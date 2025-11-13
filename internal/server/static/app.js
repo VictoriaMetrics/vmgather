@@ -25,15 +25,33 @@ function initializeDateTimePickers() {
     document.getElementById('timeFrom').value = formatDateTimeLocal(oneHourAgo);
 }
 
-function formatDateTimeLocal(date) {
+function formatDateTimeLocal(date, timezone = 'local') {
     // Format: YYYY-MM-DDTHH:mm
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
+    let targetDate = date;
+    
+    if (timezone !== 'local') {
+        // Convert to target timezone
+        const dateStr = date.toLocaleString('en-US', { timeZone: timezone });
+        targetDate = new Date(dateStr);
+    }
+    
+    const year = targetDate.getFullYear();
+    const month = String(targetDate.getMonth() + 1).padStart(2, '0');
+    const day = String(targetDate.getDate()).padStart(2, '0');
+    const hours = String(targetDate.getHours()).padStart(2, '0');
+    const minutes = String(targetDate.getMinutes()).padStart(2, '0');
     
     return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+// Update times when timezone changes
+function updateTimezoneTimes() {
+    const timezone = document.getElementById('timezone').value;
+    const now = new Date();
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    
+    document.getElementById('timeTo').value = formatDateTimeLocal(now, timezone);
+    document.getElementById('timeFrom').value = formatDateTimeLocal(oneHourAgo, timezone);
 }
 
 // Navigation
@@ -119,6 +137,7 @@ function validateStep(step) {
 // Time Range Presets
 function setPreset(preset, clickedButton) {
     const now = new Date();
+    const timezone = document.getElementById('timezone').value;
     let from;
     
     switch(preset) {
@@ -142,8 +161,8 @@ function setPreset(preset, clickedButton) {
             break;
     }
     
-    document.getElementById('timeFrom').value = formatDateTimeLocal(from);
-    document.getElementById('timeTo').value = formatDateTimeLocal(now);
+    document.getElementById('timeFrom').value = formatDateTimeLocal(from, timezone);
+    document.getElementById('timeTo').value = formatDateTimeLocal(now, timezone);
     
     // Update button states
     document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));

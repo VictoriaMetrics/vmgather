@@ -566,6 +566,26 @@
                     </div>
 
                     <div class="form-group">
+                        <label for="timezone">Timezone:</label>
+                        <select id="timezone" onchange="updateTimezoneTimes()">
+                            <option value="local">Local Time (Browser)</option>
+                            <option value="UTC">UTC</option>
+                            <option value="America/New_York">America/New York (EST/EDT)</option>
+                            <option value="America/Los_Angeles">America/Los Angeles (PST/PDT)</option>
+                            <option value="Europe/London">Europe/London (GMT/BST)</option>
+                            <option value="Europe/Paris">Europe/Paris (CET/CEST)</option>
+                            <option value="Europe/Moscow">Europe/Moscow (MSK)</option>
+                            <option value="Asia/Tokyo">Asia/Tokyo (JST)</option>
+                            <option value="Asia/Shanghai">Asia/Shanghai (CST)</option>
+                            <option value="Asia/Singapore">Asia/Singapore (SGT)</option>
+                            <option value="Australia/Sydney">Australia/Sydney (AEDT/AEST)</option>
+                        </select>
+                        <small style="color: #888; margin-top: 5px; display: block;">
+                            🌍 Times will be converted to this timezone
+                        </small>
+                    </div>
+
+                    <div class="form-group">
                         <label for="timeFrom">From (Date & Time):</label>
                         <input type="datetime-local" id="timeFrom" required>
                         <small style="color: #888; margin-top: 5px; display: block;">
