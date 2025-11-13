@@ -2,7 +2,7 @@
 
 ## Beta Notice
 
-VMExporter is currently in beta. Security has not been audited for production use.
+VMExporter is currently in beta.
 
 ## Reporting Security Issues
 
@@ -21,7 +21,5 @@ When using VMExporter:
 
 ## Known Security Considerations
 
-- Beta software - not production-tested
 - Credentials are transmitted but not persisted
 - Obfuscated data is deterministic (same input = same output)
-- Export archives may contain sensitive metric names/labels
