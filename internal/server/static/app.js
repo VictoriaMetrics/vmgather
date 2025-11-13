@@ -1094,6 +1094,9 @@ function renderExportSpoilers(samples) {
     let html = '<h3 style="margin-bottom: 15px;">📊 Exported Data Samples (Top 5)</h3>';
     
     limited.forEach((sample, idx) => {
+        // Handle both 'name' and 'metric_name' fields for backward compatibility
+        const metricName = sample.name || sample.metric_name || 'unknown';
+        
         const labels = Object.entries(sample.labels || {})
             .map(([k, v]) => `${k}="${v}"`)
             .join(', ');
@@ -1101,13 +1104,13 @@ function renderExportSpoilers(samples) {
         html += `
             <div class="spoiler">
                 <div class="spoiler-header" onclick="toggleSpoiler(this)">
-                    <span>Sample ${idx + 1}: ${sample.name}</span>
+                    <span>Sample ${idx + 1}: ${metricName}</span>
                     <span>▼</span>
                 </div>
                 <div class="spoiler-content">
                     <div class="spoiler-body">
                         <div class="sample-metric">
-                            <div class="metric-name">${sample.name}</div>
+                            <div class="metric-name">${metricName}</div>
                             <div class="metric-labels">{${labels}}</div>
                             ${sample.value ? `<div style="margin-top: 10px; color: #2962FF;">Value: ${sample.value}</div>` : ''}
                         </div>

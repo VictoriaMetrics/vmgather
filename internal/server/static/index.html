@@ -554,18 +554,6 @@
                 <h2 class="step-title">Select Time Range</h2>
                 <div class="step-content">
                     <div class="form-group">
-                        <label>Quick Presets:</label>
-                        <div class="preset-buttons">
-                            <button class="preset-btn" onclick="setPreset('15m', this)">Last 15min</button>
-                            <button class="preset-btn active" onclick="setPreset('1h', this)">Last 1h</button>
-                            <button class="preset-btn" onclick="setPreset('3h', this)">Last 3h</button>
-                            <button class="preset-btn" onclick="setPreset('6h', this)">Last 6h</button>
-                            <button class="preset-btn" onclick="setPreset('12h', this)">Last 12h</button>
-                            <button class="preset-btn" onclick="setPreset('24h', this)">Last 24h</button>
-                        </div>
-                    </div>
-
-                    <div class="form-group">
                         <label for="timezone">Timezone:</label>
                         <select id="timezone" onchange="updateTimezoneTimes()">
                             <option value="local">Local Time (Browser)</option>
@@ -583,6 +571,18 @@
                         <small style="color: #888; margin-top: 5px; display: block;">
                             🌍 Times will be converted to this timezone
                         </small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Quick Presets:</label>
+                        <div class="preset-buttons">
+                            <button class="preset-btn" onclick="setPreset('15m', this)">Last 15min</button>
+                            <button class="preset-btn active" onclick="setPreset('1h', this)">Last 1h</button>
+                            <button class="preset-btn" onclick="setPreset('3h', this)">Last 3h</button>
+                            <button class="preset-btn" onclick="setPreset('6h', this)">Last 6h</button>
+                            <button class="preset-btn" onclick="setPreset('12h', this)">Last 12h</button>
+                            <button class="preset-btn" onclick="setPreset('24h', this)">Last 24h</button>
+                        </div>
                     </div>
 
                     <div class="form-group">

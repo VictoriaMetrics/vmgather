@@ -341,11 +341,38 @@ func (s *Server) handleGetSample(w http.ResponseWriter, r *http.Request) {
 	log.Printf("✅ Sample retrieval complete: %d samples", len(samples))
 	log.Printf("  Unique labels: %v", labelList)
 
+	// Convert samples to response format with 'name' field for frontend compatibility
+	sampleData := make([]map[string]interface{}, 0, len(samples))
+	for _, sample := range samples {
+		// Ensure metric name is never empty
+		metricName := sample.MetricName
+		if metricName == "" {
+			// Fallback to __name__ label if MetricName is empty
+			if labels := sample.Labels; labels != nil {
+				if name, exists := labels["__name__"]; exists {
+					metricName = name
+				}
+			}
+			// Final fallback
+			if metricName == "" {
+				metricName = "unknown"
+			}
+		}
+		
+		sampleData = append(sampleData, map[string]interface{}{
+			"name":        metricName, // Frontend expects 'name' field
+			"metric_name": sample.MetricName, // Keep for backward compatibility
+			"labels":      sample.Labels,
+			"value":       sample.Value,
+			"timestamp":   sample.Timestamp,
+		})
+	}
+
 	// Return samples
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"samples": samples,
-		"count":   len(samples),
+		"samples": sampleData,
+		"count":   len(sampleData),
 	})
 }
 

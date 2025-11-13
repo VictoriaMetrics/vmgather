@@ -151,8 +151,16 @@ func TestServer_HandleGetSample_ResponseFormat(t *testing.T) {
 			continue
 		}
 
-		if nameStr == "" {
-			t.Errorf("Sample %d 'name' should not be empty", i)
+		if nameStr == "" || nameStr == "unknown" {
+			// Check if metric_name exists as fallback
+			if metricName, exists := sampleMap["metric_name"]; exists {
+				metricNameStr, ok := metricName.(string)
+				if ok && metricNameStr != "" {
+					// metric_name exists, that's acceptable
+					continue
+				}
+			}
+			t.Errorf("Sample %d 'name' should not be empty or 'unknown' (got: %s)", i, nameStr)
 		}
 
 		// Verify labels exist
