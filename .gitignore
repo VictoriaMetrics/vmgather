@@ -35,9 +35,6 @@ exports/
 # Local development (AI-agent documentation, not for public)
 local-development/
 
-# Local test environment (Docker setup, not for public)
-local-test-env/
-
 # Playwright
 tests/e2e/node_modules/
 tests/e2e/playwright-report/
@@ -81,7 +78,6 @@ tests/e2e/node_modules/
 
 # Local development
 local-development/
-local-test-env/
 
 # IDE
 .idea/

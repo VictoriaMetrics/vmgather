@@ -1,0 +1,50 @@
+# VMAuth config for testing Export API availability
+# 
+# This config emulates real-world scenario where:
+# - User "tenant1011-legacy": Export API is NOT available (legacy paths, no export)
+# - User "tenant2022-modern": Export API IS available (modern paths, with export)
+#
+# This allows us to test fallback logic:
+# - When export fails → fallback to query_range
+# - When export works → use direct export
+
+unauthorized_user:
+  url_prefix: "http://vmselect:8481"
+
+users:
+  # ============================================================================
+  # Tenant 1011: NO EXPORT API (legacy paths)
+  # ============================================================================
+  # This user has access to query endpoints but NOT export
+  # Simulates legacy configuration where /api/v1/export is not enabled
+  - username: "tenant1011-legacy"
+    password: "legacy-pass-1011"
+    url_map:
+      # Query endpoints work
+      - src_paths: 
+          - "/api/v1/query.*"
+          - "/api/v1/series.*"
+          - "/api/v1/label.*"
+        url_prefix: "http://vmselect:8481/select/1011/prometheus"
+      
+      # /api/v1/export is NOT configured → will return 400 "missing route"
+      # This forces fallback to query_range!
+    
+  # ============================================================================
+  # Tenant 2022: EXPORT API AVAILABLE (modern paths)
+  # ============================================================================
+  # This user has full API access including /api/v1/export
+  - username: "tenant2022-modern"
+    password: "modern-pass-2022"
+    url_map:
+      # All standard endpoints including export
+      - src_paths: 
+          - "/api/v1/.*"  # All API endpoints including export
+        url_prefix: "http://vmselect:8481/select/2022/prometheus"
+    
+  # ============================================================================
+  # Admin: multitenant access (for setup/debugging)
+  # ============================================================================
+  - username: "admin-multitenant"
+    password: "admin-multi-pass"
+    url_prefix: "http://vmselect:8481/select/multitenant/prometheus"

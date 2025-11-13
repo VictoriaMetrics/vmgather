@@ -1,0 +1,231 @@
+version: '3.8'
+
+# Comprehensive VictoriaMetrics test environment
+# Covers all scenarios: single/cluster, auth/no-auth, multitenant, localhost/network
+
+services:
+  # ============================================================================
+  # Scenario 1: VMSingle without auth (simplest case)
+  # ============================================================================
+  vmsingle-noauth:
+    image: victoriametrics/victoria-metrics:latest
+    container_name: vmsingle-noauth
+    ports:
+      - "8428:8428"
+    command:
+      - "--storageDataPath=/storage"
+      - "--httpListenAddr=:8428"
+    volumes:
+      - vmsingle-noauth-data:/storage
+    networks:
+      - vmtest
+
+  # ============================================================================
+  # Scenario 2: VMSingle with basic auth via vmauth
+  # ============================================================================
+  vmsingle-auth:
+    image: victoriametrics/victoria-metrics:latest
+    container_name: vmsingle-auth
+    ports:
+      - "8429:8428"
+    command:
+      - "--storageDataPath=/storage"
+      - "--httpListenAddr=:8428"
+    volumes:
+      - vmsingle-auth-data:/storage
+    networks:
+      - vmtest
+
+  vmauth-single:
+    image: victoriametrics/vmauth:latest
+    container_name: vmauth-single
+    ports:
+      - "8427:8427"
+    volumes:
+      - ./test-configs/vmauth-single.yml:/etc/vmauth.yml
+    command:
+      - "-auth.config=/etc/vmauth.yml"
+      - "-httpListenAddr=:8427"
+    depends_on:
+      - vmsingle-auth
+    networks:
+      - vmtest
+
+  # ============================================================================
+  # Scenario 3: VM Cluster without auth (multitenant capable)
+  # ============================================================================
+  vmstorage-1:
+    image: victoriametrics/vmstorage:latest
+    container_name: vmstorage-1
+    ports:
+      - "8482:8482"
+      - "8400:8400"
+      - "8401:8401"
+    command:
+      - "--storageDataPath=/storage"
+      - "--httpListenAddr=:8482"
+      - "--vminsertAddr=:8400"
+      - "--vmselectAddr=:8401"
+    volumes:
+      - vmstorage-1-data:/storage
+    networks:
+      - vmtest
+
+  vmstorage-2:
+    image: victoriametrics/vmstorage:latest
+    container_name: vmstorage-2
+    ports:
+      - "8483:8482"
+      - "8402:8400"
+      - "8403:8401"
+    command:
+      - "--storageDataPath=/storage"
+      - "--httpListenAddr=:8482"
+      - "--vminsertAddr=:8400"
+      - "--vmselectAddr=:8401"
+    volumes:
+      - vmstorage-2-data:/storage
+    networks:
+      - vmtest
+
+  vminsert:
+    image: victoriametrics/vminsert:latest
+    container_name: vminsert
+    ports:
+      - "8480:8480"
+    command:
+      - "--httpListenAddr=:8480"
+      - "--storageNode=vmstorage-1:8400,vmstorage-2:8400"
+    depends_on:
+      - vmstorage-1
+      - vmstorage-2
+    networks:
+      - vmtest
+
+  vmselect:
+    image: victoriametrics/vmselect:latest
+    container_name: vmselect
+    ports:
+      - "8481:8481"
+    command:
+      - "--httpListenAddr=:8481"
+      - "--storageNode=vmstorage-1:8401,vmstorage-2:8401"
+    depends_on:
+      - vmstorage-1
+      - vmstorage-2
+    networks:
+      - vmtest
+
+  # ============================================================================
+  # Scenario 4: VM Cluster with auth via vmauth (multitenant)
+  # ============================================================================
+  vmauth-cluster:
+    image: victoriametrics/vmauth:latest
+    container_name: vmauth-cluster
+    ports:
+      - "8426:8426"
+    volumes:
+      - ./test-configs/vmauth-cluster-rw.yml:/etc/vmauth.yml
+    command:
+      - "-auth.config=/etc/vmauth.yml"
+      - "-httpListenAddr=:8426"
+    depends_on:
+      - vmselect
+      - vminsert
+    networks:
+      - vmtest
+
+  # ============================================================================
+  # Scenario 5: VMAuth for Export API availability testing
+  # ============================================================================
+  # This VMAuth instance has two tenants:
+  # - Tenant 1011: NO export API (legacy paths) → forces fallback to query_range
+  # - Tenant 2022: WITH export API (modern paths) → uses direct export
+  vmauth-export-test:
+    image: victoriametrics/vmauth:latest
+    container_name: vmauth-export-test
+    ports:
+      - "8425:8425"
+    volumes:
+      - ./test-configs/vmauth-export-test.yml:/etc/vmauth.yml
+    command:
+      - "-auth.config=/etc/vmauth.yml"
+      - "-httpListenAddr=:8425"
+    depends_on:
+      - vmselect
+      - vminsert
+    networks:
+      - vmtest
+
+  # ============================================================================
+  # Scenario 6: vmagent for generating test metrics
+  # ============================================================================
+  vmagent:
+    image: victoriametrics/vmagent:latest
+    container_name: vmagent
+    ports:
+      - "8430:8430"
+    command:
+      - "--promscrape.config=/etc/prometheus/prometheus.yml"
+      - "--remoteWrite.url=http://vminsert:8480/insert/0/prometheus/api/v1/write"
+      - "--remoteWrite.url=http://vminsert:8480/insert/1011/prometheus/api/v1/write"
+      - "--remoteWrite.url=http://vminsert:8480/insert/2022/prometheus/api/v1/write"
+      - "--remoteWrite.url=http://vmsingle-noauth:8428/api/v1/write"
+      - "--httpListenAddr=:8430"
+    volumes:
+      - ./test-configs/prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - vminsert
+      - vmsingle-noauth
+      - vmsingle-auth
+    networks:
+      - vmtest
+
+  # ============================================================================
+  # Test data generator - pushes metrics to all instances
+  # ============================================================================
+  test-data-generator:
+    image: prom/prometheus:latest
+    container_name: test-data-generator
+    ports:
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    volumes:
+      - ./test-configs/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    networks:
+      - vmtest
+
+  # ============================================================================
+  # Nginx reverse proxy (for testing with domain names, not localhost)
+  # ============================================================================
+  nginx-proxy:
+    image: nginx:alpine
+    container_name: nginx-proxy
+    ports:
+      - "8888:80"
+    volumes:
+      - ./test-configs/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - vmauth-cluster
+      - vmauth-single
+      - vmsingle-noauth
+      - vmselect
+    networks:
+      - vmtest
+
+volumes:
+  vmsingle-noauth-data:
+  vmsingle-auth-data:
+  vmstorage-1-data:
+  vmstorage-2-data:
+  prometheus-data:
+
+networks:
+  vmtest:
+    driver: bridge
+

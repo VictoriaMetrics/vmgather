@@ -1,0 +1,61 @@
+# VMAuth config that mimics VictoriaMetrics Managed (MaaS) behavior
+# 
+# In MaaS/Cloud setup:
+# - /rw/prometheus → read+write endpoint (query works, export doesn't)
+# - /r/prometheus → read-only endpoint (query and export work)
+# - /<tenant_id>/ → tenant isolation
+#
+# This config emulates that behavior for testing
+
+users:
+  # ============================================================================
+  # User: monitoring-rw (tenant 1011, /rw/prometheus path)
+  # ============================================================================
+  # This user has /rw/prometheus path which:
+  # - Works for /query (read operations)
+  # - Does NOT work for /export (because VMAuth doesn't route it)
+  # This is the EXACT scenario customer reported!
+  - username: "monitoring-rw"
+    password: "secret-rw-pass"
+    # Default routing - will work for most paths
+    url_prefix: "http://vmselect:8481/select/1011/prometheus"
+    
+  # ============================================================================
+  # User: monitoring-read (tenant 1011, /r/prometheus path)
+  # ============================================================================
+  # This user has /r/prometheus path which:
+  # - Works for /query (read operations)
+  # - Works for /export (read operations)
+  # This is the correct path for export!
+  - username: "monitoring-read"
+    password: "secret-read-pass"
+    url_prefix: "http://vmselect:8481/select/1011/prometheus"
+    
+  # ============================================================================
+  # User: monitoring-standard (tenant 1011, standard /prometheus path)
+  # ============================================================================
+  # This user has standard /prometheus path which works for everything
+  - username: "monitoring-standard"
+    password: "secret-standard-pass"
+    url_prefix: "http://vmselect:8481/select/1011/prometheus"
+    
+  # ============================================================================
+  # User: tenant0-user (tenant 0)
+  # ============================================================================
+  - username: "tenant0-user"
+    password: "tenant0-pass"
+    url_prefix: "http://vmselect:8481/select/0/prometheus"
+    
+  # ============================================================================
+  # Admin: multitenant access
+  # ============================================================================
+  - username: "admin-multitenant"
+    password: "admin-multi-pass"
+    url_prefix: "http://vmselect:8481/select/multitenant/prometheus"
+    
+  # ============================================================================
+  # Bearer token: tenant 1011
+  # ============================================================================
+  - bearer_token: "bearer-tenant1011-token"
+    url_prefix: "http://vmselect:8481/select/1011/prometheus"
+

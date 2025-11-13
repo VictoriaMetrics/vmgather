@@ -1,0 +1,13 @@
+# VMAuth config for single VM instance with basic auth
+users:
+  - username: "monitoring-read"
+    password: "secret-password-123"
+    url_prefix: "http://vmsingle-auth:8428"
+    
+  - username: "admin"
+    password: "admin-password-456"
+    url_prefix: "http://vmsingle-auth:8428"
+    
+  - bearer_token: "test-bearer-token-789"
+    url_prefix: "http://vmsingle-auth:8428"
+

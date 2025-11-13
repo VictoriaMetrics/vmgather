@@ -1,0 +1,18 @@
+# VMAuth config that mimics VictoriaMetrics Managed behavior
+# Customer has: https://vm.example.com/1011/rw/prometheus
+# Where /rw/prometheus works for /query but NOT for /export
+
+users:
+  # User with read access - /rw/prometheus path
+  # This simulates customer's setup where /rw works for query but not export
+  - username: "monitoring-read"
+    password: "secret-read-password"
+    # For /query requests, route to /select/0/prometheus
+    url_prefix: "http://vmselect:8481/select/0/prometheus"
+    
+  # User with write access - /rw/prometheus path  
+  - username: "monitoring-write"
+    password: "secret-write-password"
+    # For /write requests, route to vminsert
+    url_prefix: "http://vminsert:8480/insert/0/prometheus"
+

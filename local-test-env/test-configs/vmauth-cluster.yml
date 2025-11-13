@@ -1,0 +1,26 @@
+# VMAuth config for VM cluster with multitenant support
+users:
+  # User with access to tenant 0
+  - username: "tenant0-user"
+    password: "tenant0-pass"
+    url_prefix: "http://vmselect:8481/select/0/prometheus"
+    
+  # User with access to tenant 1011
+  - username: "tenant1011-user"
+    password: "tenant1011-pass"
+    url_prefix: "http://vmselect:8481/select/1011/prometheus"
+    
+  # Admin user with multitenant access
+  - username: "admin-multitenant"
+    password: "admin-multi-pass"
+    url_prefix: "http://vmselect:8481/select/multitenant/prometheus"
+    
+  # Bearer token user for tenant 0
+  - bearer_token: "bearer-tenant0-token"
+    url_prefix: "http://vmselect:8481/select/0/prometheus"
+    
+  # Custom header auth for tenant 1011 (using bearer token with name)
+  - bearer_token: "custom-header-token-1011"
+    name: "header-user-1011"
+    url_prefix: "http://vmselect:8481/select/1011/prometheus"
+
