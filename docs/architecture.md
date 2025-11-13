@@ -226,7 +226,4 @@ Downloads the export archive.
 - Efficient JSONL parsing
 - Compressed output
 
-## Future Enhancements
-
-See [OPENSOURCE_TODO.md](../OPENSOURCE_TODO.md) for roadmap.
 
