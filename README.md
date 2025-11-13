@@ -60,7 +60,9 @@ cd support
 make build
 ```
 
-## Testing
+## Development
+
+### Testing
 
 Unit tests (50+ tests):
 ```bash
@@ -69,8 +71,22 @@ make test
 
 E2E tests (35+ tests, requires Docker):
 ```bash
-make test-e2e
+# Start test environment
+make test-env-up
+
+# Run E2E tests
+cd tests/e2e
+npm install
+npm test
+
+# Or run all scenarios
+make test-scenarios
+
+# Stop environment
+make test-env-down
 ```
+
+See [local-test-env/README.md](local-test-env/README.md) for detailed test environment documentation.
 
 **Test Coverage:**
 - ✅ URL parsing for all VictoriaMetrics configurations

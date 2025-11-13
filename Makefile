@@ -242,10 +242,14 @@ fmt:
 	@go fmt ./...
 	@echo "✅ Format complete"
 
-# Lint code
+# Lint code (matches CI environment)
 lint:
 	@echo "🔍 Running linter..."
-	@golangci-lint run || true
+	@if ! command -v golangci-lint &> /dev/null; then \
+		echo "❌ golangci-lint not found. Installing..."; \
+		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin v1.59.1; \
+	fi
+	@golangci-lint run --timeout=5m
 	@echo "✅ Lint complete"
 
 # =============================================================================
