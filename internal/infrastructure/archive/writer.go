@@ -27,6 +27,8 @@ func NewWriter(outputDir string) *Writer {
 }
 
 // ArchiveMetadata contains metadata about the export
+// Note: InstanceMap and JobMap are intentionally excluded from archive metadata
+// per issue #10 - mapping should not be included in the archive sent to customers
 type ArchiveMetadata struct {
 	ExportID       string                 `json:"export_id"`
 	ExportDate     time.Time              `json:"export_date"`
@@ -35,9 +37,22 @@ type ArchiveMetadata struct {
 	Jobs           []string               `json:"jobs"`
 	MetricsCount   int                    `json:"metrics_count"`
 	Obfuscated     bool                   `json:"obfuscated"`
-	InstanceMap    map[string]string      `json:"instance_map,omitempty"`
-	JobMap         map[string]string      `json:"job_map,omitempty"`
+	InstanceMap    map[string]string      `json:"instance_map,omitempty"` // Internal use only, not included in archive
+	JobMap         map[string]string      `json:"job_map,omitempty"`      // Internal use only, not included in archive
 	VMExporterVersion string              `json:"vmexporter_version"`
+}
+
+// archiveMetadataPublic is the public version of metadata without obfuscation maps
+// This is what gets included in the archive sent to customers
+type archiveMetadataPublic struct {
+	ExportID          string            `json:"export_id"`
+	ExportDate        time.Time         `json:"export_date"`
+	TimeRange         domain.TimeRange  `json:"time_range"`
+	Components        []string          `json:"components"`
+	Jobs              []string          `json:"jobs"`
+	MetricsCount     int               `json:"metrics_count"`
+	Obfuscated        bool              `json:"obfuscated"`
+	VMExporterVersion string            `json:"vmexporter_version"`
 }
 
 // CreateArchive creates a ZIP archive with metrics data
@@ -109,15 +124,28 @@ func (w *Writer) addMetricsToArchive(zipWriter *zip.Writer, metricsReader io.Rea
 }
 
 // addMetadataToArchive adds metadata JSON to archive
+// Note: Obfuscation maps (InstanceMap, JobMap) are excluded from archive per issue #10
 func (w *Writer) addMetadataToArchive(zipWriter *zip.Writer, metadata ArchiveMetadata) error {
 	writer, err := zipWriter.Create("metadata.json")
 	if err != nil {
 		return err
 	}
 
+	// Create public metadata without obfuscation maps
+	publicMetadata := archiveMetadataPublic{
+		ExportID:          metadata.ExportID,
+		ExportDate:        metadata.ExportDate,
+		TimeRange:         metadata.TimeRange,
+		Components:        metadata.Components,
+		Jobs:              metadata.Jobs,
+		MetricsCount:      metadata.MetricsCount,
+		Obfuscated:        metadata.Obfuscated,
+		VMExporterVersion: metadata.VMExporterVersion,
+	}
+
 	encoder := json.NewEncoder(writer)
 	encoder.SetIndent("", "  ")
-	return encoder.Encode(metadata)
+	return encoder.Encode(publicMetadata)
 }
 
 // addReadmeToArchive adds human-readable README to archive
@@ -155,12 +183,11 @@ Components Exported:
 	if metadata.Obfuscated {
 		readme += "\n⚠️  OBFUSCATION APPLIED\n"
 		readme += "Instance IPs and job names have been obfuscated for privacy.\n"
-		readme += "See metadata.json for the mapping.\n"
 	}
 
 	readme += "\nFiles in this archive:\n"
 	readme += "  - metrics.jsonl: Exported metrics in JSONL format\n"
-	readme += "  - metadata.json: Export metadata and obfuscation mappings\n"
+	readme += "  - metadata.json: Export metadata\n"
 	readme += "  - README.txt: This file\n"
 
 	readme += "\nFor support inquiries, send this archive to VictoriaMetrics Support Team.\n"

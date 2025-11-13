@@ -270,12 +270,112 @@ func TestWriter_CreateArchive_MetadataContent(t *testing.T) {
 		t.Error("Obfuscated flag not set")
 	}
 
-	if len(parsedMetadata.InstanceMap) != 1 {
-		t.Errorf("InstanceMap length = %d, want 1", len(parsedMetadata.InstanceMap))
+	// Per issue #10: mapping should not be included in archive
+	// Verify that InstanceMap and JobMap are NOT in the archive metadata
+	if len(parsedMetadata.InstanceMap) != 0 {
+		t.Errorf("InstanceMap should not be in archive, but found %d entries", len(parsedMetadata.InstanceMap))
 	}
 
-	if len(parsedMetadata.JobMap) != 1 {
-		t.Errorf("JobMap length = %d, want 1", len(parsedMetadata.JobMap))
+	if len(parsedMetadata.JobMap) != 0 {
+		t.Errorf("JobMap should not be in archive, but found %d entries", len(parsedMetadata.JobMap))
+	}
+}
+
+// TestWriter_CreateArchive_MappingExcluded tests that obfuscation maps are excluded from archive
+// This test verifies the fix for issue #10
+func TestWriter_CreateArchive_MappingExcluded(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	writer := NewWriter(tmpDir)
+
+	metricsData := `{"metric":{"__name__":"test"},"values":[1],"timestamps":[1]}`
+	metadata := ArchiveMetadata{
+		ExportID:          "test-mapping-excluded",
+		ExportDate:        time.Now(),
+		TimeRange:         domain.TimeRange{Start: time.Now(), End: time.Now()},
+		Components:        []string{"vmstorage"},
+		Jobs:              []string{"vmstorage-prod"},
+		MetricsCount:      1,
+		Obfuscated:        true,
+		InstanceMap:       map[string]string{"10.0.1.5:8482": "777.777.1.1:8482", "10.0.1.6:8482": "777.777.1.2:8482"},
+		JobMap:            map[string]string{"vmstorage-prod": "vm_component_vmstorage_1", "vmselect-prod": "vm_component_vmselect_1"},
+		VMExporterVersion: "1.0.0",
+	}
+
+	archivePath, _, err := writer.CreateArchive("test", strings.NewReader(metricsData), metadata)
+	if err != nil {
+		t.Fatalf("CreateArchive failed: %v", err)
+	}
+
+	// Read metadata from archive
+	zipReader, err := zip.OpenReader(archivePath)
+	if err != nil {
+		t.Fatalf("failed to open archive: %v", err)
+	}
+	defer zipReader.Close()
+
+	// Find metadata.json
+	var metadataFile *zip.File
+	for _, file := range zipReader.File {
+		if file.Name == "metadata.json" {
+			metadataFile = file
+			break
+		}
+	}
+
+	if metadataFile == nil {
+		t.Fatal("metadata.json not found in archive")
+	}
+
+	// Read and parse
+	reader, err := metadataFile.Open()
+	if err != nil {
+		t.Fatalf("failed to open metadata file: %v", err)
+	}
+	defer reader.Close()
+
+	// Parse as public metadata (without maps)
+	var parsedMetadata struct {
+		ExportID          string            `json:"export_id"`
+		ExportDate        string            `json:"export_date"`
+		TimeRange         domain.TimeRange   `json:"time_range"`
+		Components        []string          `json:"components"`
+		Jobs              []string          `json:"jobs"`
+		MetricsCount      int               `json:"metrics_count"`
+		Obfuscated        bool              `json:"obfuscated"`
+		InstanceMap       map[string]string `json:"instance_map,omitempty"`
+		JobMap            map[string]string `json:"job_map,omitempty"`
+		VMExporterVersion string            `json:"vmexporter_version"`
+	}
+
+	if err := json.NewDecoder(reader).Decode(&parsedMetadata); err != nil {
+		t.Fatalf("failed to parse metadata: %v", err)
+	}
+
+	// Verify that obfuscation maps are NOT present in archive
+	if parsedMetadata.InstanceMap != nil && len(parsedMetadata.InstanceMap) > 0 {
+		t.Errorf("InstanceMap should not be in archive metadata, but found: %v", parsedMetadata.InstanceMap)
+	}
+
+	if parsedMetadata.JobMap != nil && len(parsedMetadata.JobMap) > 0 {
+		t.Errorf("JobMap should not be in archive metadata, but found: %v", parsedMetadata.JobMap)
+	}
+
+	// Verify other fields are present
+	if parsedMetadata.ExportID != metadata.ExportID {
+		t.Errorf("ExportID = %v, want %v", parsedMetadata.ExportID, metadata.ExportID)
+	}
+
+	if !parsedMetadata.Obfuscated {
+		t.Error("Obfuscated flag should be true")
+	}
+
+	if parsedMetadata.MetricsCount != metadata.MetricsCount {
+		t.Errorf("MetricsCount = %v, want %v", parsedMetadata.MetricsCount, metadata.MetricsCount)
 	}
 }
 

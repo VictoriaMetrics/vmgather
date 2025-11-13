@@ -157,6 +157,16 @@ func TestDateTimeLocalFormat(t *testing.T) {
 			timezone: "UTC",
 			want:     "2025-01-15T14:30",
 		},
+		{
+			name:     "America/New_York",
+			timezone: "America/New_York",
+			want:     "2025-01-15T09:30", // UTC-5 in January
+		},
+		{
+			name:     "Europe/Moscow",
+			timezone: "Europe/Moscow",
+			want:     "2025-01-15T17:30", // UTC+3
+		},
 	}
 
 	for _, tt := range tests {
@@ -173,6 +183,50 @@ func TestDateTimeLocalFormat(t *testing.T) {
 				t.Errorf("Format mismatch: got %s, want %s", formatted, tt.want)
 			}
 		})
+	}
+}
+
+// TestTimezoneDefaultSelection tests that timezone selection works correctly
+// This test verifies that different timezones produce different formatted times
+func TestTimezoneDefaultSelection(t *testing.T) {
+	baseTime := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	timezones := []string{
+		"UTC",
+		"America/New_York",
+		"Europe/London",
+		"Asia/Tokyo",
+		"Europe/Moscow",
+	}
+
+	formattedTimes := make(map[string]string)
+
+	for _, tz := range timezones {
+		loc, err := time.LoadLocation(tz)
+		if err != nil {
+			t.Fatalf("Failed to load timezone %s: %v", tz, err)
+		}
+
+		converted := baseTime.In(loc)
+		formatted := converted.Format("2006-01-02T15:04")
+		formattedTimes[tz] = formatted
+	}
+
+	// Verify that different timezones produce different formatted times
+	// (except for timezones with same offset at that time)
+	if formattedTimes["UTC"] == formattedTimes["Asia/Tokyo"] {
+		t.Error("UTC and Tokyo should have different formatted times")
+	}
+
+	if formattedTimes["America/New_York"] == formattedTimes["Europe/Moscow"] {
+		t.Error("New York and Moscow should have different formatted times")
+	}
+
+	// Verify format is correct (YYYY-MM-DDTHH:mm)
+	for tz, formatted := range formattedTimes {
+		if len(formatted) != 16 {
+			t.Errorf("Timezone %s: formatted time should be 16 chars (YYYY-MM-DDTHH:mm), got %d: %s", tz, len(formatted), formatted)
+		}
 	}
 }
 

@@ -9,6 +9,9 @@ let exportResult = null;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+    // Set default timezone to user's browser timezone
+    initializeTimezone();
+    
     // Set default time range (last 1 hour)
     setPreset('1h');
     
@@ -16,13 +19,43 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeDateTimePickers();
 });
 
+// Initialize timezone selector with user's default timezone
+function initializeTimezone() {
+    const timezoneSelect = document.getElementById('timezone');
+    if (!timezoneSelect) {
+        return;
+    }
+    
+    // Get user's browser timezone
+    try {
+        const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        
+        // Try to find matching option
+        const options = timezoneSelect.options;
+        for (let i = 0; i < options.length; i++) {
+            if (options[i].value === userTimezone) {
+                timezoneSelect.selectedIndex = i;
+                return;
+            }
+        }
+        
+        // If exact match not found, default to "local"
+        timezoneSelect.value = 'local';
+    } catch (e) {
+        // Fallback to local if timezone detection fails
+        console.warn('Failed to detect timezone:', e);
+        timezoneSelect.value = 'local';
+    }
+}
+
 // DateTime Picker initialization
 function initializeDateTimePickers() {
+    const timezone = document.getElementById('timezone')?.value || 'local';
     const now = new Date();
     const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
     
-    document.getElementById('timeTo').value = formatDateTimeLocal(now);
-    document.getElementById('timeFrom').value = formatDateTimeLocal(oneHourAgo);
+    document.getElementById('timeTo').value = formatDateTimeLocal(now, timezone);
+    document.getElementById('timeFrom').value = formatDateTimeLocal(oneHourAgo, timezone);
 }
 
 function formatDateTimeLocal(date, timezone = 'local') {
@@ -828,13 +861,17 @@ function renderSamplePreview(samples) {
     let html = '';
     
     limited.forEach(sample => {
+        // Handle both 'name' and 'metric_name' fields for backward compatibility
+        const metricName = sample.name || sample.metric_name || 'unknown';
+        
+        // Ensure labels exist
         const labels = Object.entries(sample.labels || {})
             .map(([k, v]) => `${k}="${v}"`)
             .join(', ');
         
         html += `
             <div class="sample-metric">
-                <div class="metric-name">${sample.name}</div>
+                <div class="metric-name">${metricName}</div>
                 <div class="metric-labels">{${labels}}</div>
             </div>
         `;
