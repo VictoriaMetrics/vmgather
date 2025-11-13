@@ -113,11 +113,12 @@ func TestExportService_GuessComponent(t *testing.T) {
 			expected: "vmalert",
 		},
 		{
-			name: "generic vm metric",
+			name: "generic vm metric with job",
 			labels: map[string]string{
 				"__name__": "vm_app_version",
+				"job":      "vmauth-single",
 			},
-			expected: "vm",
+			expected: "vmauth-single",
 		},
 		{
 			name: "go metric with job",
