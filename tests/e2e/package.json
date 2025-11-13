@@ -1,0 +1,24 @@
+{
+  "name": "vmexporter-e2e-tests",
+  "version": "1.0.0",
+  "description": "E2E tests for VMExporter using Playwright",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui",
+    "test:debug": "playwright test --debug",
+    "test:chromium": "playwright test --project=chromium",
+    "test:firefox": "playwright test --project=firefox",
+    "test:webkit": "playwright test --project=webkit",
+    "test:mobile": "playwright test --project='Mobile Chrome'",
+    "report": "playwright show-report test-results/html",
+    "update-snapshots": "playwright test --update-snapshots"
+  },
+  "keywords": ["e2e", "playwright", "testing", "victoriametrics"],
+  "author": "VictoriaMetrics",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}
+

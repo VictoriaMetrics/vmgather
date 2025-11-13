@@ -1,0 +1,196 @@
+package archive
+
+import (
+	"archive/zip"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/VictoriaMetrics/support/internal/domain"
+)
+
+// Writer handles archive creation for export data
+type Writer struct {
+	outputDir string
+}
+
+// NewWriter creates a new archive writer
+func NewWriter(outputDir string) *Writer {
+	return &Writer{
+		outputDir: outputDir,
+	}
+}
+
+// ArchiveMetadata contains metadata about the export
+type ArchiveMetadata struct {
+	ExportID       string                 `json:"export_id"`
+	ExportDate     time.Time              `json:"export_date"`
+	TimeRange      domain.TimeRange       `json:"time_range"`
+	Components     []string               `json:"components"`
+	Jobs           []string               `json:"jobs"`
+	MetricsCount   int                    `json:"metrics_count"`
+	Obfuscated     bool                   `json:"obfuscated"`
+	InstanceMap    map[string]string      `json:"instance_map,omitempty"`
+	JobMap         map[string]string      `json:"job_map,omitempty"`
+	VMExporterVersion string              `json:"vmexporter_version"`
+}
+
+// CreateArchive creates a ZIP archive with metrics data
+// Returns archive path, SHA256 checksum, and error
+func (w *Writer) CreateArchive(
+	exportID string,
+	metricsReader io.Reader,
+	metadata ArchiveMetadata,
+) (archivePath string, sha256sum string, err error) {
+	// Generate archive filename
+	timestamp := time.Now().Format("20060102_150405")
+	archiveName := fmt.Sprintf("vmexport_%s_%s.zip", exportID, timestamp)
+	archivePath = filepath.Join(w.outputDir, archiveName)
+
+	// Create output directory if not exists
+	if err := os.MkdirAll(w.outputDir, 0755); err != nil {
+		return "", "", fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	// Create archive file
+	archiveFile, err := os.Create(archivePath)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create archive file: %w", err)
+	}
+	defer archiveFile.Close()
+
+	// Create ZIP writer
+	zipWriter := zip.NewWriter(archiveFile)
+	defer zipWriter.Close()
+
+	// Add metrics data
+	if err := w.addMetricsToArchive(zipWriter, metricsReader); err != nil {
+		return "", "", fmt.Errorf("failed to add metrics: %w", err)
+	}
+
+	// Add metadata
+	if err := w.addMetadataToArchive(zipWriter, metadata); err != nil {
+		return "", "", fmt.Errorf("failed to add metadata: %w", err)
+	}
+
+	// Add README
+	if err := w.addReadmeToArchive(zipWriter, metadata); err != nil {
+		return "", "", fmt.Errorf("failed to add README: %w", err)
+	}
+
+	// Close ZIP writer to flush all data
+	if err := zipWriter.Close(); err != nil {
+		return "", "", fmt.Errorf("failed to close zip writer: %w", err)
+	}
+
+	// Calculate SHA256
+	sha256sum, err = w.calculateSHA256(archivePath)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to calculate SHA256: %w", err)
+	}
+
+	return archivePath, sha256sum, nil
+}
+
+// addMetricsToArchive adds metrics JSONL data to archive
+func (w *Writer) addMetricsToArchive(zipWriter *zip.Writer, metricsReader io.Reader) error {
+	writer, err := zipWriter.Create("metrics.jsonl")
+	if err != nil {
+		return err
+	}
+
+	_, err = io.Copy(writer, metricsReader)
+	return err
+}
+
+// addMetadataToArchive adds metadata JSON to archive
+func (w *Writer) addMetadataToArchive(zipWriter *zip.Writer, metadata ArchiveMetadata) error {
+	writer, err := zipWriter.Create("metadata.json")
+	if err != nil {
+		return err
+	}
+
+	encoder := json.NewEncoder(writer)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(metadata)
+}
+
+// addReadmeToArchive adds human-readable README to archive
+func (w *Writer) addReadmeToArchive(zipWriter *zip.Writer, metadata ArchiveMetadata) error {
+	writer, err := zipWriter.Create("README.txt")
+	if err != nil {
+		return err
+	}
+
+	readme := w.generateReadme(metadata)
+	_, err = writer.Write([]byte(readme))
+	return err
+}
+
+// generateReadme generates human-readable README content
+func (w *Writer) generateReadme(metadata ArchiveMetadata) string {
+	readme := fmt.Sprintf(`VictoriaMetrics Metrics Export
+================================
+
+Export ID: %s
+Export Date: %s
+Time Range: %s to %s
+
+Components Exported:
+`, metadata.ExportID, metadata.ExportDate.Format(time.RFC3339),
+		metadata.TimeRange.Start.Format(time.RFC3339),
+		metadata.TimeRange.End.Format(time.RFC3339))
+
+	for _, comp := range metadata.Components {
+		readme += fmt.Sprintf("  - %s\n", comp)
+	}
+
+	readme += fmt.Sprintf("\nTotal Metrics: %d\n", metadata.MetricsCount)
+
+	if metadata.Obfuscated {
+		readme += "\n⚠️  OBFUSCATION APPLIED\n"
+		readme += "Instance IPs and job names have been obfuscated for privacy.\n"
+		readme += "See metadata.json for the mapping.\n"
+	}
+
+	readme += "\nFiles in this archive:\n"
+	readme += "  - metrics.jsonl: Exported metrics in JSONL format\n"
+	readme += "  - metadata.json: Export metadata and obfuscation mappings\n"
+	readme += "  - README.txt: This file\n"
+
+	readme += "\nFor support inquiries, send this archive to VictoriaMetrics Support Team.\n"
+	readme += fmt.Sprintf("Generated by VMExporter v%s\n", metadata.VMExporterVersion)
+
+	return readme
+}
+
+// calculateSHA256 calculates SHA256 checksum of a file
+func (w *Writer) calculateSHA256(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+// GetArchiveSize returns the size of an archive file in bytes
+func (w *Writer) GetArchiveSize(archivePath string) (int64, error) {
+	info, err := os.Stat(archivePath)
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
+}
+

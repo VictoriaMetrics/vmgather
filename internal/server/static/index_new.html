@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VMExporter - VictoriaMetrics Metrics Exporter</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 900px;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #2962FF 0%, #1E88E5 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            font-size: 16px;
+            opacity: 0.9;
+        }
+
+        .wizard {
+            padding: 40px;
+        }
+
+        .progress-container {
+            margin-bottom: 30px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #2962FF 0%, #1E88E5 100%);
+            transition: width 0.3s ease;
+        }
+
+        .step-info {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #666;
+        }
+
+        .step-title {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .step-content {
+            min-height: 300px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #444;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        input[type="datetime-local"],
+        select,
+        textarea {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #2962FF;
+        }
+
+        .button-group {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 30px;
+            padding-top: 30px;
+            border-top: 2px solid #e0e0e0;
+        }
+
+        button {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #e0e0e0;
+            color: #666;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #d0d0d0;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #2962FF 0%, #1E88E5 100%);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(41, 98, 255, 0.3);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #43A047 0%, #388E3C 100%);
+            color: white;
+        }
+
+        .btn-success:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(67, 160, 71, 0.3);
+        }
+
+        .step {
+            display: none;
+        }
+
+        .step.active {
+            display: block;
+        }
+
+        .preset-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .preset-btn {
+            padding: 12px;
+            background: white;
+            border: 2px solid #2962FF;
+            color: #2962FF;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .preset-btn:hover {
+            background: #2962FF;
+            color: white;
+        }
+
+        .preset-btn.active {
+            background: #2962FF;
+            color: white;
+        }
+
+        .info-box {
+            padding: 15px;
+            background: #E3F2FD;
+            border-left: 4px solid #2196F3;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #1976D2;
+        }
+
+        .warning-box {
+            padding: 15px;
+            background: #FFF3E0;
+            border-left: 4px solid #FF9800;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #F57C00;
+        }
+
+        .success-box {
+            padding: 30px;
+            background: #E8F5E9;
+            border: 3px solid #4CAF50;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .success-icon {
+            font-size: 64px;
+            color: #4CAF50;
+            margin-bottom: 20px;
+        }
+
+        .component-list {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+        }
+
+        .component-item {
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: white;
+        }
+
+        .component-item:hover {
+            border-color: #2962FF;
+            background: #f5f9ff;
+        }
+
+        .component-item.selected {
+            border-color: #2962FF;
+            background: #E3F2FD;
+        }
+
+        .component-item input[type="checkbox"] {
+            width: auto;
+            margin-right: 10px;
+            cursor: pointer;
+            transform: scale(1.3);
+        }
+
+        .component-header {
+            display: flex;
+            align-items: center;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .component-details {
+            font-size: 13px;
+            color: #666;
+            margin-left: 30px;
+        }
+
+        .jobs-group {
+            margin-left: 30px;
+            margin-top: 10px;
+            padding-left: 15px;
+            border-left: 3px solid #2962FF;
+        }
+
+        .job-item {
+            padding: 8px;
+            margin: 5px 0;
+            background: #f8f8f8;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .job-item input[type="checkbox"] {
+            margin-right: 8px;
+        }
+
+        .help-section {
+            background: #f5f5f5;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .help-section summary {
+            cursor: pointer;
+            font-weight: 600;
+            color: #2962FF;
+            padding: 5px;
+            user-select: none;
+        }
+
+        .help-section summary:hover {
+            background: #e8e8e8;
+            border-radius: 4px;
+        }
+
+        .help-content {
+            margin-top: 15px;
+            line-height: 1.6;
+            color: #555;
+        }
+
+        .url-example {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            margin: 10px 0;
+            overflow-x: auto;
+        }
+
+        .url-example-grid {
+            display: grid;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .obfuscation-options {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .label-selector {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+
+        .label-item {
+            padding: 10px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .label-item:last-child {
+            border-bottom: none;
+        }
+
+        .label-item input[type="checkbox"] {
+            margin-right: 10px;
+            transform: scale(1.2);
+        }
+
+        .label-sample {
+            font-size: 12px;
+            color: #888;
+            font-family: monospace;
+            margin-left: 10px;
+        }
+
+        .sample-preview {
+            background: #f5f5f5;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .sample-metric {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+
+        .metric-name {
+            color: #2962FF;
+            font-weight: 600;
+        }
+
+        .metric-labels {
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .spoiler {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            overflow: hidden;
+        }
+
+        .spoiler-header {
+            background: #f5f5f5;
+            padding: 15px;
+            cursor: pointer;
+            font-weight: 600;
+            user-select: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .spoiler-header:hover {
+            background: #e8e8e8;
+        }
+
+        .spoiler-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .spoiler-content.open {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .spoiler-body {
+            padding: 15px;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(41,98,255,0.3);
+            border-radius: 50%;
+            border-top-color: #2962FF;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .error-message {
+            padding: 15px;
+            background: #FFEBEE;
+            border-left: 4px solid #F44336;
+            border-radius: 4px;
+            color: #C62828;
+            margin-bottom: 15px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                margin: 10px;
+            }
+            
+            .wizard {
+                padding: 20px;
+            }
+
+            header h1 {
+                font-size: 24px;
+            }
+
+            .preset-buttons {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 VMExporter</h1>
+            <p>VictoriaMetrics Metrics Exporter</p>
+        </header>
+
+        <div class="wizard">
+            <div class="progress-container">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress" style="width: 0%"></div>
+                </div>
+                <div class="step-info" id="stepInfo">Step 1 of 6: Welcome</div>
+            </div>
+
+            <!-- Step 1: Welcome -->
+            <div class="step active" data-step="1">
+                <h2 class="step-title">Welcome to VMExporter! 👋</h2>
+                <div class="step-content">
+                    <div class="info-box">
+                        <strong>🎯 Purpose:</strong> Export VictoriaMetrics internal metrics for support team analysis
+                    </div>
+                    
+                    <p style="margin-bottom: 20px; color: #666; line-height: 1.6;">
+                        This wizard will guide you through exporting metrics from your VictoriaMetrics installation.
+                        You'll be able to:
+                    </p>
+
+                    <ul style="margin-left: 30px; margin-bottom: 20px; color: #666; line-height: 1.8;">
+                        <li>✅ Select time range for export</li>
+                        <li>✅ Connect to your VM instance (vmselect/vmsingle)</li>
+                        <li>✅ Choose which components to export</li>
+                        <li>✅ Obfuscate sensitive information (IPs, job names)</li>
+                        <li>✅ Download ready-to-send archive</li>
+                    </ul>
+
+                    <div class="warning-box">
+                        <strong>🔒 Privacy:</strong> Your credentials are never stored. Obfuscation uses obviously fake IPs (777.777.x.x) for clarity.
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button class="btn-secondary" disabled>← Back</button>
+                    <button class="btn-primary" onclick="nextStep()">Next →</button>
+                </div>
+            </div>
+
+            <!-- Step 2: Time Range -->
+            <div class="step" data-step="2">
+                <h2 class="step-title">Select Time Range</h2>
+                <div class="step-content">
+                    <div class="form-group">
+                        <label>Quick Presets:</label>
+                        <div class="preset-buttons">
+                            <button class="preset-btn" onclick="setPreset('15m')">Last 15min</button>
+                            <button class="preset-btn active" onclick="setPreset('1h')">Last 1h</button>
+                            <button class="preset-btn" onclick="setPreset('3h')">Last 3h</button>
+                            <button class="preset-btn" onclick="setPreset('6h')">Last 6h</button>
+                            <button class="preset-btn" onclick="setPreset('12h')">Last 12h</button>
+                            <button class="preset-btn" onclick="setPreset('24h')">Last 24h</button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="timeFrom">From (Date & Time):</label>
+                        <input type="datetime-local" id="timeFrom" required>
+                        <small style="color: #888; margin-top: 5px; display: block;">
+                            📅 Pick date and time using the calendar picker
+                        </small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="timeTo">To (Date & Time):</label>
+                        <input type="datetime-local" id="timeTo" required>
+                        <small style="color: #888; margin-top: 5px; display: block;">
+                            📅 Pick date and time using the calendar picker
+                        </small>
+                    </div>
+
+                    <div class="info-box">
+                        <strong>💡 Tip:</strong> Shorter time ranges export faster. Recommended: 1-24 hours for most cases.
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button class="btn-secondary" onclick="prevStep()">← Back</button>
+                    <button class="btn-primary" onclick="nextStep()">Next →</button>
+                </div>
+            </div>
+
+            <!-- Step 3: VM Connection -->
+            <div class="step" data-step="3">
+                <h2 class="step-title">VictoriaMetrics Connection</h2>
+                <div class="step-content">
+                    <details class="help-section" open>
+                        <summary>📚 How to find your VM URL? (Click to expand)</summary>
+                        <div class="help-content">
+                            <p><strong>For vmselect (cluster):</strong></p>
+                            <div class="url-example-grid">
+                                <div class="url-example">http://vmselect:8481</div>
+                                <div class="url-example">http://vmselect.monitoring.svc.cluster.local:8481</div>
+                                <div class="url-example">http://10.0.1.5:8481</div>
+                            </div>
+
+                            <p style="margin-top: 15px;"><strong>For vmsingle:</strong></p>
+                            <div class="url-example-grid">
+                                <div class="url-example">http://vmsingle:8428</div>
+                                <div class="url-example">http://localhost:8428</div>
+                                <div class="url-example">https://victoria-metrics.example.com</div>
+                            </div>
+
+                            <p style="margin-top: 15px;"><strong>🔍 Finding URL from Grafana datasource:</strong></p>
+                            <ol style="margin-left: 20px; margin-top: 10px;">
+                                <li>Open Grafana → Configuration → Data Sources</li>
+                                <li>Find your VictoriaMetrics datasource</li>
+                                <li>Copy the <strong>URL</strong> field (e.g., <code>http://vmselect:8481/select/0/prometheus</code>)</li>
+                                <li>Use <strong>base URL only</strong>: <code>http://vmselect:8481</code> (without <code>/select/0/prometheus</code>)</li>
+                            </ol>
+
+                            <div class="warning-box" style="margin-top: 15px;">
+                                <strong>⚠️ Important:</strong> Use base URL without paths. VMExporter adds required API paths automatically.
+                            </div>
+                        </div>
+                    </details>
+
+                    <div class="form-group">
+                        <label for="vmUrl">VM URL:</label>
+                        <input type="text" id="vmUrl" placeholder="http://localhost:8428" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="authType">Authentication:</label>
+                        <select id="authType" onchange="toggleAuthFields()">
+                            <option value="none">None</option>
+                            <option value="basic">Basic Auth (Username/Password)</option>
+                            <option value="bearer">Bearer Token</option>
+                            <option value="header">Custom Header</option>
+                        </select>
+                    </div>
+
+                    <div id="authFields"></div>
+
+                    <button class="btn-primary" onclick="testConnection()" style="width: 100%; margin-top: 10px;">
+                        <span id="testBtnText">Test Connection</span>
+                    </button>
+
+                    <div id="connectionResult" style="margin-top: 15px;"></div>
+                </div>
+
+                <div class="button-group">
+                    <button class="btn-secondary" onclick="prevStep()">← Back</button>
+                    <button class="btn-primary" id="step3Next" onclick="nextStep()" disabled>Next →</button>
+                </div>
+            </div>
+
+            <!-- Step 4: Select Components -->
+            <div class="step" data-step="4">
+                <h2 class="step-title">Select Components to Export</h2>
+                <div class="step-content">
+                    <div class="info-box">
+                        Select which VictoriaMetrics components you want to export metrics from.
+                    </div>
+
+                    <div id="componentsLoading" class="loading-spinner" style="margin: 20px auto; display: block;"></div>
+                    <div id="componentsList" class="component-list" style="display: none;"></div>
+                    <div id="componentsError" class="error-message hidden"></div>
+                </div>
+
+                <div class="button-group">
+                    <button class="btn-secondary" onclick="prevStep()">← Back</button>
+                    <button class="btn-primary" onclick="nextStep()">Next →</button>
+                </div>
+            </div>
+
+            <!-- Step 5: Obfuscation -->
+            <div class="step" data-step="5">
+                <h2 class="step-title">Obfuscation Options</h2>
+                <div class="step-content">
+                    <div class="info-box">
+                        Obfuscate sensitive information before sending to support team.
+                    </div>
+
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="enableObfuscation" checked onchange="toggleObfuscation()" style="width: auto; margin-right: 10px;">
+                            Enable obfuscation
+                        </label>
+                    </div>
+
+                    <div id="obfuscationOptions" class="obfuscation-options">
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" class="obf-label-checkbox" data-label="instance" checked>
+                                Obfuscate instance IPs (777.777.x.x pool)
+                            </label>
+                        </div>
+
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" class="obf-label-checkbox" data-label="job" checked>
+                                Obfuscate job names (vm_component_X_N format)
+                            </label>
+                        </div>
+
+                        <details style="margin-top: 20px;">
+                            <summary style="cursor: pointer; font-weight: 600; color: #2962FF; padding: 10px; background: #f5f5f5; border-radius: 4px;">
+                                🔧 Advanced: Obfuscate other labels
+                            </summary>
+                            <div id="advancedLabels" class="label-selector">
+                                <div style="text-align: center; color: #888; padding: 20px;">
+                                    <div class="loading-spinner" style="display: inline-block;"></div>
+                                    <p style="margin-top: 10px;">Loading sample metrics...</p>
+                                </div>
+                            </div>
+                        </details>
+
+                        <details style="margin-top: 20px;">
+                            <summary style="cursor: pointer; font-weight: 600; color: #2962FF; padding: 10px; background: #f5f5f5; border-radius: 4px;">
+                                👀 Preview sample data
+                            </summary>
+                            <div id="samplePreview" class="sample-preview">
+                                <p style="text-align: center; color: #888;">Loading samples...</p>
+                            </div>
+                        </details>
+                    </div>
+
+                    <div class="warning-box">
+                        <strong>ℹ️ Note:</strong> Obfuscation mappings will be included in metadata.json for reference.
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button class="btn-secondary" onclick="prevStep()">← Back</button>
+                    <button class="btn-primary" onclick="exportMetrics()">Start Export</button>
+                </div>
+            </div>
+
+            <!-- Step 6: Complete -->
+            <div class="step" data-step="6">
+                <h2 class="step-title">Export Complete!</h2>
+                <div class="step-content">
+                    <div class="success-box">
+                        <div class="success-icon">✅</div>
+                        <h3 style="color: #4CAF50; margin-bottom: 20px;">Export Successful</h3>
+
+                        <div style="text-align: left; margin: 20px 0;">
+                            <p><strong>Export ID:</strong> <span id="exportId">-</span></p>
+                            <p><strong>Metrics Exported:</strong> <span id="metricsCount">-</span></p>
+                            <p><strong>Archive Size:</strong> <span id="archiveSize">-</span> KB</p>
+                            <p><strong>SHA256:</strong> <code id="archiveSha256" style="font-size: 11px; word-break: break-all;">-</code></p>
+                        </div>
+
+                        <button class="btn-success" onclick="downloadArchive()" id="downloadBtn" style="width: 100%; margin: 20px 0; padding: 15px; font-size: 18px;">
+                            📦 Download Archive
+                        </button>
+
+                        <button class="btn-secondary" onclick="location.reload()" style="width: 100%;">
+                            Start New Export
+                        </button>
+                    </div>
+
+                    <div id="exportSpoilers" style="margin-top: 30px;">
+                        <!-- Spoilers with sample data will be inserted here -->
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button class="btn-secondary" onclick="prevStep()">← Back</button>
+                    <button class="btn-success" onclick="location.reload()">Finish</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
+

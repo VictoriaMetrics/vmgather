@@ -1,0 +1,95 @@
+# Binaries
+vmexporter
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.out
+coverage.html
+
+# Build artifacts
+dist/
+build/output/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Exports directory (generated archives)
+exports/
+*.zip
+
+# Local development (AI-agent documentation, not for public)
+local-development/
+
+# Local test environment (Docker setup, not for public)
+local-test-env/
+
+# Playwright
+tests/e2e/node_modules/
+tests/e2e/playwright-report/
+tests/e2e/test-results/
+tests/e2e/.playwright/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+
+# Local development (AI documentation, not for public)
+local-development/
+
+# Log files  
+*.log
+*.bak
+*.backup
+
+# Reports (internal analysis)
+reports/
+
+# Log files
+*.log
+
+# Backup files
+*.bak
+*.backup
+
+# Build artifacts
+vmexporter
+dist/
+coverage.out
+
+# Test artifacts
+exports/
+tests/e2e/playwright-report/
+tests/e2e/test-results/
+tests/e2e/node_modules/
+
+# Local development
+local-development/
+local-test-env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
