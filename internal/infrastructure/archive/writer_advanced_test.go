@@ -19,7 +19,7 @@ func TestWriter_CrossPlatformPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	writer := NewWriter(tmpDir)
 
@@ -105,7 +105,7 @@ func TestWriter_FileCollisions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	writer := NewWriter(tmpDir)
 	exportID := "export-collision-test"
@@ -161,7 +161,7 @@ func TestWriter_LargeArchive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	writer := NewWriter(tmpDir)
 
@@ -229,7 +229,7 @@ func TestWriter_ConcurrentArchiveCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	writer := NewWriter(tmpDir)
 	const numArchives = 20
@@ -297,7 +297,7 @@ func TestWriter_EmptyMetricsStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	writer := NewWriter(tmpDir)
 
@@ -340,7 +340,7 @@ func TestWriter_SpecialCharactersInMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	writer := NewWriter(tmpDir)
 
@@ -474,7 +474,7 @@ func TestWriter_ArchiveNaming(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	writer := NewWriter(tmpDir)
 

@@ -34,7 +34,7 @@ func TestWriter_CreateArchive_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	writer := NewWriter(tmpDir)
 
@@ -91,7 +91,7 @@ func TestWriter_CreateArchive_ContainsRequiredFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	writer := NewWriter(tmpDir)
 
@@ -139,7 +139,7 @@ func TestWriter_CreateArchive_MetricsContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	writer := NewWriter(tmpDir)
 
@@ -202,7 +202,7 @@ func TestWriter_CreateArchive_MetadataContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	writer := NewWriter(tmpDir)
 
@@ -285,7 +285,7 @@ func TestWriter_CreateArchive_ReadmeContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	writer := NewWriter(tmpDir)
 
@@ -368,7 +368,7 @@ func TestWriter_CalculateSHA256(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create test file
 	testFile := filepath.Join(tmpDir, "test.txt")
@@ -407,7 +407,7 @@ func TestWriter_GetArchiveSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	writer := NewWriter(tmpDir)
 
@@ -450,7 +450,7 @@ func TestWriter_CreateArchive_CreatesOutputDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Use non-existent subdirectory
 	outputDir := filepath.Join(tmpDir, "nested", "output")
@@ -484,7 +484,7 @@ func TestWriter_CreateArchive_EmptyMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	writer := NewWriter(tmpDir)
 

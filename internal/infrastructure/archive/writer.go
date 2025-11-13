@@ -62,11 +62,11 @@ func (w *Writer) CreateArchive(
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create archive file: %w", err)
 	}
-	defer archiveFile.Close()
+	defer func() { _ = archiveFile.Close() }()
 
 	// Create ZIP writer
 	zipWriter := zip.NewWriter(archiveFile)
-	defer zipWriter.Close()
+	defer func() { _ = zipWriter.Close() }()
 
 	// Add metrics data
 	if err := w.addMetricsToArchive(zipWriter, metricsReader); err != nil {
@@ -175,7 +175,7 @@ func (w *Writer) calculateSHA256(filePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {

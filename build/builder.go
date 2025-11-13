@@ -177,7 +177,7 @@ func calculateSHA256(filePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
@@ -194,15 +194,15 @@ func generateChecksums(results []BuildResult) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
-	fmt.Fprintf(file, "# VMExporter v%s - SHA256 Checksums\n", version)
-	fmt.Fprintf(file, "# Generated: %s\n\n", time.Now().Format(time.RFC3339))
+	_, _ = fmt.Fprintf(file, "# VMExporter v%s - SHA256 Checksums\n", version)
+	_, _ = fmt.Fprintf(file, "# Generated: %s\n\n", time.Now().Format(time.RFC3339))
 
 	for _, result := range results {
 		if result.Error == nil {
 			filename := filepath.Base(result.OutputPath)
-			fmt.Fprintf(file, "%s  %s\n", result.SHA256, filename)
+			_, _ = fmt.Fprintf(file, "%s  %s\n", result.SHA256, filename)
 		}
 	}
 
@@ -228,7 +228,7 @@ func listDistFiles() []string {
 
 // fatal prints error and exits
 func fatal(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "❌ ERROR: "+format+"\n", args...)
+	_, _ = fmt.Fprintf(os.Stderr, "❌ ERROR: "+format+"\n", args...)
 	os.Exit(1)
 }
 

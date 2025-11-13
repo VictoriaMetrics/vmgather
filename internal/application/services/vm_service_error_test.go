@@ -23,7 +23,7 @@ func TestVMService_DiscoverComponents_NetworkError(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		conn.Close()
+		_ = conn.Close()
 	}))
 	defer server.Close()
 
@@ -250,7 +250,7 @@ func TestVMService_GetSample_NetworkError(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		conn.Close()
+		_ = conn.Close()
 	}))
 	defer server.Close()
 

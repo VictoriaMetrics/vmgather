@@ -24,7 +24,7 @@ func TestExportService_ExecuteExport_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	_ = NewExportService(tmpDir) // Will be used when implementing real integration test
 
@@ -40,7 +40,7 @@ func TestExportService_ExecuteExport_Cancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	service := NewExportService(tmpDir)
 
@@ -218,7 +218,7 @@ func TestExportService_ConcurrentExports(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	_ = NewExportService(tmpDir) // Will be used for real concurrent export tests
 

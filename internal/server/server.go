@@ -163,8 +163,6 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 		}
 	}
 	
-	log.Printf("✅ Connection successful! Components found: %d", len(result.Data.Result))
-
 	// Extract version info and verify it's VictoriaMetrics
 	version := "unknown"
 	components := 0
@@ -172,6 +170,7 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 	vmComponents := []string{}
 	
 	if result != nil && result.Status == "success" && len(result.Data.Result) > 0 {
+		log.Printf("✅ Connection successful! Components found: %d", len(result.Data.Result))
 		components = len(result.Data.Result)
 		
 		// Extract version and component info from metrics
@@ -469,7 +468,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusNotFound, fmt.Sprintf("File not found: %s", filePath))
 		return
 	}
-	fileInfo.Close()
+	_ = fileInfo.Close()
 
 	// Set headers for download
 	w.Header().Set("Content-Type", "application/zip")

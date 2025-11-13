@@ -159,7 +159,7 @@ func (s *vmServiceImpl) estimateComponentMetrics(ctx context.Context, client *vm
 	}
 
 	var count int
-	fmt.Sscanf(valueStr, "%d", &count)
+	_, _ = fmt.Sscanf(valueStr, "%d", &count)
 	return count, nil
 }
 
@@ -194,7 +194,7 @@ func (s *vmServiceImpl) countInstances(ctx context.Context, client *vm.Client, j
 	}
 
 	var count int
-	fmt.Sscanf(valueStr, "%d", &count)
+	_, _ = fmt.Sscanf(valueStr, "%d", &count)
 	return count, nil
 }
 
@@ -234,7 +234,7 @@ func (s *vmServiceImpl) GetSample(ctx context.Context, config domain.ExportConfi
 		if len(r.Value) >= 2 {
 			// Value is [timestamp, value_string]
 			if valStr, ok := r.Value[1].(string); ok {
-				fmt.Sscanf(valStr, "%f", &sample.Value)
+				_, _ = fmt.Sscanf(valStr, "%f", &sample.Value)
 			} else if val, ok := r.Value[1].(float64); ok {
 				sample.Value = val
 			}

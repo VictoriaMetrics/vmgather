@@ -68,7 +68,7 @@ func TestClient_Query_Success(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -124,7 +124,7 @@ func TestClient_Query_WithBasicAuth(t *testing.T) {
 			Status: "success",
 			Data:   QueryData{ResultType: "vector", Result: []Result{}},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -163,7 +163,7 @@ func TestClient_Query_WithBearerToken(t *testing.T) {
 			Status: "success",
 			Data:   QueryData{ResultType: "vector", Result: []Result{}},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -223,7 +223,7 @@ func TestClient_Query_APIError(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 

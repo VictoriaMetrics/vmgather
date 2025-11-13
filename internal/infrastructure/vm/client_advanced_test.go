@@ -55,7 +55,7 @@ func TestClient_QueryRange(t *testing.T) {
 			},
 		}
 
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -107,7 +107,7 @@ func TestClient_Query_WithCustomHeader(t *testing.T) {
 			Status: "success",
 			Data:   QueryData{ResultType: "vector", Result: []Result{}},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -195,7 +195,7 @@ func TestClient_Query_WithRedirect(t *testing.T) {
 			Status: "success",
 			Data:   QueryData{ResultType: "vector", Result: []Result{}},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer targetServer.Close()
 
@@ -239,7 +239,7 @@ func TestClient_Query_WithRateLimiting(t *testing.T) {
 			Status: "success",
 			Data:   QueryData{ResultType: "vector", Result: []Result{}},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -323,7 +323,7 @@ func TestClient_Export_LargeResponse(t *testing.T) {
 				"values":     []float64{float64(i)},
 				"timestamps": []int64{int64(1699728000 + i)},
 			}
-			json.NewEncoder(w).Encode(metric)
+			_ = json.NewEncoder(w).Encode(metric)
 		}
 	}))
 	defer server.Close()

@@ -85,7 +85,7 @@ func ensureAvailablePort(addr string) (string, error) {
 	listener, err := net.Listen("tcp", addr)
 	if err == nil {
 		// Port is available, close it and return
-		listener.Close()
+		_ = listener.Close()
 		return addr, nil
 	}
 
@@ -106,7 +106,7 @@ func ensureAvailablePort(addr string) (string, error) {
 
 	// Get the assigned port
 	assignedAddr := listener.Addr().String()
-	listener.Close()
+	_ = listener.Close()
 
 	// Extract port number
 	_, port, err := net.SplitHostPort(assignedAddr)

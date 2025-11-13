@@ -88,7 +88,7 @@ func (c *Client) Query(ctx context.Context, query string, ts time.Time) (*QueryR
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
@@ -130,7 +130,7 @@ func (c *Client) QueryRange(ctx context.Context, query string, start, end time.T
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
@@ -179,7 +179,7 @@ func (c *Client) Export(ctx context.Context, selector string, start, end time.Ti
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -249,7 +249,7 @@ func (c *Client) buildRequest(ctx context.Context, method, path string, params u
 	reqURL := baseURL + path
 	log.Printf("  Final request URL (before params): %s", reqURL)
 
-	if params != nil && len(params) > 0 {
+	if len(params) > 0 {
 		if method == http.MethodGet {
 			reqURL += "?" + params.Encode()
 		}

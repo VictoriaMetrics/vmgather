@@ -467,7 +467,7 @@ func TestExportService_Integration_NoObfuscation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// This test would require actual VM instance or more sophisticated mocking
 	// For now, we verify service creation works

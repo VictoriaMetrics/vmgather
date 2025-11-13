@@ -128,7 +128,7 @@ func TestBuildPlatform_InvalidPlatform(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Try to build for invalid platform
 	invalidPlatform := Platform{
@@ -166,7 +166,7 @@ func TestListDistFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// This test is limited because listDistFiles uses const distDir
 	// Just verify it doesn't crash
@@ -185,7 +185,7 @@ func TestGenerateChecksums(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Mock results
 	results := []BuildResult{

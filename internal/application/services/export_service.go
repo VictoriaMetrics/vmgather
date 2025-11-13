@@ -68,7 +68,7 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 	} else {
 		fmt.Println("✅ Direct export successful")
 	}
-	defer exportReader.Close()
+	defer func() { _ = exportReader.Close() }()
 
 	// Step 2: Process metrics (with optional obfuscation)
 	fmt.Printf("🔄 Processing metrics (obfuscation: %v)...\n", config.Obfuscation.Enabled)
