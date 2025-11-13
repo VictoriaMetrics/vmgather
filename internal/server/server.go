@@ -42,7 +42,7 @@ func NewServer(outputDir string) *Server {
 func respondWithError(w http.ResponseWriter, statusCode int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"error":  message,
 		"status": statusCode,
 	})
@@ -71,7 +71,7 @@ func (s *Server) Router() http.Handler {
 
 // handleHealth returns server health status
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status":  "ok",
 		"version": "1.0.0",
 	})
@@ -123,7 +123,7 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 	
 	if err != nil {
 		log.Printf("❌ Connection validation failed: %v", err)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
 			"valid":   false,
 			"message": fmt.Sprintf("Connection failed: %v", err),
@@ -153,7 +153,7 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 		
 		if err != nil {
 			log.Printf("❌ All queries failed: %v", err)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"success": false,
 				"valid":   false,
 				"message": fmt.Sprintf("Connection failed: %v", err),
@@ -211,7 +211,7 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 
 	log.Printf("✅ VictoriaMetrics detected! Version: %s, Components: %v", version, vmComponents)
 
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":             true,
 		"valid":               true,
 		"message":             "Connection successful",
@@ -268,7 +268,7 @@ func (s *Server) handleDiscoverComponents(w http.ResponseWriter, r *http.Request
 
 	// Return discovered components
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"components": components,
 	})
 }
@@ -344,7 +344,7 @@ func (s *Server) handleGetSample(w http.ResponseWriter, r *http.Request) {
 
 	// Return samples
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"samples": samples,
 		"count":   len(samples),
 	})
@@ -414,7 +414,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 
 	// Return export result
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // getSampleDataFromResult retrieves sample data for preview
