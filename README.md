@@ -14,25 +14,60 @@ VMExporter helps export VictoriaMetrics internal metrics for support diagnostics
 
 ## Quick Start
 
-Download binary for your platform from the releases page.
+Download binary for your platform from the [releases page](https://github.com/VictoriaMetrics/support/releases).
 
-Run:
+### macOS
+
 ```bash
+# Download the binary for your Mac
+# For M1/M2/M3/M4 Macs: vmexporter-vX.X.X-macos-apple-silicon
+# For Intel Macs: vmexporter-vX.X.X-macos-intel
+
 chmod +x vmexporter-*
-./vmexporter-darwin-arm64  # macOS Apple Silicon
-# or
-./vmexporter-linux-amd64   # Linux
-# or
-vmexporter-windows-amd64.exe  # Windows
+./vmexporter-vX.X.X-macos-apple-silicon
 ```
 
-Opens browser at http://localhost:<RANDOM_PORT>
+**First run on macOS:** You'll see a security warning "Cannot be opened because it is from an unidentified developer."
+
+**Solution:**
+1. Go to **System Settings** → **Privacy & Security**
+2. Scroll down to the **Security** section
+3. Click **"Open Anyway"** next to the VMExporter message
+4. Click **"Open"** in the confirmation dialog
+
+Alternatively, run from terminal:
+```bash
+xattr -d com.apple.quarantine vmexporter-*
+./vmexporter-*
+```
+
+### Linux
+
+```bash
+chmod +x vmexporter-*-linux-amd64
+./vmexporter-*-linux-amd64
+```
+
+### Windows
+
+Download `.exe` file and double-click to run, or from PowerShell:
+```powershell
+.\vmexporter-*-windows-amd64.exe
+```
+
+**Opens browser automatically at** `http://localhost:<RANDOM_PORT>`
 
 ## Documentation
 
 - [User Guide](docs/user-guide.md)
 - [Architecture](docs/architecture.md)
 - [Development](docs/development.md)
+
+## Important Notes
+
+⚠️ **Label Export Limitation:** VMExporter exports only VictoriaMetrics default labels (`job`, `instance`, `vm_component`, etc.). Any custom labels added to your metrics will be **ignored** and their values will **not** be included in the export.
+
+If you need to export custom labels, please contact VictoriaMetrics support team.
 
 ## Use Cases
 
