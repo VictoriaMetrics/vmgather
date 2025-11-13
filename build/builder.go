@@ -13,10 +13,11 @@ import (
 )
 
 const (
-	version    = "1.0.0"
 	binaryName = "vmexporter"
 	distDir    = "dist"
 )
+
+var version = getVersion()
 
 // Platform represents a target build platform
 type Platform struct {
@@ -235,5 +236,13 @@ func fatal(format string, args ...interface{}) {
 // GetCurrentPlatform returns current OS/ARCH as string
 func GetCurrentPlatform() string {
 	return fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH)
+}
+
+// getVersion returns version from VERSION env var or default
+func getVersion() string {
+	if v := os.Getenv("VERSION"); v != "" {
+		return strings.TrimPrefix(v, "v")
+	}
+	return "1.0.0"
 }
 
