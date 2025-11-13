@@ -38,9 +38,10 @@ jobs:
           go-version: '1.21'
       
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v2.6.1
+          args: --timeout=5m
 
   # E2E tests disabled in CI - require Docker environment
   # Run locally with: make test-e2e
