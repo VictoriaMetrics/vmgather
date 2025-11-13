@@ -24,6 +24,7 @@ type Platform struct {
 	GOOS   string
 	GOARCH string
 	Ext    string // .exe for windows, empty for others
+	Alias  string // User-friendly name (optional)
 }
 
 // BuildResult contains build output information
@@ -43,8 +44,8 @@ var platforms = []Platform{
 	{GOOS: "linux", GOARCH: "386", Ext: ""},
 	
 	// macOS
-	{GOOS: "darwin", GOARCH: "amd64", Ext: ""},
-	{GOOS: "darwin", GOARCH: "arm64", Ext: ""}, // Apple Silicon
+	{GOOS: "darwin", GOARCH: "amd64", Ext: "", Alias: "macos-intel"},
+	{GOOS: "darwin", GOARCH: "arm64", Ext: "", Alias: "macos-apple-silicon"},
 	
 	// Windows
 	{GOOS: "windows", GOARCH: "amd64", Ext: ".exe"},
@@ -163,6 +164,22 @@ func buildPlatform(platform Platform) BuildResult {
 		}
 	}
 
+	// Create alias copy if specified (e.g., macos-apple-silicon)
+	if platform.Alias != "" {
+		aliasFilename := fmt.Sprintf("%s-v%s-%s%s",
+			binaryName,
+			version,
+			platform.Alias,
+			platform.Ext,
+		)
+		aliasPath := filepath.Join(distDir, aliasFilename)
+		
+		// Copy file
+		if err := copyFile(outputPath, aliasPath); err == nil {
+			fmt.Printf("   📋 Created alias: %s\n", aliasFilename)
+		}
+	}
+
 	return BuildResult{
 		Platform:   platform,
 		OutputPath: outputPath,
@@ -244,5 +261,23 @@ func getVersion() string {
 		return strings.TrimPrefix(v, "v")
 	}
 	return "1.0.0"
+}
+
+// copyFile copies a file from src to dst
+func copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sourceFile.Close() }()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = destFile.Close() }()
+
+	_, err = io.Copy(destFile, sourceFile)
+	return err
 }
 
