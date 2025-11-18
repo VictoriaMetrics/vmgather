@@ -40,7 +40,7 @@ func main() {
 	}
 
 	// Create HTTP server
-	srv := server.NewServer(*outputDir)
+	srv := server.NewServer(*outputDir, version)
 	httpServer := &http.Server{
 		Addr:    finalAddr,
 		Handler: srv.Router(),

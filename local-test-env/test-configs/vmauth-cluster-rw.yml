@@ -19,6 +19,13 @@ users:
     password: "secret-rw-pass"
     # Default routing - will work for most paths
     url_prefix: "http://vmselect:8481/select/1011/prometheus"
+
+  # ============================================================================
+  # User: tenant1011-user (used by integration tests mimicking customer config)
+  # ============================================================================
+  - username: "tenant1011-user"
+    password: "tenant1011-pass"
+    url_prefix: "http://vmselect:8481/select/1011/prometheus"
     
   # ============================================================================
   # User: monitoring-read (tenant 1011, /r/prometheus path)
@@ -58,4 +65,3 @@ users:
   # ============================================================================
   - bearer_token: "bearer-tenant1011-token"
     url_prefix: "http://vmselect:8481/select/1011/prometheus"
-

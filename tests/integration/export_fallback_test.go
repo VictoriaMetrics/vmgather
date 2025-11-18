@@ -41,7 +41,7 @@ func TestExportFallback_LegacyTenant(t *testing.T) {
 	})
 
 	t.Run("Export_ShouldFallbackToQueryRange", func(t *testing.T) {
-		exportService := services.NewExportService(t.TempDir())
+		exportService := services.NewExportService(t.TempDir(), "integration-test")
 
 		config := domain.ExportConfig{
 			Connection: conn,
@@ -98,7 +98,7 @@ func TestExportDirect_ModernTenant(t *testing.T) {
 	})
 
 	t.Run("Export_ShouldUseDirect", func(t *testing.T) {
-		exportService := services.NewExportService(t.TempDir())
+		exportService := services.NewExportService(t.TempDir(), "integration-test")
 
 		config := domain.ExportConfig{
 			Connection: conn,
@@ -146,7 +146,7 @@ func TestExportFallback_ErrorMessages(t *testing.T) {
 		},
 	}
 
-	exportService := services.NewExportService(t.TempDir())
+	exportService := services.NewExportService(t.TempDir(), "integration-test")
 
 	config := domain.ExportConfig{
 		Connection: conn,
@@ -185,10 +185,10 @@ func TestExportAPI_DirectCheck(t *testing.T) {
 	vmService := services.NewVMService()
 
 	tests := []struct {
-		name        string
-		conn        domain.VMConnection
+		name         string
+		conn         domain.VMConnection
 		expectExport bool
-		description string
+		description  string
 	}{
 		{
 			name: "Tenant1011_NoExport",
@@ -252,7 +252,7 @@ func TestExportFallback_CompareResults(t *testing.T) {
 		},
 	}
 
-	exportService1011 := services.NewExportService(t.TempDir())
+	exportService1011 := services.NewExportService(t.TempDir(), "integration-test")
 	config1011 := domain.ExportConfig{
 		Connection: conn1011,
 		TimeRange:  timeRange,
@@ -277,7 +277,7 @@ func TestExportFallback_CompareResults(t *testing.T) {
 		},
 	}
 
-	exportService2022 := services.NewExportService(t.TempDir())
+	exportService2022 := services.NewExportService(t.TempDir(), "integration-test")
 	config2022 := domain.ExportConfig{
 		Connection: conn2022,
 		TimeRange:  timeRange,
@@ -306,7 +306,7 @@ func TestExportFallback_CompareResults(t *testing.T) {
 	// So we just check that both archives are non-trivial in size
 	assert.Greater(t, stat1011.Size(), int64(1000), "Tenant 1011 archive should be substantial")
 	assert.Greater(t, stat2022.Size(), int64(1000), "Tenant 2022 archive should be substantial")
-	
+
 	// Fallback (1011) might be larger due to query_range returning more points
 	// This is expected behavior
 	t.Logf("Archive sizes: Fallback=%d bytes, Direct=%d bytes", stat1011.Size(), stat2022.Size())
@@ -330,7 +330,7 @@ func TestExportFallback_MissingRoute(t *testing.T) {
 		},
 	}
 
-	exportService := services.NewExportService(t.TempDir())
+	exportService := services.NewExportService(t.TempDir(), "integration-test")
 
 	config := domain.ExportConfig{
 		Connection: conn,
@@ -360,4 +360,3 @@ func TestExportFallback_MissingRoute(t *testing.T) {
 	// Clean up
 	os.Remove(result.ArchivePath)
 }
-

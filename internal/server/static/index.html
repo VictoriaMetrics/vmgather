@@ -90,6 +90,21 @@
             margin-bottom: 20px;
         }
 
+        .input-hint {
+            color: #666;
+            font-size: 0.85em;
+            margin-top: 5px;
+            display: block;
+        }
+
+        .input-hint.success {
+            color: #2E7D32;
+        }
+
+        .input-hint.error {
+            color: #C62828;
+        }
+
         label {
             display: block;
             margin-bottom: 8px;
@@ -223,6 +238,60 @@
             margin-bottom: 20px;
             font-size: 14px;
             color: #F57C00;
+        }
+
+        .selection-summary {
+            margin-top: 20px;
+            border-left: 4px solid #2962FF;
+            background: #f4f7ff;
+        }
+
+        .selection-summary h4 {
+            margin-bottom: 8px;
+        }
+
+        .summary-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        @media (min-width: 700px) {
+            .summary-grid {
+                flex-direction: row;
+                flex-wrap: wrap;
+            }
+        }
+
+        .summary-card {
+            flex: 1 1 240px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 12px;
+            background: #fff;
+        }
+
+        .summary-card ul {
+            margin: 8px 0 0 18px;
+            color: #555;
+        }
+
+        .summary-meta {
+            font-size: 13px;
+            color: #555;
+            margin-top: 6px;
+        }
+
+        .summary-total {
+            margin-top: 12px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .summary-placeholder {
+            color: #666;
+            margin-top: 6px;
         }
 
         .success-box {
@@ -545,7 +614,7 @@
 
                 <div class="button-group">
                     <button class="btn-secondary" disabled>← Back</button>
-                    <button class="btn-primary" onclick="nextStep()">Next →</button>
+                    <button class="btn-primary" onclick="nextStep()">Get Started</button>
                 </div>
             </div>
 
@@ -620,7 +689,7 @@
                         <strong>✅ Flexible URL Parser:</strong> Paste URL in ANY format - with paths, tenant ID, from Grafana datasource - everything works!
                     </div>
 
-                    <details class="help-section" open>
+                    <details class="help-section">
                         <summary>📋 Accepted URL Formats (Click to expand)</summary>
                         <div class="help-content">
                             <h4 style="margin-top: 10px; color: #1976d2;">✅ Format 1: Base URL (simple)</h4>
@@ -665,8 +734,8 @@
                     <div class="form-group">
                         <label for="vmUrl">VM URL (any format):</label>
                         <input type="text" id="vmUrl" placeholder="e.g., https://vm.example.com/1011 or http://localhost:8428" required>
-                        <small style="color: #4caf50; font-size: 0.85em; margin-top: 5px; display: block;">
-                            ✅ Paste URL in any format - with paths, tenant ID, query params - everything works
+                        <small id="vmUrlHint" class="input-hint">
+                            Enter a VictoriaMetrics endpoint (http/https)
                         </small>
                     </div>
 
@@ -764,6 +833,11 @@
                                 <p style="text-align: center; color: #888;">Loading samples...</p>
                             </div>
                         </details>
+
+                        <div id="selectionSummary" class="selection-summary info-box">
+                            <h4>📦 Estimated Export Volume</h4>
+                            <p class="summary-placeholder">Select components above to see per-component and per-job series counts.</p>
+                        </div>
                     </div>
 
                     <div class="warning-box">
@@ -817,4 +891,3 @@
     <script src="/static/app.js"></script>
 </body>
 </html>
-

@@ -26,7 +26,7 @@ func TestExportService_ExecuteExport_Integration(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	_ = NewExportService(tmpDir) // Will be used when implementing real integration test
+	_ = NewExportService(tmpDir, "test-version") // Will be used when implementing real integration test
 
 	// This would require a mock VM client or real VM instance
 	// For now, documenting the test structure
@@ -42,7 +42,7 @@ func TestExportService_ExecuteExport_Cancellation(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	service := NewExportService(tmpDir)
+	service := NewExportService(tmpDir, "test-version")
 
 	// Create cancellable context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -81,7 +81,7 @@ this is not json at all
 		obfConfig := domain.ObfuscationConfig{Enabled: false}
 
 		_, count, _, err := service.processMetrics(reader, obfConfig)
-		
+
 		// Current implementation: fail-fast on first error (KISS principle)
 		// Returns error and discards partial results
 		if err == nil {
@@ -102,7 +102,7 @@ this is not json at all
 		obfConfig := domain.ObfuscationConfig{Enabled: false}
 
 		_, count, _, err := service.processMetrics(reader, obfConfig)
-		
+
 		// Should return error immediately
 		if err == nil {
 			t.Error("expected error on malformed JSONL")
@@ -198,7 +198,11 @@ func TestExportService_ProcessMetrics_MemoryEfficiency(t *testing.T) {
 	var memAfter runtime.MemStats
 	runtime.ReadMemStats(&memAfter)
 
-	memUsedMB := float64(memAfter.Alloc-memBefore.Alloc) / 1024 / 1024
+	diff := int64(memAfter.Alloc) - int64(memBefore.Alloc)
+	if diff < 0 {
+		diff = -diff
+	}
+	memUsedMB := float64(diff) / 1024 / 1024
 
 	t.Logf("Memory used: %.2f MB for 100K metrics", memUsedMB)
 
@@ -220,7 +224,7 @@ func TestExportService_ConcurrentExports(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	_ = NewExportService(tmpDir) // Will be used for real concurrent export tests
+	_ = NewExportService(tmpDir, "test-version") // Will be used for real concurrent export tests
 
 	const numExports = 10
 
@@ -328,11 +332,11 @@ func TestExportService_BuildArchiveMetadata_EdgeCases(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		config         domain.ExportConfig
-		metricsCount   int
+		name            string
+		config          domain.ExportConfig
+		metricsCount    int
 		obfuscationMaps map[string]map[string]string
-		wantError      bool
+		wantError       bool
 	}{
 		{
 			name: "zero metrics",
@@ -410,12 +414,12 @@ func TestExportService_ApplyObfuscation_SelectiveLabels(t *testing.T) {
 	// Create metric with multiple labels
 	metric := &vm.ExportedMetric{
 		Metric: map[string]string{
-			"__name__":  "vm_app_version",
-			"instance":  "10.0.1.5:8482",
-			"job":       "vmstorage-prod",
-			"env":       "production",
+			"__name__":   "vm_app_version",
+			"instance":   "10.0.1.5:8482",
+			"job":        "vmstorage-prod",
+			"env":        "production",
 			"datacenter": "dc1",
-			"version":   "v1.95.1",
+			"version":    "v1.95.1",
 		},
 		Values:     []interface{}{1.0},
 		Timestamps: []int64{1699728000000},
@@ -423,8 +427,8 @@ func TestExportService_ApplyObfuscation_SelectiveLabels(t *testing.T) {
 
 	// Test selective obfuscation
 	tests := []struct {
-		name      string
-		config    domain.ObfuscationConfig
+		name            string
+		config          domain.ObfuscationConfig
 		shouldObfuscate map[string]bool
 	}{
 		{
@@ -492,4 +496,3 @@ func TestExportService_ApplyObfuscation_SelectiveLabels(t *testing.T) {
 		})
 	}
 }
-

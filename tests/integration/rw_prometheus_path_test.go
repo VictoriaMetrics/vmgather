@@ -26,8 +26,8 @@ func TestRealScenario_RwPrometheusPath(t *testing.T) {
 	t.Run("RwPath_QueryWorks", func(t *testing.T) {
 		config := domain.ExportConfig{
 			Connection: domain.VMConnection{
-				URL:         "http://localhost:8888",
-				FullApiUrl:  "http://localhost:8888/1011/rw/prometheus",
+				URL:        "http://localhost:8888",
+				FullApiUrl: "http://localhost:8888/1011/rw/prometheus",
 				Auth: domain.AuthConfig{
 					Type:     domain.AuthTypeBasic,
 					Username: "monitoring-rw",
@@ -65,8 +65,8 @@ func TestRealScenario_RwPrometheusPath(t *testing.T) {
 	t.Run("RwPath_ExportWorksWithNormalization", func(t *testing.T) {
 		config := domain.ExportConfig{
 			Connection: domain.VMConnection{
-				URL:         "http://localhost:8888",
-				FullApiUrl:  "http://localhost:8888/1011/rw/prometheus",
+				URL:        "http://localhost:8888",
+				FullApiUrl: "http://localhost:8888/1011/rw/prometheus",
 				Auth: domain.AuthConfig{
 					Type:     domain.AuthTypeBasic,
 					Username: "monitoring-rw",
@@ -81,7 +81,7 @@ func TestRealScenario_RwPrometheusPath(t *testing.T) {
 			Jobs:       []string{"vmagent-prometheus"},
 		}
 
-		exportService := services.NewExportService(t.TempDir())
+		exportService := services.NewExportService(t.TempDir(), "integration-test")
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
@@ -106,8 +106,8 @@ func TestRealScenario_RwPrometheusPath(t *testing.T) {
 	t.Run("RPath_QueryWorks", func(t *testing.T) {
 		config := domain.ExportConfig{
 			Connection: domain.VMConnection{
-				URL:         "http://localhost:8888",
-				FullApiUrl:  "http://localhost:8888/1011/r/prometheus",
+				URL:        "http://localhost:8888",
+				FullApiUrl: "http://localhost:8888/1011/r/prometheus",
 				Auth: domain.AuthConfig{
 					Type:     domain.AuthTypeBasic,
 					Username: "monitoring-read",
@@ -144,8 +144,8 @@ func TestRealScenario_RwPrometheusPath(t *testing.T) {
 	t.Run("RPath_ExportWorks", func(t *testing.T) {
 		config := domain.ExportConfig{
 			Connection: domain.VMConnection{
-				URL:         "http://localhost:8888",
-				FullApiUrl:  "http://localhost:8888/1011/r/prometheus",
+				URL:        "http://localhost:8888",
+				FullApiUrl: "http://localhost:8888/1011/r/prometheus",
 				Auth: domain.AuthConfig{
 					Type:     domain.AuthTypeBasic,
 					Username: "monitoring-read",
@@ -160,7 +160,7 @@ func TestRealScenario_RwPrometheusPath(t *testing.T) {
 			Jobs:       []string{"vmagent-prometheus"},
 		}
 
-		exportService := services.NewExportService(t.TempDir())
+		exportService := services.NewExportService(t.TempDir(), "integration-test")
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
@@ -186,8 +186,8 @@ func TestRealScenario_RwPrometheusPath(t *testing.T) {
 		// This tests that VMexporter automatically normalizes the path
 		config := domain.ExportConfig{
 			Connection: domain.VMConnection{
-				URL:         "http://localhost:8888",
-				FullApiUrl:  "http://localhost:8888/1011/rw/prometheus",
+				URL:        "http://localhost:8888",
+				FullApiUrl: "http://localhost:8888/1011/rw/prometheus",
 				Auth: domain.AuthConfig{
 					Type:     domain.AuthTypeBasic,
 					Username: "monitoring-rw",
@@ -202,7 +202,7 @@ func TestRealScenario_RwPrometheusPath(t *testing.T) {
 			Jobs:       []string{"vmagent-prometheus"},
 		}
 
-		exportService := services.NewExportService(t.TempDir())
+		exportService := services.NewExportService(t.TempDir(), "integration-test")
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
@@ -210,7 +210,7 @@ func TestRealScenario_RwPrometheusPath(t *testing.T) {
 		// But in our test environment, /rw/prometheus export is blocked by design
 		// So we expect it to fail, but VMexporter should have tried to normalize
 		_, err := exportService.ExecuteExport(ctx, config)
-		
+
 		// The error should NOT contain "/rw/prometheus" in the final URL
 		// because VMexporter should have normalized it
 		if err != nil {
@@ -223,4 +223,3 @@ func TestRealScenario_RwPrometheusPath(t *testing.T) {
 		}
 	})
 }
-

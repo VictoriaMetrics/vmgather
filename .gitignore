@@ -46,6 +46,9 @@ tmp/
 temp/
 *.tmp
 
+.cache/
+.gocache/
+
 
 # Local development (AI documentation, not for public)
 local-development/

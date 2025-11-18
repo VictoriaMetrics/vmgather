@@ -1,7 +1,6 @@
 package services
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/VictoriaMetrics/support/internal/domain"
@@ -151,19 +150,17 @@ func TestVMService_EstimateComponentMetrics_ParsesCount(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Simulate parsing logic
-			var count int
-
+			value := 0
+			ok := false
 			if len(tt.value) >= 2 {
-				if valueStr, ok := tt.value[1].(string); ok {
-					fmt.Sscanf(valueStr, "%d", &count)
-				} else if valueFloat, ok := tt.value[1].(float64); ok {
-					count = int(valueFloat)
+				if count, parsed := parseCountValue(tt.value[1]); parsed {
+					value = count
+					ok = true
 				}
 			}
 
-			if count != tt.expected {
-				t.Errorf("count = %v, want %v", count, tt.expected)
+			if !ok || value != tt.expected {
+				t.Errorf("count = %v, ok=%v, want %v", value, ok, tt.expected)
 			}
 		})
 	}
@@ -254,4 +251,3 @@ func TestVMService_DiscoverComponents_IgnoresInvalidMetrics(t *testing.T) {
 		t.Errorf("expected 1 component after filtering, got %d", len(componentMap))
 	}
 }
-

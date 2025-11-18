@@ -31,20 +31,21 @@ type AuthConfig struct {
 // VMConnection represents connection settings to VictoriaMetrics
 type VMConnection struct {
 	URL           string     `json:"url"`
-	ApiBasePath   string     `json:"api_base_path,omitempty"`   // e.g., "/select/0/prometheus" or "/1011/prometheus"
-	TenantId      string     `json:"tenant_id,omitempty"`       // e.g., "0" or "1011"
-	IsMultitenant bool       `json:"is_multitenant,omitempty"`  // true for /select/multitenant endpoints
-	FullApiUrl    string     `json:"full_api_url,omitempty"`    // Complete URL with base path
+	ApiBasePath   string     `json:"api_base_path,omitempty"`  // e.g., "/select/0/prometheus" or "/1011/prometheus"
+	TenantId      string     `json:"tenant_id,omitempty"`      // e.g., "0" or "1011"
+	IsMultitenant bool       `json:"is_multitenant,omitempty"` // true for /select/multitenant endpoints
+	FullApiUrl    string     `json:"full_api_url,omitempty"`   // Complete URL with base path
 	Auth          AuthConfig `json:"auth"`
 	SkipTLSVerify bool       `json:"skip_tls_verify"`
 }
 
 // VMComponent represents a discovered VictoriaMetrics component
 type VMComponent struct {
-	Component            string   `json:"component"`
-	Jobs                 []string `json:"jobs"`
-	InstanceCount        int      `json:"instance_count"`
-	MetricsCountEstimate int      `json:"metrics_count_estimate"`
+	Component            string         `json:"component"`
+	Jobs                 []string       `json:"jobs"`
+	InstanceCount        int            `json:"instance_count"`
+	MetricsCountEstimate int            `json:"metrics_count_estimate"`
+	JobMetrics           map[string]int `json:"job_metrics,omitempty"`
 }
 
 // MetricSample represents a sample metric for preview
@@ -91,4 +92,3 @@ type ExportResult struct {
 	ObfuscationApplied bool      `json:"obfuscation_applied"`
 	SHA256             string    `json:"sha256"`
 }
-

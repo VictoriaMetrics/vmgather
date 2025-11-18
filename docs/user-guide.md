@@ -43,11 +43,11 @@ Official walkthrough for the VictoriaMetrics metrics export wizard.
 | Step | Description |
 | --- | --- |
 | 1. **Time range** | Choose presets (15m, 1h, 6h, 24h) or define custom start/end timestamps. |
-| 2. **Connection** | Enter URL + auth method. |
+| 2. **Connection** | Enter URL + auth method. Invalid URLs disable the **Test Connection** button instantly. |
 | 3. **Validation** | Click **Test connection**. VMExporter checks reachability, detects product flavour, and confirms `/api/v1/export` availability. |
 | 4. **Component discovery** | Select which VictoriaMetrics components, tenants, and jobs to include. UI lists everything found via `vm_app_version` metrics. |
-| 5. **Obfuscation** | Enable anonymisation for IPs, job labels, or add custom label keys. Mapping remains deterministic during the export session. |
-| 6. **Summary** | Review time range, target, authentication, and components before exporting. |
+| 5. **Obfuscation** | Enable anonymisation for IPs, job labels, or add custom label keys. An estimated series count per component/job is displayed based on discovery data. |
+| 6. **Summary** | Review time range, target, authentication, selected components, and pre-obfuscated sample data before exporting. |
 
 Each card contains hints and sample values matching VictoriaMetrics defaults.
 
@@ -60,8 +60,8 @@ Click **Start export** to execute the workflow:
 3. Archive contents are written to a temporary directory:
    - `metrics.jsonl` – raw metrics dump.
    - `metadata.json` – VictoriaMetrics versions, selected components, timeframe, and checksums.
-   - `README.txt` – human-readable summary for support.
-4. A ZIP archive is produced with SHA256 checksum displayed on completion.
+   - `README.txt` – human-readable summary for support (timestamps in UTC, unique component list, current binary version).
+4. A ZIP archive is produced with SHA256 checksum displayed on completion. The UI shows obfuscated sample data from the final export for clarity.
 
 Downloads start automatically in the browser; you can also retrieve the archive via the **Download again** button.
 

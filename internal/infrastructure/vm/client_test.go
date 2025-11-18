@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -38,7 +37,7 @@ func TestNewClient(t *testing.T) {
 // TestClient_Query_Success tests successful query execution
 func TestClient_Query_Success(t *testing.T) {
 	// Create mock server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request path
 		if r.URL.Path != "/api/v1/query" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
@@ -104,7 +103,7 @@ func TestClient_Query_WithBasicAuth(t *testing.T) {
 	expectedUser := "testuser"
 	expectedPass := "testpass"
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify auth header
 		user, pass, ok := r.BasicAuth()
 		if !ok {
@@ -149,7 +148,7 @@ func TestClient_Query_WithBasicAuth(t *testing.T) {
 func TestClient_Query_WithBearerToken(t *testing.T) {
 	expectedToken := "test-token-123"
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify Authorization header
 		auth := r.Header.Get("Authorization")
 		if auth != "Bearer "+expectedToken {
@@ -185,7 +184,7 @@ func TestClient_Query_WithBearerToken(t *testing.T) {
 
 // TestClient_Query_Timeout tests query timeout
 func TestClient_Query_Timeout(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Simulate slow response
 		time.Sleep(2 * time.Second)
 		w.WriteHeader(http.StatusOK)
@@ -216,7 +215,7 @@ func TestClient_Query_Timeout(t *testing.T) {
 
 // TestClient_Query_APIError tests API error response
 func TestClient_Query_APIError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := QueryResult{
 			Status: "error",
 			Error:  "invalid query syntax",
@@ -250,7 +249,7 @@ func TestClient_Export_Success(t *testing.T) {
 	mockData := `{"metric":{"__name__":"vm_app_version"},"values":[1],"timestamps":[1699728000000]}
 {"metric":{"__name__":"go_goroutines"},"values":[42],"timestamps":[1699728000000]}`
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify path
 		if r.URL.Path != "/api/v1/export" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
@@ -308,7 +307,7 @@ func TestClient_Export_Success(t *testing.T) {
 
 // TestClient_Export_HTTPError tests export with HTTP error
 func TestClient_Export_HTTPError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("internal server error"))
 	}))

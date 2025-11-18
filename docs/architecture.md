@@ -57,7 +57,7 @@ ZIP archive → browser download
 | Endpoint | Purpose |
 | --- | --- |
 | `POST /api/validate` | Checks reachability, auth, and returns detected VM flavour + version. |
-| `POST /api/discover` | Finds available components and jobs via `vm_app_version`. |
+	| `POST /api/discover` | Finds available components, per-job series estimates, and jobs via `vm_app_version`. |
 | `POST /api/sample` | Fetches preview metrics (up to a safe limit) for UI confirmation. |
 | `POST /api/export` | Executes the export workflow, streaming data into a temporary archive. |
 | `GET /api/download?path=…` | Returns the generated ZIP file. |
@@ -69,6 +69,7 @@ All endpoints accept/return JSON with error details suitable for UI presentation
 - **IPs** – replaced with `777.777.X.Y`, retaining port numbers and component grouping.
 - **Jobs** – renamed to `<component>-job-<n>` while keeping the original component prefix.
 - **Custom labels** – user-provided keys; mappings kept in memory for the session, not persisted.
+- **Sample previews** – `/api/sample` responses and export previews reuse the obfuscator so the UI never shows raw instances/jobs once obfuscation is enabled.
 - **Deterministic** – the same input within a session maps to the same output so support can correlate metrics.
 
 ## Security characteristics

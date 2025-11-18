@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +15,7 @@ import (
 
 // TestClient_QueryRange tests range query functionality
 func TestClient_QueryRange(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify path
 		if r.URL.Path != "/api/v1/query_range" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
@@ -94,7 +93,7 @@ func TestClient_Query_WithCustomHeader(t *testing.T) {
 	expectedHeaderName := "X-Custom-Auth"
 	expectedHeaderValue := "secret-token-123"
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify custom header
 		headerValue := r.Header.Get(expectedHeaderName)
 		if headerValue != expectedHeaderValue {
@@ -130,7 +129,7 @@ func TestClient_Query_WithCustomHeader(t *testing.T) {
 
 // TestClient_Export_WithMultitenantPath tests multitenant path handling
 func TestClient_Export_WithMultitenantPath(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify multitenant path
 		expectedPath := "/select/multitenant/prometheus/api/v1/export"
 		if r.URL.Path != expectedPath {
@@ -161,7 +160,7 @@ func TestClient_Export_WithMultitenantPath(t *testing.T) {
 func TestClient_Export_WithTenantID(t *testing.T) {
 	tenantID := "1011"
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify tenant ID in path
 		if !strings.Contains(r.URL.Path, tenantID) {
 			t.Errorf("tenant ID not in path: %s", r.URL.Path)
@@ -190,7 +189,7 @@ func TestClient_Export_WithTenantID(t *testing.T) {
 // TestClient_Query_WithRedirect tests HTTP redirect handling
 func TestClient_Query_WithRedirect(t *testing.T) {
 	// Create target server
-	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	targetServer := newIPv4TestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := QueryResult{
 			Status: "success",
 			Data:   QueryData{ResultType: "vector", Result: []Result{}},
@@ -200,7 +199,7 @@ func TestClient_Query_WithRedirect(t *testing.T) {
 	defer targetServer.Close()
 
 	// Create redirect server
-	redirectServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	redirectServer := newIPv4TestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, targetServer.URL+r.URL.Path, http.StatusMovedPermanently)
 	}))
 	defer redirectServer.Close()
@@ -223,7 +222,7 @@ func TestClient_Query_WithRedirect(t *testing.T) {
 func TestClient_Query_WithRateLimiting(t *testing.T) {
 	callCount := 0
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 
 		if callCount == 1 {
@@ -263,12 +262,12 @@ func TestClient_Query_WithRateLimiting(t *testing.T) {
 
 // TestClient_Export_StreamInterruption tests stream interruption handling
 func TestClient_Export_StreamInterruption(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Write partial data then close
 		w.Write([]byte(`{"metric":{"__name__":"test1"},"values":[1],"timestamps":[1]}` + "\n"))
 		w.Write([]byte(`{"metric":{"__name__":"test2"},"values":[2],"timestamps":[2]}`))
 		// Intentionally don't write newline and close connection
-		
+
 		// Flush to send data
 		if flusher, ok := w.(http.Flusher); ok {
 			flusher.Flush()
@@ -294,7 +293,7 @@ func TestClient_Export_StreamInterruption(t *testing.T) {
 	scanner := bufio.NewScanner(reader)
 	buf := make([]byte, 1024)
 	scanner.Buffer(buf, 10*1024*1024)
-	
+
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
 	}
@@ -311,14 +310,14 @@ func TestClient_Export_LargeResponse(t *testing.T) {
 		t.Skip("skipping large response test in short mode")
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Generate 100K metrics (~ 15MB)
 		for i := 0; i < 100000; i++ {
 			metric := map[string]interface{}{
 				"metric": map[string]string{
-					"__name__":  "test_metric",
-					"instance":  "10.0.1.5:8482",
-					"job":       "test",
+					"__name__": "test_metric",
+					"instance": "10.0.1.5:8482",
+					"job":      "test",
 				},
 				"values":     []float64{float64(i)},
 				"timestamps": []int64{int64(1699728000 + i)},
@@ -366,7 +365,7 @@ func TestClient_Export_LargeResponse(t *testing.T) {
 
 // TestClient_Export_GzipCompression tests gzip compressed responses
 func TestClient_Export_GzipCompression(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4TestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Check Accept-Encoding header
 		acceptEncoding := r.Header.Get("Accept-Encoding")
 		if !strings.Contains(acceptEncoding, "gzip") {
@@ -402,4 +401,3 @@ func TestClient_Export_GzipCompression(t *testing.T) {
 		t.Error("no data received")
 	}
 }
-

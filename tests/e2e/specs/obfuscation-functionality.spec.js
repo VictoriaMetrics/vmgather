@@ -120,7 +120,9 @@ test.describe('Obfuscation Functionality', () => {
         await page.check('#enableObfuscation');
         await page.waitForSelector('#obfuscationOptions', { state: 'visible' });
 
-        // Select pod and namespace (should be ignored by backend)
+        // Deselect default labels, select pod and namespace only
+        await page.locator('.obf-label-checkbox[data-label="instance"]').uncheck();
+        await page.locator('.obf-label-checkbox[data-label="job"]').uncheck();
         await page.locator('.obf-label-checkbox[data-label="pod"]').check();
         await page.locator('.obf-label-checkbox[data-label="namespace"]').check();
 
@@ -166,4 +168,3 @@ test.describe('Obfuscation Functionality', () => {
         });
     });
 });
-

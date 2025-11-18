@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -13,7 +12,7 @@ import (
 // TestVMService_DiscoverComponents_NetworkError tests discovery with network errors
 func TestVMService_DiscoverComponents_NetworkError(t *testing.T) {
 	// Create server that closes connection immediately
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4Server(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Close connection without response
 		hj, ok := w.(http.Hijacker)
 		if !ok {
@@ -49,7 +48,7 @@ func TestVMService_DiscoverComponents_NetworkError(t *testing.T) {
 
 // TestVMService_DiscoverComponents_InvalidJSON tests discovery with invalid JSON response
 func TestVMService_DiscoverComponents_InvalidJSON(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4Server(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{invalid json`))
@@ -111,7 +110,7 @@ func TestVMService_DiscoverComponents_HTTPError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := newIPv4Server(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tt.statusCode)
 				w.Write([]byte(tt.body))
@@ -142,7 +141,7 @@ func TestVMService_DiscoverComponents_HTTPError(t *testing.T) {
 // TestVMService_DiscoverComponents_ContextCancellation tests discovery with cancelled context
 func TestVMService_DiscoverComponents_ContextCancellation(t *testing.T) {
 	// Create slow server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4Server(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(5 * time.Second) // Slow response
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
@@ -172,7 +171,7 @@ func TestVMService_DiscoverComponents_ContextCancellation(t *testing.T) {
 
 // TestVMService_DiscoverComponents_EmptyResponse tests discovery with empty result set
 func TestVMService_DiscoverComponents_EmptyResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4Server(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
@@ -203,7 +202,7 @@ func TestVMService_DiscoverComponents_EmptyResponse(t *testing.T) {
 // TestVMService_DiscoverComponents_Timeout tests discovery with timeout
 func TestVMService_DiscoverComponents_Timeout(t *testing.T) {
 	// Create slow server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4Server(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(10 * time.Second) // Very slow response
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
@@ -240,7 +239,7 @@ func TestVMService_DiscoverComponents_Timeout(t *testing.T) {
 
 // TestVMService_GetSample_NetworkError tests sample retrieval with network errors
 func TestVMService_GetSample_NetworkError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newIPv4Server(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Close connection
 		hj, ok := w.(http.Hijacker)
 		if !ok {
@@ -310,4 +309,3 @@ func TestVMService_ValidateConnection_InvalidURL(t *testing.T) {
 		})
 	}
 }
-

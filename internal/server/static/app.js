@@ -17,6 +17,9 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Initialize datetime-local inputs
     initializeDateTimePickers();
+
+    initializeUrlValidation();
+    updateSelectionSummary();
 });
 
 // Initialize timezone selector with user's default timezone
@@ -85,6 +88,114 @@ function updateTimezoneTimes() {
     
     document.getElementById('timeTo').value = formatDateTimeLocal(now, timezone);
     document.getElementById('timeFrom').value = formatDateTimeLocal(oneHourAgo, timezone);
+}
+
+// URL validation helpers
+function initializeUrlValidation() {
+    const urlInput = document.getElementById('vmUrl');
+    const hint = document.getElementById('vmUrlHint');
+    const testButton = document.getElementById('testConnectionBtn');
+    if (!urlInput || !hint || !testButton) {
+        return;
+    }
+
+    const applyState = () => {
+        const assessment = analyzeVmUrl(urlInput.value);
+        const nextBtn = document.getElementById('step3Next');
+
+        if (assessment.valid) {
+            hint.textContent = `✅ ${assessment.message || 'URL looks good'}`;
+            hint.classList.remove('error');
+            hint.classList.add('success');
+            testButton.disabled = false;
+        } else {
+            const message = assessment.message || 'Enter a valid http(s) URL';
+            hint.textContent = `❌ ${message}`;
+            hint.classList.remove('success');
+            hint.classList.add('error');
+            testButton.disabled = true;
+            connectionValid = false;
+            if (nextBtn) {
+                nextBtn.disabled = true;
+            }
+        }
+    };
+
+    urlInput.addEventListener('input', applyState);
+    applyState();
+}
+
+const PROTOCOL_REGEX = /^[a-zA-Z][a-zA-Z0-9+\-.]*:\/\//;
+
+function analyzeVmUrl(rawUrl) {
+    const trimmed = (rawUrl || '').trim();
+    if (!trimmed) {
+        return { valid: false, message: 'Enter a VictoriaMetrics URL' };
+    }
+
+    if (/[\\\s]/.test(trimmed)) {
+        return { valid: false, message: 'Remove spaces or backslashes from the URL' };
+    }
+
+    let candidate = trimmed;
+    if (!PROTOCOL_REGEX.test(candidate)) {
+        candidate = `http://${candidate}`;
+    }
+
+    let parsedUrl;
+    try {
+        parsedUrl = new URL(candidate);
+    } catch (err) {
+        return { valid: false, message: 'Invalid URL format' };
+    }
+
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        return { valid: false, message: 'Only http:// or https:// are supported' };
+    }
+
+    if (!isValidHost(parsedUrl.hostname)) {
+        return { valid: false, message: 'Hostname must be localhost, IP, or DNS name' };
+    }
+
+    return {
+        valid: true,
+        url: parsedUrl,
+        normalized: candidate.replace(/\/+$/, ''),
+        message: parsedUrl.hostname === 'localhost' ? 'Local endpoint detected' : 'URL looks valid',
+    };
+}
+
+function isValidHost(host) {
+    if (!host) {
+        return false;
+    }
+
+    if (host === 'localhost') {
+        return true;
+    }
+
+    // IPv4
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+        return host.split('.').every(part => {
+            const value = Number(part);
+            return value >= 0 && value <= 255;
+        });
+    }
+
+    // IPv6
+    if (host.includes(':')) {
+        try {
+            // Validate by attempting to construct a URL with IPv6 literal
+            new URL(`http://[${host}]:8080`);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    // Kubernetes-style DNS names (allow single label or multi-label)
+    const labelRegex = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/i;
+    return host.split('.').every(segment => labelRegex.test(segment));
 }
 
 // Navigation
@@ -254,8 +365,26 @@ async function testConnection() {
     const btn = document.getElementById('testBtnText');
     const result = document.getElementById('connectionResult');
     const nextBtn = document.getElementById('step3Next');
+    const buttonWrapper = document.getElementById('testConnectionBtn');
     
     btn.innerHTML = '<span class="loading-spinner"></span> Testing...';
+    
+    const urlAssessment = analyzeVmUrl(document.getElementById('vmUrl').value);
+    if (!urlAssessment.valid) {
+        result.innerHTML = `
+            <div class="error-message">
+                ❌ ${urlAssessment.message}
+            </div>
+        `;
+        btn.textContent = 'Test Connection';
+        connectionValid = false;
+        nextBtn.disabled = true;
+        if (buttonWrapper) {
+            buttonWrapper.disabled = true;
+        }
+        return;
+    }
+    
     result.innerHTML = '<div id="validationSteps"></div>';
     
     const stepsContainer = document.getElementById('validationSteps');
@@ -468,66 +597,47 @@ async function testConnection() {
 
 // Parse VM URL to extract base URL and path components
 function parseVMUrl(rawUrl) {
-    try {
-        // Remove trailing slash
-        rawUrl = rawUrl.trim().replace(/\/$/, '');
-        
-        const url = new URL(rawUrl);
-        const path = url.pathname;
-        
-        // Extract base URL (protocol + host)
-        const baseUrl = `${url.protocol}//${url.host}`;
-        
-        // Detect URL format
-        let apiBasePath = '';
-        let tenantId = null;
-        let isMultitenant = false;
-        
-        // Check for /select/<tenant>/prometheus or /select/multitenant patterns
-        const selectMatch = path.match(/^(\/select\/(\d+|multitenant))(\/prometheus)?/);
-        if (selectMatch) {
-            const tenant = selectMatch[2];
-            if (tenant === 'multitenant') {
-                isMultitenant = true;
-                apiBasePath = '/select/multitenant/prometheus';
-            } else {
-                tenantId = tenant;
-                apiBasePath = `/select/${tenant}/prometheus`;
-            }
-        } 
-        // Check for simple tenant ID at path (e.g., /1011)
-        else if (path.match(/^\/\d+$/)) {
-            tenantId = path.substring(1);
-            apiBasePath = path + '/prometheus';
-        }
-        // Check if path contains /prometheus or other known endpoints
-        else if (path.includes('/prometheus')) {
-            apiBasePath = path;
-        }
-        // Otherwise, use path as-is or empty if just base URL
-        else if (path && path !== '/') {
-            apiBasePath = path + '/prometheus';
-        } else {
-            apiBasePath = '/prometheus';
-        }
-        
-        return {
-            baseUrl: baseUrl,
-            apiBasePath: apiBasePath,
-            tenantId: tenantId,
-            isMultitenant: isMultitenant,
-            fullApiUrl: baseUrl + apiBasePath
-        };
-    } catch (e) {
-        // If URL parsing fails, return as-is
-        return {
-            baseUrl: rawUrl,
-            apiBasePath: '/prometheus',
-            tenantId: null,
-            isMultitenant: false,
-            fullApiUrl: rawUrl + '/prometheus'
-        };
+    const assessment = analyzeVmUrl(rawUrl);
+    if (!assessment.valid || !assessment.url) {
+        throw new Error(assessment.message || 'Invalid URL');
     }
+
+    const url = assessment.url;
+    const sanitizedPath = url.pathname.replace(/\/+$/, '') || '/';
+
+    const baseUrl = `${url.protocol}//${url.host}`;
+    let apiBasePath = '';
+    let tenantId = null;
+    let isMultitenant = false;
+
+    const selectMatch = sanitizedPath.match(/^(\/select\/(\d+|multitenant))(\/prometheus)?/);
+    if (selectMatch) {
+        const tenant = selectMatch[2];
+        if (tenant === 'multitenant') {
+            isMultitenant = true;
+            apiBasePath = '/select/multitenant/prometheus';
+        } else {
+            tenantId = tenant;
+            apiBasePath = `/select/${tenant}/prometheus`;
+        }
+    } else if (/^\/\d+$/.test(sanitizedPath)) {
+        tenantId = sanitizedPath.substring(1);
+        apiBasePath = `${sanitizedPath}/prometheus`;
+    } else if (sanitizedPath.includes('/prometheus')) {
+        apiBasePath = sanitizedPath;
+    } else if (sanitizedPath && sanitizedPath !== '/') {
+        apiBasePath = `${sanitizedPath}/prometheus`;
+    } else {
+        apiBasePath = '/prometheus';
+    }
+
+    return {
+        baseUrl,
+        apiBasePath,
+        tenantId,
+        isMultitenant,
+        fullApiUrl: baseUrl + apiBasePath
+    };
 }
 
 function getConnectionConfig() {
@@ -657,6 +767,10 @@ function renderComponents(components) {
     components.sort((a, b) => a.component.localeCompare(b.component)).forEach(comp => {
         const totalInstances = comp.instance_count || 0;
         const allJobs = comp.jobs || []; // Array of job names
+        const seriesEstimate = typeof comp.metrics_count_estimate === 'number' && comp.metrics_count_estimate >= 0
+            ? `${comp.metrics_count_estimate.toLocaleString()} series`
+            : 'series unknown';
+        const jobListText = allJobs.length > 0 ? allJobs.join(', ') : 'n/a';
         
         html += `
             <div class="component-item" onclick="toggleComponent(this)">
@@ -668,23 +782,25 @@ function renderComponents(components) {
                     <strong>${comp.component}</strong>
                 </div>
                 <div class="component-details">
-                    Jobs: ${allJobs.join(', ')} | Instances: ${totalInstances}
+                    Jobs: ${jobListText} | Instances: ${totalInstances} | ${seriesEstimate}
                 </div>
-                ${allJobs.length > 1 ? renderJobsGroup(comp.component, allJobs, totalInstances) : ''}
+                ${allJobs.length > 0 ? renderJobsGroup(comp.component, allJobs, totalInstances, comp.job_metrics || {}) : ''}
             </div>
         `;
     });
     
     list.innerHTML = html;
+    updateSelectionSummary();
 }
 
-function renderJobsGroup(componentType, jobs, totalInstances) {
+function renderJobsGroup(componentType, jobs, totalInstances, jobMetrics = {}) {
     let html = '<div class="jobs-group">';
     
-    // jobs is an array of job names (strings)
     jobs.forEach(job => {
-        // Estimate instances per job (divide equally)
         const estimatedInstances = Math.ceil(totalInstances / jobs.length);
+        const seriesForJob = typeof jobMetrics[job] === 'number' && jobMetrics[job] >= 0
+            ? `${jobMetrics[job].toLocaleString()} series`
+            : 'series unknown';
         
         html += `
             <div class="job-item">
@@ -693,7 +809,7 @@ function renderJobsGroup(componentType, jobs, totalInstances) {
                            data-component="${componentType}" 
                            data-job="${job}"
                            onchange="handleJobCheck(this)">
-                    <strong>${job}</strong> - ~${estimatedInstances} instance(s)
+                    <strong>${job}</strong> - ~${estimatedInstances} instance(s) • ${seriesForJob}
                 </label>
             </div>
         `;
@@ -725,6 +841,8 @@ function handleComponentCheck(checkbox) {
             jobCheckbox.checked = false;
         });
     }
+
+    updateSelectionSummary();
 }
 
 function handleJobCheck(checkbox) {
@@ -741,6 +859,8 @@ function handleJobCheck(checkbox) {
         componentCheckbox.checked = false;
         item.classList.remove('selected');
     }
+
+    updateSelectionSummary();
 }
 
 // Sample Metrics Loading
@@ -763,12 +883,17 @@ async function loadSampleMetrics() {
         
         // Get selected components/jobs
         const selected = getSelectedComponents();
+        if (selected.length === 0) {
+            throw new Error('No components selected. Please go back to Step 4.');
+        }
+        const uniqueComponents = Array.from(new Set(selected.map(s => s.component)));
+        const selectedJobs = selected.map(s => s.job).filter(Boolean);
         
         // 🔍 DEBUG: Log sample request
         console.group('📊 Sample Metrics Loading');
-        console.log('📋 Selected Components:', selected.length);
-        console.log('🎯 Components:', selected.map(s => s.component));
-        console.log('💼 Jobs:', selected.map(s => s.job).filter(Boolean));
+        console.log('📋 Selected Components:', uniqueComponents.length);
+        console.log('🎯 Components:', uniqueComponents);
+        console.log('💼 Jobs:', selectedJobs);
         
         // Add timeout (30 seconds)
         const controller = new AbortController();
@@ -784,8 +909,8 @@ async function loadSampleMetrics() {
                 config: {
                     connection: config,
                     time_range: { start: from, end: to },
-                    components: selected.map(s => s.component),
-                    jobs: selected.map(s => s.job).filter(Boolean),
+                    components: uniqueComponents,
+                    jobs: selectedJobs,
                     obfuscation: obfuscation  // Add obfuscation to samples
                 },
                 limit: 10
@@ -821,6 +946,7 @@ async function loadSampleMetrics() {
         
         renderSamplePreview(sampleMetrics);
         renderAdvancedLabels(sampleMetrics);
+        updateSelectionSummary();
     } catch (err) {
         console.error('❌ Sample loading failed:', err);
         console.groupEnd();
@@ -927,16 +1053,7 @@ function toggleObfuscation() {
     const enabled = document.getElementById('enableObfuscation').checked;
     const options = document.getElementById('obfuscationOptions');
     
-    if (enabled) {
-        options.style.display = 'block';
-        // Auto-enable instance and job obfuscation when enabling obfuscation
-        const instanceCheckbox = document.querySelector('[data-label="instance"]');
-        const jobCheckbox = document.querySelector('[data-label="job"]');
-        if (instanceCheckbox) instanceCheckbox.checked = true;
-        if (jobCheckbox) jobCheckbox.checked = true;
-    } else {
-        options.style.display = 'none';
-    }
+    options.style.display = enabled ? 'block' : 'none';
 }
 
 function getSelectedComponents() {
@@ -965,6 +1082,135 @@ function getSelectedComponents() {
     });
     
     return selected;
+}
+
+function updateSelectionSummary() {
+    const summary = document.getElementById('selectionSummary');
+    if (!summary) {
+        return;
+    }
+
+    const selected = getSelectedComponents();
+    if (!selected || selected.length === 0) {
+        summary.innerHTML = `
+            <h4>📦 Estimated Export Volume</h4>
+            <p class="summary-placeholder">Select components above to see per-component and per-job series counts.</p>
+        `;
+        return;
+    }
+
+    const stats = computeSelectionStats(selected);
+    if (stats.length === 0) {
+        summary.innerHTML = `
+            <h4>📦 Estimated Export Volume</h4>
+            <p class="summary-placeholder">Metrics data is not available for the selected components.</p>
+        `;
+        return;
+    }
+
+    const totalKnown = stats.reduce((sum, stat) => {
+        return stat.series != null ? sum + stat.series : sum;
+    }, 0);
+    const hasUnknown = stats.some(stat => stat.series == null);
+
+    let html = '<h4>📦 Estimated Export Volume</h4><div class="summary-grid">';
+    stats.forEach(stat => {
+        const seriesLabel = stat.series != null
+            ? `${stat.series.toLocaleString()} series`
+            : 'Series count unavailable';
+
+        html += `
+            <div class="summary-card">
+                <div><strong>${stat.component}</strong></div>
+                <div class="summary-meta">${seriesLabel}</div>
+        `;
+
+        if (stat.jobs.length > 0) {
+            html += '<ul>';
+            stat.jobs.forEach(job => {
+                const jobLabel = job.series != null
+                    ? job.series.toLocaleString()
+                    : 'unknown';
+                html += `<li>${job.name}: ${jobLabel}</li>`;
+            });
+            html += '</ul>';
+        }
+
+        html += '</div>';
+    });
+    html += '</div>';
+
+    if (hasUnknown) {
+        html += `<div class="summary-total">Known total: ${totalKnown.toLocaleString()} series (additional data pending)</div>`;
+    } else {
+        html += `<div class="summary-total">Total: ${totalKnown.toLocaleString()} series</div>`;
+    }
+
+    summary.innerHTML = html;
+}
+
+function computeSelectionStats(selected) {
+    const statsMap = new Map();
+
+    selected.forEach(item => {
+        if (!item || !item.component) {
+            return;
+        }
+
+        const compData = discoveredComponents.find(comp => comp.component === item.component);
+        if (!compData) {
+            return;
+        }
+
+        const existing = statsMap.get(item.component) || {
+            component: item.component,
+            series: 0,
+            jobs: [],
+            hasUnknownJob: false,
+            metricsEstimate: typeof compData.metrics_count_estimate === 'number' && compData.metrics_count_estimate >= 0
+                ? compData.metrics_count_estimate
+                : null,
+            jobMetrics: compData.job_metrics || {},
+        };
+
+        if (item.job) {
+            const jobSeries = existing.jobMetrics[item.job];
+            existing.jobs.push({
+                name: item.job,
+                series: typeof jobSeries === 'number' && jobSeries >= 0 ? jobSeries : null,
+            });
+
+            if (jobSeries == null || jobSeries < 0) {
+                existing.hasUnknownJob = true;
+            } else if (!existing.hasUnknownJob) {
+                existing.series += jobSeries;
+            }
+        } else {
+            existing.series = existing.metricsEstimate;
+            existing.jobs = (compData.jobs || []).map(jobName => ({
+                name: jobName,
+                series: typeof existing.jobMetrics[jobName] === 'number' && existing.jobMetrics[jobName] >= 0
+                    ? existing.jobMetrics[jobName]
+                    : null,
+            }));
+        }
+
+        statsMap.set(item.component, existing);
+    });
+
+    return Array.from(statsMap.values()).map(stat => {
+        if (stat.jobs.length === 0 && stat.series == null) {
+            stat.series = stat.metricsEstimate;
+        }
+        if (stat.hasUnknownJob && stat.series !== null && stat.jobs.length > 0) {
+            stat.series = null;
+        }
+        return {
+            component: stat.component,
+            series: stat.series,
+            jobs: stat.jobs,
+        };
+    });
 }
 
 function getObfuscationConfig() {
@@ -1017,6 +1263,11 @@ async function exportMetrics(buttonElement) {
         const from = new Date(document.getElementById('timeFrom').value).toISOString();
         const to = new Date(document.getElementById('timeTo').value).toISOString();
         const selected = getSelectedComponents();
+        if (selected.length === 0) {
+            throw new Error('No components selected. Please go back to Step 4.');
+        }
+        const uniqueComponents = Array.from(new Set(selected.map(s => s.component)));
+        const selectedJobs = selected.map(s => s.job).filter(Boolean);
         const obfuscation = getObfuscationConfig();
         
         // 🔍 DEBUG: Log export request
@@ -1030,7 +1281,8 @@ async function exportMetrics(buttonElement) {
                 obfuscate_job: obfuscation.obfuscate_job
             }
         });
-        console.log('🎯 Selected:', selected);
+        console.log('🎯 Selected components:', uniqueComponents);
+        console.log('💼 Selected jobs:', selectedJobs);
         
         const response = await fetch('/api/export', {
             method: 'POST',
@@ -1038,8 +1290,8 @@ async function exportMetrics(buttonElement) {
             body: JSON.stringify({
                 connection: config,
                 time_range: { start: from, end: to },
-                components: selected.map(s => s.component),
-                jobs: selected.map(s => s.job).filter(Boolean),
+                components: uniqueComponents,
+                jobs: selectedJobs,
                 obfuscation: obfuscation
             })
         });
@@ -1164,4 +1416,3 @@ function downloadArchive() {
     link.click();
     document.body.removeChild(link);
 }
-

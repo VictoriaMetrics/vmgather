@@ -26,14 +26,19 @@ type Server struct {
 	vmService     services.VMService
 	exportService services.ExportService
 	outputDir     string
+	version       string
 }
 
 // NewServer creates a new HTTP server
-func NewServer(outputDir string) *Server {
+func NewServer(outputDir, version string) *Server {
+	if version == "" {
+		version = "dev"
+	}
 	return &Server{
 		vmService:     services.NewVMService(),
-		exportService: services.NewExportService(outputDir),
+		exportService: services.NewExportService(outputDir, version),
 		outputDir:     outputDir,
+		version:       version,
 	}
 }
 
@@ -73,7 +78,7 @@ func (s *Server) Router() http.Handler {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status":  "ok",
-		"version": "1.0.0",
+		"version": s.version,
 	})
 }
 
@@ -88,7 +93,7 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 	var req struct {
 		Connection domain.VMConnection `json:"connection"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err))
 		return
@@ -109,18 +114,18 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 
 	// Create VM client
 	client := vm.NewClient(req.Connection)
-	
+
 	// Try a simple query to validate connection
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	
+
 	query := "vm_app_version"
 	log.Printf("📡 Executing query: %s", query)
-	
+
 	result, err := client.Query(ctx, query, time.Now())
-	
+
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	if err != nil {
 		log.Printf("❌ Connection validation failed: %v", err)
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -131,17 +136,17 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 		})
 		return
 	}
-	
+
 	// If vm_app_version returns no results, try alternative queries
 	if result != nil && result.Status == "success" && len(result.Data.Result) == 0 {
 		log.Printf("⚠️  vm_app_version returned no results, trying alternative queries...")
-		
+
 		// Try to query any vm_* metric
 		result, err = client.Query(ctx, `{__name__=~"vm_.*"}`, time.Now())
 		if err == nil && len(result.Data.Result) > 0 {
 			log.Printf("✅ Found %d vm_* metrics", len(result.Data.Result))
 		}
-		
+
 		// If still no results, try a simple constant query to verify API works
 		if err == nil && len(result.Data.Result) == 0 {
 			log.Printf("⚠️  No vm_* metrics found, trying constant query...")
@@ -150,7 +155,7 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 				log.Printf("✅ API responds correctly (Prometheus-compatible)")
 			}
 		}
-		
+
 		if err != nil {
 			log.Printf("❌ All queries failed: %v", err)
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -162,17 +167,17 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	
+
 	// Extract version info and verify it's VictoriaMetrics
 	version := "unknown"
 	components := 0
 	isVictoriaMetrics := false
 	vmComponents := []string{}
-	
+
 	if result != nil && result.Status == "success" && len(result.Data.Result) > 0 {
 		log.Printf("✅ Connection successful! Components found: %d", len(result.Data.Result))
 		components = len(result.Data.Result)
-		
+
 		// Extract version and component info from metrics
 		for _, metric := range result.Data.Result {
 			// Check if this is VictoriaMetrics by looking for vm_component or version label
@@ -185,7 +190,7 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 					isVictoriaMetrics = true
 				}
 			}
-			
+
 			// Extract component name
 			if comp, ok := metric.Metric["vm_component"]; ok {
 				vmComponents = append(vmComponents, comp)
@@ -196,7 +201,7 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 			}
 		}
 	}
-	
+
 	// If API responds correctly but no VM-specific metrics found, still consider it valid
 	// (metrics might not be scraped yet)
 	if !isVictoriaMetrics {
@@ -358,9 +363,9 @@ func (s *Server) handleGetSample(w http.ResponseWriter, r *http.Request) {
 				metricName = "unknown"
 			}
 		}
-		
+
 		sampleData = append(sampleData, map[string]interface{}{
-			"name":        metricName, // Frontend expects 'name' field
+			"name":        metricName,        // Frontend expects 'name' field
 			"metric_name": sample.MetricName, // Keep for backward compatibility
 			"labels":      sample.Labels,
 			"value":       sample.Value,
@@ -452,6 +457,10 @@ func (s *Server) getSampleDataFromResult(ctx context.Context, config domain.Expo
 		return []map[string]interface{}{}
 	}
 
+	if config.Obfuscation.Enabled {
+		samples = s.obfuscateSamples(samples, config.Obfuscation)
+	}
+
 	// Convert to response format
 	sampleData := make([]map[string]interface{}, 0, len(samples))
 	for _, sample := range samples {
@@ -469,7 +478,7 @@ func (s *Server) getSampleDataFromResult(ctx context.Context, config domain.Expo
 				metricName = "unknown"
 			}
 		}
-		
+
 		sampleData = append(sampleData, map[string]interface{}{
 			"name":   metricName,
 			"labels": sample.Labels,
@@ -502,7 +511,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	// Security: ensure file is within output directory
 	// For now, serve from relative path
 	// TODO: Add proper path validation
-	
+
 	// Check if file exists
 	fileInfo, err := http.Dir(".").Open(filePath)
 	if err != nil {
@@ -591,11 +600,11 @@ func guessComponentFromMetric(metricName string) string {
 // staticFileServer serves static files with proper MIME types
 func staticFileServer(fsys fs.FS) http.Handler {
 	fileServer := http.FileServer(http.FS(fsys))
-	
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Set proper Content-Type based on file extension
 		ext := strings.ToLower(filepath.Ext(r.URL.Path))
-		
+
 		switch ext {
 		case ".js":
 			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
@@ -616,7 +625,7 @@ func staticFileServer(fsys fs.FS) http.Handler {
 		case ".woff2":
 			w.Header().Set("Content-Type", "font/woff2")
 		}
-		
+
 		fileServer.ServeHTTP(w, r)
 	})
 }
@@ -628,4 +637,3 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-

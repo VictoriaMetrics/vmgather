@@ -115,6 +115,12 @@ func (s *vmServiceImpl) DiscoverComponents(ctx context.Context, conn domain.VMCo
 		// Count instances
 		comp.InstanceCount, _ = s.countInstances(ctx, client, comp.Jobs, tr)
 
+		// Estimate per-job metrics if possible
+		jobMetrics := s.estimateJobMetrics(ctx, client, comp.Jobs, tr)
+		if len(jobMetrics) > 0 {
+			comp.JobMetrics = jobMetrics
+		}
+
 		components = append(components, *comp)
 	}
 
@@ -143,24 +149,15 @@ func (s *vmServiceImpl) estimateComponentMetrics(ctx context.Context, client *vm
 		return 0, nil
 	}
 
-	// Parse count value
 	if len(result.Data.Result[0].Value) < 2 {
 		return 0, nil
 	}
 
-	// Value is [timestamp, count_as_string]
-	valueStr, ok := result.Data.Result[0].Value[1].(string)
-	if !ok {
-		// Try float64
-		if valueFloat, ok := result.Data.Result[0].Value[1].(float64); ok {
-			return int(valueFloat), nil
-		}
-		return 0, nil
+	if count, ok := parseCountValue(result.Data.Result[0].Value[1]); ok {
+		return count, nil
 	}
 
-	var count int
-	_, _ = fmt.Sscanf(valueStr, "%d", &count)
-	return count, nil
+	return 0, nil
 }
 
 // countInstances counts unique instances for given jobs
@@ -185,17 +182,55 @@ func (s *vmServiceImpl) countInstances(ctx context.Context, client *vm.Client, j
 		return 0, nil
 	}
 
-	valueStr, ok := result.Data.Result[0].Value[1].(string)
-	if !ok {
-		if valueFloat, ok := result.Data.Result[0].Value[1].(float64); ok {
-			return int(valueFloat), nil
-		}
-		return 0, nil
+	if count, ok := parseCountValue(result.Data.Result[0].Value[1]); ok {
+		return count, nil
 	}
 
-	var count int
-	_, _ = fmt.Sscanf(valueStr, "%d", &count)
-	return count, nil
+	return 0, nil
+}
+
+// estimateJobMetrics returns per-job series counts if available
+func (s *vmServiceImpl) estimateJobMetrics(ctx context.Context, client *vm.Client, jobs []string, tr domain.TimeRange) map[string]int {
+	jobCounts := make(map[string]int)
+
+	if len(jobs) == 0 {
+		return jobCounts
+	}
+
+	jobRegex := strings.Join(jobs, "|")
+	query := fmt.Sprintf(`count by (job) ({job=~"%s"})`, jobRegex)
+
+	result, err := client.Query(ctx, query, tr.End)
+	if err != nil || len(result.Data.Result) == 0 {
+		return jobCounts
+	}
+
+	for _, series := range result.Data.Result {
+		job := series.Metric["job"]
+		if job == "" || len(series.Value) < 2 {
+			continue
+		}
+
+		if count, ok := parseCountValue(series.Value[1]); ok {
+			jobCounts[job] = count
+		}
+	}
+
+	return jobCounts
+}
+
+// parseCountValue extracts an integer series count from Prometheus API values
+func parseCountValue(value interface{}) (int, bool) {
+	switch v := value.(type) {
+	case string:
+		var count int
+		if _, err := fmt.Sscanf(v, "%d", &count); err == nil {
+			return count, true
+		}
+	case float64:
+		return int(v), true
+	}
+	return 0, false
 }
 
 // GetSample retrieves sample metrics for preview
@@ -278,32 +313,31 @@ func (s *vmServiceImpl) CheckExportAPI(ctx context.Context, conn domain.VMConnec
 	// Use a very short time range and simple match to minimize data transfer
 	start := time.Now().Add(-1 * time.Minute)
 	end := time.Now()
-	
+
 	// Try to export a single metric (up is commonly available)
 	selector := "up"
-	
+
 	_, err := client.Export(ctx, selector, start, end)
-	
+
 	if err != nil {
 		errMsg := strings.ToLower(err.Error())
-		
+
 		// Check for "missing route" error - this means export API is not configured
 		if strings.Contains(errMsg, "missing route") {
 			return false
 		}
-		
+
 		// Check for 404 - endpoint not found
 		if strings.Contains(errMsg, "404") || strings.Contains(errMsg, "not found") {
 			return false
 		}
-		
+
 		// Other errors (auth, timeout, etc.) don't necessarily mean export is unavailable
 		// The endpoint exists, just failed for other reasons
 		// We'll consider this as "export available but failed"
 		return true
 	}
-	
+
 	// Export succeeded - API is available
 	return true
 }
-

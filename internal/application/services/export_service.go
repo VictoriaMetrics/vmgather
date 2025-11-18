@@ -23,17 +23,20 @@ type ExportService interface {
 
 // exportServiceImpl implements ExportService
 type exportServiceImpl struct {
-	clientFactory  func(domain.VMConnection) *vm.Client
-	archiveWriter  *archive.Writer
+	clientFactory     func(domain.VMConnection) *vm.Client
+	archiveWriter     *archive.Writer
 	vmExporterVersion string
 }
 
 // NewExportService creates a new export service
-func NewExportService(outputDir string) ExportService {
+func NewExportService(outputDir, version string) ExportService {
+	if version == "" {
+		version = "dev"
+	}
 	return &exportServiceImpl{
-		clientFactory:  vm.NewClient,
-		archiveWriter:  archive.NewWriter(outputDir),
-		vmExporterVersion: "1.0.0",
+		clientFactory:     vm.NewClient,
+		archiveWriter:     archive.NewWriter(outputDir),
+		vmExporterVersion: version,
 	}
 }
 
@@ -49,12 +52,12 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 	// Try direct export first
 	fmt.Printf("📤 Attempting direct export via /api/v1/export...\n")
 	exportReader, err := client.Export(ctx, selector, config.TimeRange.Start, config.TimeRange.End)
-	
+
 	// Check if export failed due to missing route (export API not available)
 	if err != nil && s.isMissingRouteError(err) {
 		fmt.Printf("⚠️  Export API not available (error: %v)\n", err)
 		fmt.Println("⚠️  Falling back to query_range method")
-		
+
 		// Fallback to query_range
 		exportReader, err = s.exportViaQueryRange(ctx, client, selector, config.TimeRange)
 		if err != nil {
@@ -274,10 +277,10 @@ func (s *exportServiceImpl) buildArchiveMetadata(
 ) archive.ArchiveMetadata {
 	metadata := archive.ArchiveMetadata{
 		ExportID:          exportID,
-		ExportDate:        time.Now(),
+		ExportDate:        time.Now().UTC(),
 		TimeRange:         config.TimeRange,
-		Components:        config.Components,
-		Jobs:              config.Jobs,
+		Components:        uniqueStrings(config.Components),
+		Jobs:              uniqueStrings(config.Jobs),
 		MetricsCount:      metricsCount,
 		Obfuscated:        config.Obfuscation.Enabled,
 		VMExporterVersion: s.vmExporterVersion,
@@ -328,6 +331,22 @@ func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
 
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, v := range values {
+		if v == "" {
+			continue
+		}
+		if _, exists := seen[v]; exists {
+			continue
+		}
+		seen[v] = struct{}{}
+		result = append(result, v)
+	}
+	return result
+}
+
 // exportViaQueryRange exports metrics using query_range as fallback when /api/v1/export is not available
 // This method queries all series matching the selector and reconstructs export format
 func (s *exportServiceImpl) exportViaQueryRange(ctx context.Context, client *vm.Client, selector string, timeRange domain.TimeRange) (io.ReadCloser, error) {
@@ -362,7 +381,7 @@ func (s *exportServiceImpl) exportViaQueryRange(ctx context.Context, client *vm.
 
 	fmt.Printf("✅ Query_range completed in %v\n", time.Since(startTime))
 	fmt.Printf("   Series returned: %d\n", len(result.Data.Result))
-	
+
 	// Calculate total data points
 	totalDataPoints := 0
 	for _, series := range result.Data.Result {
@@ -374,7 +393,7 @@ func (s *exportServiceImpl) exportViaQueryRange(ctx context.Context, client *vm.
 	// Convert query_range result to export format (JSONL)
 	var buf bytes.Buffer
 	encoder := json.NewEncoder(&buf)
-	
+
 	convertStartTime := time.Now()
 	processedPoints := 0
 	lastProgressReport := time.Now()
@@ -398,21 +417,21 @@ func (s *exportServiceImpl) exportViaQueryRange(ctx context.Context, client *vm.
 
 			// Build export line in VictoriaMetrics export format
 			exportLine := map[string]interface{}{
-				"metric": series.Metric,
-				"values": []interface{}{valueStr},
+				"metric":     series.Metric,
+				"values":     []interface{}{valueStr},
 				"timestamps": []interface{}{int64(timestamp * 1000)}, // Convert to milliseconds
 			}
 
 			if err := encoder.Encode(exportLine); err != nil {
 				return nil, fmt.Errorf("failed to encode export line: %w", err)
 			}
-			
+
 			processedPoints++
-			
+
 			// Report progress every 5 seconds or every 10000 points
 			if time.Since(lastProgressReport) > 5*time.Second || processedPoints%10000 == 0 {
 				progress := float64(processedPoints) / float64(totalDataPoints) * 100
-				fmt.Printf("   Progress: %d/%d points (%.1f%%) - Series %d/%d\n", 
+				fmt.Printf("   Progress: %d/%d points (%.1f%%) - Series %d/%d\n",
 					processedPoints, totalDataPoints, progress, seriesIdx+1, len(result.Data.Result))
 				lastProgressReport = time.Now()
 			}
@@ -432,4 +451,3 @@ func (s *exportServiceImpl) generateExportID() string {
 	timestamp := time.Now().Unix()
 	return fmt.Sprintf("export-%d", timestamp)
 }
-

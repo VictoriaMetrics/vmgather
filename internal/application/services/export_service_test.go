@@ -14,7 +14,7 @@ import (
 
 // TestNewExportService tests service creation
 func TestNewExportService(t *testing.T) {
-	service := NewExportService("/tmp/test")
+	service := NewExportService("/tmp/test", "test-version")
 
 	if service == nil {
 		t.Fatal("expected non-nil service")
@@ -182,8 +182,8 @@ func TestExportService_BuildArchiveMetadata(t *testing.T) {
 
 	now := time.Now()
 	config := domain.ExportConfig{
-		Components: []string{"vmstorage", "vmselect"},
-		Jobs:       []string{"vmstorage-prod", "vmselect-prod"},
+		Components: []string{"vmstorage", "vmselect", "vmstorage"},
+		Jobs:       []string{"vmstorage-prod", "vmselect-prod", "vmstorage-prod"},
 		TimeRange: domain.TimeRange{
 			Start: now.Add(-1 * time.Hour),
 			End:   now,
@@ -212,9 +212,15 @@ func TestExportService_BuildArchiveMetadata(t *testing.T) {
 	if len(metadata.Components) != 2 {
 		t.Errorf("Components length = %d, want 2", len(metadata.Components))
 	}
+	if metadata.Components[0] != "vmstorage" || metadata.Components[1] != "vmselect" {
+		t.Errorf("Components order incorrect: %v", metadata.Components)
+	}
 
 	if len(metadata.Jobs) != 2 {
 		t.Errorf("Jobs length = %d, want 2", len(metadata.Jobs))
+	}
+	if metadata.Jobs[0] != "vmstorage-prod" || metadata.Jobs[1] != "vmselect-prod" {
+		t.Errorf("Jobs order incorrect: %v", metadata.Jobs)
 	}
 
 	if metadata.MetricsCount != 1500 {
@@ -227,6 +233,10 @@ func TestExportService_BuildArchiveMetadata(t *testing.T) {
 
 	if metadata.VMExporterVersion != "1.0.0-test" {
 		t.Errorf("VMExporterVersion = %v, want 1.0.0-test", metadata.VMExporterVersion)
+	}
+
+	if metadata.ExportDate.Location() != time.UTC {
+		t.Errorf("ExportDate location = %v, want UTC", metadata.ExportDate.Location())
 	}
 
 	if len(metadata.InstanceMap) != 1 {
@@ -356,9 +366,9 @@ func TestExportService_ApplyObfuscation(t *testing.T) {
 	// Create metric
 	metric := &vm.ExportedMetric{
 		Metric: map[string]string{
-			"__name__":  "vm_app_version",
-			"instance":  "10.0.1.5:8482",
-			"job":       "vmstorage-prod",
+			"__name__": "vm_app_version",
+			"instance": "10.0.1.5:8482",
+			"job":      "vmstorage-prod",
 		},
 		Values:     []interface{}{1.0},
 		Timestamps: []int64{1699728000000},
@@ -471,7 +481,7 @@ func TestExportService_Integration_NoObfuscation(t *testing.T) {
 
 	// This test would require actual VM instance or more sophisticated mocking
 	// For now, we verify service creation works
-	service := NewExportService(tmpDir)
+	service := NewExportService(tmpDir, "test-version")
 	if service == nil {
 		t.Fatal("expected non-nil service")
 	}
@@ -483,4 +493,3 @@ func TestExportService_Integration_NoObfuscation(t *testing.T) {
 	// This is better suited for E2E tests
 	t.Log("Integration test stub - full E2E requires VM instance")
 }
-

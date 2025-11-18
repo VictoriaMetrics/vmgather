@@ -31,7 +31,7 @@ func TestObfuscation_RealExport(t *testing.T) {
 		URL: "http://localhost:8428",
 	}
 
-	exportService := services.NewExportService(t.TempDir())
+	exportService := services.NewExportService(t.TempDir(), "integration-test")
 
 	config := domain.ExportConfig{
 		Connection: conn,
@@ -43,8 +43,8 @@ func TestObfuscation_RealExport(t *testing.T) {
 		Jobs:       []string{"vmagent"},
 		Obfuscation: domain.ObfuscationConfig{
 			Enabled:           true,
-			ObfuscateInstance: true,  // CRITICAL: Must be true
-			ObfuscateJob:      true,  // CRITICAL: Must be true
+			ObfuscateInstance: true, // CRITICAL: Must be true
+			ObfuscateJob:      true, // CRITICAL: Must be true
 			PreserveStructure: true,
 		},
 	}
@@ -66,28 +66,28 @@ func TestObfuscation_RealExport(t *testing.T) {
 		// Check that instance values are obfuscated (should be 777.777.777.777:port)
 		foundObfuscatedInstance := false
 		foundRealIP := false
-		
+
 		for _, metric := range metrics {
 			if instance, ok := metric.Metric["instance"]; ok {
 				t.Logf("Instance value: %s", instance)
-				
+
 				// Check if obfuscated (777.777.X.X:port format)
 				if strings.HasPrefix(instance, "777.777.") {
 					foundObfuscatedInstance = true
 				}
-				
+
 				// Check for real IP patterns (should NOT exist)
-				if strings.Contains(instance, "10.") || 
-				   strings.Contains(instance, "192.168.") ||
-				   strings.Contains(instance, "172.") {
+				if strings.Contains(instance, "10.") ||
+					strings.Contains(instance, "192.168.") ||
+					strings.Contains(instance, "172.") {
 					foundRealIP = true
 					t.Errorf("Found real IP in obfuscated data: %s", instance)
 				}
 			}
-			
+
 			if job, ok := metric.Metric["job"]; ok {
 				t.Logf("Job value: %s", job)
-				
+
 				// Job should be obfuscated (e.g., "vm_component_vmagent_1", "vm_component_vmauth_1")
 				if !strings.HasPrefix(job, "vm_component_") {
 					t.Errorf("Job not properly obfuscated: %s (expected vm_component_* format)", job)
@@ -116,7 +116,7 @@ func TestObfuscation_NoObfuscation(t *testing.T) {
 		URL: "http://localhost:8428",
 	}
 
-	exportService := services.NewExportService(t.TempDir())
+	exportService := services.NewExportService(t.TempDir(), "integration-test")
 
 	config := domain.ExportConfig{
 		Connection: conn,
@@ -127,7 +127,7 @@ func TestObfuscation_NoObfuscation(t *testing.T) {
 		Components: []string{"vmagent"},
 		Jobs:       []string{"vmagent"},
 		Obfuscation: domain.ObfuscationConfig{
-			Enabled: false,  // Disabled
+			Enabled: false, // Disabled
 		},
 	}
 
@@ -140,7 +140,7 @@ func TestObfuscation_NoObfuscation(t *testing.T) {
 	require.NotEmpty(t, metrics, "Should have metrics in archive")
 
 	foundObfuscatedInstance := false
-	
+
 	for _, metric := range metrics {
 		if instance, ok := metric.Metric["instance"]; ok {
 			// Should NOT have 777.777.777.X pattern
@@ -170,7 +170,7 @@ func TestObfuscation_OnlyInstance(t *testing.T) {
 		URL: "http://localhost:8428",
 	}
 
-	exportService := services.NewExportService(t.TempDir())
+	exportService := services.NewExportService(t.TempDir(), "integration-test")
 
 	config := domain.ExportConfig{
 		Connection: conn,
@@ -182,8 +182,8 @@ func TestObfuscation_OnlyInstance(t *testing.T) {
 		Jobs:       []string{"vmagent"},
 		Obfuscation: domain.ObfuscationConfig{
 			Enabled:           true,
-			ObfuscateInstance: true,   // Only instance
-			ObfuscateJob:      false,  // NOT job
+			ObfuscateInstance: true,  // Only instance
+			ObfuscateJob:      false, // NOT job
 			PreserveStructure: true,
 		},
 	}
@@ -198,14 +198,14 @@ func TestObfuscation_OnlyInstance(t *testing.T) {
 
 	foundObfuscatedInstance := false
 	foundOriginalJob := false
-	
+
 	for _, metric := range metrics {
 		if instance, ok := metric.Metric["instance"]; ok {
 			if strings.HasPrefix(instance, "777.777.") {
 				foundObfuscatedInstance = true
 			}
 		}
-		
+
 		if job, ok := metric.Metric["job"]; ok {
 			// Job should be original (not obfuscated with vm_component_ prefix)
 			if !strings.HasPrefix(job, "vm_component_") {
@@ -247,7 +247,7 @@ func extractMetricsFromArchive(t *testing.T, archivePath string) []vm.ExportedMe
 					continue
 				}
 				metrics = append(metrics, metric)
-				
+
 				// Limit to first 100 for testing
 				if len(metrics) >= 100 {
 					return metrics
@@ -258,4 +258,3 @@ func extractMetricsFromArchive(t *testing.T, archivePath string) []vm.ExportedMe
 
 	return metrics
 }
-

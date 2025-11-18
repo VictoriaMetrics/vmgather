@@ -16,13 +16,13 @@ func TestRealScenario_VMAuthWithTenant(t *testing.T) {
 	// This is the EXACT config user has (but via nginx proxy with domain)
 	config := domain.ExportConfig{
 		Connection: domain.VMConnection{
-			URL:         "http://localhost:8888",  // Nginx proxy (simulates domain)
-			ApiBasePath: "/1011/rw/prometheus",          // Tenant + /rw path (not /prometheus!)
+			URL:         "http://localhost:8888", // Nginx proxy (simulates domain)
+			ApiBasePath: "/1011/rw/prometheus",   // Tenant + /rw path (not /prometheus!)
 			TenantId:    "1011",
 			Auth: domain.AuthConfig{
 				Type:     domain.AuthTypeBasic,
-				Username: "tenant1011-user",  // Use correct user for tenant 1011
-				Password: "tenant1011-pass",
+				Username: "monitoring-rw",
+				Password: "secret-rw-pass",
 			},
 		},
 		TimeRange: domain.TimeRange{
@@ -30,7 +30,7 @@ func TestRealScenario_VMAuthWithTenant(t *testing.T) {
 			End:   time.Now(),
 		},
 		Components: []string{"vmagent", "vmstorage"},
-		Jobs:       []string{"vmagent-prometheus", "vm-storage-zone-a"},
+		Jobs:       []string{},
 	}
 
 	// Create VM service
@@ -42,7 +42,7 @@ func TestRealScenario_VMAuthWithTenant(t *testing.T) {
 		defer cancel()
 
 		components, err := vmService.DiscoverComponents(ctx, config.Connection, config.TimeRange)
-		
+
 		if err != nil {
 			t.Logf("❌ Discovery failed: %v", err)
 			// Check if error contains empty URL
@@ -68,7 +68,7 @@ func TestRealScenario_VMAuthWithTenant(t *testing.T) {
 		defer cancel()
 
 		samples, err := vmService.GetSample(ctx, config, 5)
-		
+
 		if err != nil {
 			t.Logf("❌ Sample failed: %v", err)
 			// Check if error contains empty URL
@@ -92,25 +92,25 @@ func TestRealScenario_VMAuthWithTenant(t *testing.T) {
 
 	// Test 3: Export (uses /api/v1/export)
 	t.Run("Export", func(t *testing.T) {
-		exportService := services.NewExportService("./test-exports")
-		
+		exportService := services.NewExportService("./test-exports", "integration-test")
+
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
 		result, err := exportService.ExecuteExport(ctx, config)
-		
+
 		if err != nil {
 			t.Logf("❌ Export failed: %v", err)
-			
+
 			// Check for common errors
 			if err.Error() == "unsupported protocol scheme \"\"" {
 				t.Fatal("🔴 BUG FOUND: URL is empty! Connection.URL was not passed correctly to client")
 			}
-			
+
 			if contains(err.Error(), "missing route for") {
 				t.Fatalf("🔴 BUG FOUND: VMAuth doesn't recognize path '/1011/rw/prometheus/api/v1/export'. Path construction is wrong!")
 			}
-			
+
 			t.Fatalf("Export failed: %v", err)
 		}
 
@@ -171,7 +171,7 @@ func TestURLParsing_AllFormats(t *testing.T) {
 			t.Logf("Expected URL: %s", tt.expectedURL)
 			t.Logf("Expected Path: %s", tt.expectedPath)
 			t.Logf("Expected Tenant: %s", tt.expectedTenant)
-			
+
 			// TODO: Add actual URL parsing logic here when we know the bug
 		})
 	}
@@ -189,4 +189,3 @@ func indexOf(s, substr string) int {
 	}
 	return -1
 }
-

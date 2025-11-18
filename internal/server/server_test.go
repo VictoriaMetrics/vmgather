@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ func TestServer_GetSampleDataFromResult(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	server := NewServer(tmpDir)
+	server := NewServer(tmpDir, "test-version")
 	ctx := context.Background()
 
 	// Create a mock config
@@ -48,10 +49,7 @@ func TestServer_GetSampleDataFromResult(t *testing.T) {
 	// Test with empty samples (should return empty array, not error)
 	sampleData := server.getSampleDataFromResult(ctx, config)
 	if sampleData == nil {
-		t.Error("getSampleDataFromResult should return empty array, not nil")
-	}
-	if len(sampleData) != 0 {
-		t.Errorf("Expected empty array for no samples, got %d items", len(sampleData))
+		t.Error("getSampleDataFromResult should return non-nil array")
 	}
 }
 
@@ -64,7 +62,7 @@ func TestServer_HandleGetSample_ResponseFormat(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	server := NewServer(tmpDir)
+	server := NewServer(tmpDir, "test-version")
 
 	// Create request
 	reqBody := map[string]interface{}{
@@ -97,7 +95,6 @@ func TestServer_HandleGetSample_ResponseFormat(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	// Call handler
 	handler := server.Router()
 	handler.ServeHTTP(w, req)
 
@@ -177,3 +174,98 @@ func TestServer_HandleGetSample_ResponseFormat(t *testing.T) {
 	}
 }
 
+func TestServer_GetSampleDataFromResult_ObfuscatesWhenEnabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	server := NewServer(tmpDir, "test-version")
+
+	server.vmService = &mockVMService{
+		samples: []domain.MetricSample{
+			{
+				MetricName: "go_mem",
+				Labels: map[string]string{
+					"instance": "10.0.0.1:8428",
+					"job":      "vmagent",
+				},
+			},
+		},
+	}
+
+	config := domain.ExportConfig{
+		Connection: domain.VMConnection{
+			URL: "http://example.com",
+		},
+		Obfuscation: domain.ObfuscationConfig{
+			Enabled:           true,
+			ObfuscateInstance: true,
+			ObfuscateJob:      true,
+		},
+	}
+
+	data := server.getSampleDataFromResult(context.Background(), config)
+	if len(data) != 1 {
+		t.Fatalf("expected 1 sample, got %d", len(data))
+	}
+
+	labels, ok := data[0]["labels"].(map[string]string)
+	if !ok {
+		t.Fatalf("labels type mismatch: %T", data[0]["labels"])
+	}
+
+	if strings.Contains(labels["instance"], "10.0.0.1") {
+		t.Errorf("instance label was not obfuscated: %s", labels["instance"])
+	}
+	if labels["job"] == "vmagent" {
+		t.Errorf("job label was not obfuscated: %s", labels["job"])
+	}
+}
+
+func TestServer_GetSampleDataFromResult_NoSamplesMock(t *testing.T) {
+	tmpDir := t.TempDir()
+	server := NewServer(tmpDir, "test-version")
+	server.vmService = &mockVMService{
+		samples: []domain.MetricSample{},
+	}
+
+	config := domain.ExportConfig{
+		Connection: domain.VMConnection{URL: "http://localhost:8428"},
+		Obfuscation: domain.ObfuscationConfig{
+			Enabled: false,
+		},
+	}
+
+	data := server.getSampleDataFromResult(context.Background(), config)
+	if data == nil {
+		t.Fatal("expected non-nil slice")
+	}
+	if len(data) != 0 {
+		t.Fatalf("expected zero samples, got %d", len(data))
+	}
+}
+
+type mockVMService struct {
+	samples   []domain.MetricSample
+	sampleErr error
+}
+
+func (m *mockVMService) ValidateConnection(ctx context.Context, conn domain.VMConnection) error {
+	return nil
+}
+
+func (m *mockVMService) DiscoverComponents(ctx context.Context, conn domain.VMConnection, tr domain.TimeRange) ([]domain.VMComponent, error) {
+	return nil, nil
+}
+
+func (m *mockVMService) GetSample(ctx context.Context, config domain.ExportConfig, limit int) ([]domain.MetricSample, error) {
+	if m.sampleErr != nil {
+		return nil, m.sampleErr
+	}
+	return m.samples, nil
+}
+
+func (m *mockVMService) EstimateExportSize(ctx context.Context, conn domain.VMConnection, jobs []string, tr domain.TimeRange) (int, error) {
+	return 0, nil
+}
+
+func (m *mockVMService) CheckExportAPI(ctx context.Context, conn domain.VMConnection) bool {
+	return true
+}

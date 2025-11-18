@@ -95,8 +95,8 @@ make build
 2. **Connect** to VictoriaMetrics single, cluster, or managed endpoints (`vmselect`, `vmagent`, VMAuth, MaaS paths).
 3. **Validate** credentials and detect components.
 4. **Preview** metrics via sampling API calls.
-5. **Configure obfuscation** for IPs, jobs, or extra labels.
-6. **Export** – the backend streams `/api/v1/export`, obfuscates records, and creates a zip bundle with metadata + checksums.
+5. **Configure obfuscation** for IPs, jobs, or extra labels and review the estimated number of series that will be exported per component/job.
+6. **Export** – the backend streams `/api/v1/export`, obfuscates records (including sample previews), and creates a zip bundle with metadata + checksums.
 
 See [docs/user-guide.md](docs/user-guide.md) for UI screenshots and parameter descriptions.
 
