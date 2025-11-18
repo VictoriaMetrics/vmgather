@@ -1,17 +1,26 @@
-## What does this PR do?
+## Summary
 
-Brief description of changes.
+Describe the scope and intent of the change. Reference design docs or issues when relevant.
 
-## Related Issues
+## Testing
 
-Closes #XXX
+List the commands you ran (copy/paste). Example:
+
+```bash
+make lint
+make test
+make test-e2e
+```
 
 ## Checklist
 
+- [ ] Documentation updated (README/docs/local-test-env)
 - [ ] Tests added/updated
-- [ ] CHANGELOG.md updated
-- [ ] Documentation updated (if needed)
-- [ ] Code follows Go style guidelines
-- [ ] All tests passing (`make test`)
-- [ ] E2E tests passing (`make test-e2e`)
+- [ ] `make lint` and `make test` pass locally
+- [ ] E2E / scenario suites executed when applicable
+- [ ] `CHANGELOG.md` updated
+- [ ] No generated files or build artifacts committed
 
+## Issue tracker
+
+Closes #XXX

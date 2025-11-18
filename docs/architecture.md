@@ -1,229 +1,84 @@
-# VMExporter Architecture
+# VMExporter architecture
 
-## Overview
+A high-level breakdown of how the VictoriaMetrics metrics exporter is structured internally.
 
-VMExporter is a standalone Go application that exports VictoriaMetrics internal metrics for support diagnostics.
+## Guiding principles
 
-## Design Principles
+- **Single binary** – UI assets are embedded and the HTTP server binds to localhost only.
+- **Privacy-first** – the pipeline obfuscates data as it streams instead of handling temporary plaintext copies.
+- **Stateless** – no configuration files or databases; everything is supplied per-run.
+- **Predictable UX** – the same 6-step flow as other VictoriaMetrics utilities.
 
-- **Single Binary**: No external dependencies
-- **Web-Based UI**: Cross-platform compatibility
-- **Privacy First**: Data obfuscation built-in
-- **Streaming**: Memory-efficient for large exports
-- **Stateless**: No data persistence
+## Component overview
 
-## System Components
+| Layer | Package | Responsibility |
+| --- | --- | --- |
+| Presentation | `internal/server` | Hosts the HTTP server, serves static assets, exposes REST endpoints to the UI. |
+| Application | `internal/application/services` | Orchestrates validation, discovery, sampling, and export workflows. |
+| Infrastructure | `internal/infrastructure/vm` | VictoriaMetrics client (query, export APIs, auth, multitenancy). |
+| Infrastructure | `internal/infrastructure/obfuscation` | Deterministic obfuscation for IPs/jobs/custom labels. |
+| Infrastructure | `internal/infrastructure/archive` | Streams export data, writes metadata, generates ZIP + checksum. |
+| Domain | `internal/domain` | Shared types/configs used across the stack. |
 
-### Frontend (Web UI)
+### Frontend
 
-- **Technology**: Vanilla JavaScript + HTML/CSS
-- **Embedded**: Static files embedded in Go binary
-- **Flow**: 6-step wizard interface
-- **Features**:
-  - Time range selection (presets + datetime picker)
-  - Multi-stage connection validation
-  - Component discovery and selection
-  - Sample data preview
-  - Obfuscation configuration
-  - Real-time export progress
+- Vanilla JS + HTML/CSS, compiled and embedded via `go:embed`.
+- Implements the wizard, validation states, and progress updates.
+- Communicates only with the local server (`/api/*` endpoints).
 
-### Backend (Go HTTP Server)
+### Backend
 
-- **Technology**: Go 1.21+ standard library
-- **Port**: 8080 (auto-selects if busy)
-- **API**: REST endpoints for frontend
-- **Features**:
-  - HTTP server with embedded static files
-  - VictoriaMetrics client
-  - Streaming metrics export
-  - Data obfuscation
-  - ZIP archive creation
+- Go 1.21+ HTTP server using the standard library.
+- Selects a random available port on startup (to avoid conflicts).
+- Provides REST APIs mirroring other VictoriaMetrics tools.
 
-## Architecture Layers
-
-### 1. Presentation Layer
-
-**HTTP Server** (`internal/server`)
-- Serves web UI
-- REST API endpoints
-- Request/response handling
-
-### 2. Application Layer
-
-**Services** (`internal/application/services`)
-- VMService: Component discovery, metrics sampling
-- ExportService: Full export workflow orchestration
-
-### 3. Infrastructure Layer
-
-**VM Client** (`internal/infrastructure/vm`)
-- HTTP client for VictoriaMetrics API
-- Query execution (/api/v1/query, /api/v1/export)
-- Authentication handling
-- Multi-tenant support
-
-**Obfuscator** (`internal/infrastructure/obfuscation`)
-- IP address obfuscation (777.777.x.x pool)
-- Job name obfuscation
-- Label obfuscation (user-selected)
-- Deterministic mapping
-
-**Archive Writer** (`internal/infrastructure/archive`)
-- ZIP archive creation
-- Metadata file generation
-- SHA256 checksum calculation
-
-### 4. Domain Layer
-
-**Types** (`internal/domain`)
-- Core data structures
-- Business entities
-- Configuration models
-
-## Data Flow
+## Data flow
 
 ```
-User → Web UI → HTTP Server → VMService → VM Client → VictoriaMetrics
-                                    ↓
-                              ExportService
-                                    ↓
-                              Obfuscator (optional)
-                                    ↓
-                              Archive Writer
-                                    ↓
-                              ZIP Download → User
+Browser
+  ↓ (REST)
+internal/server (HTTP handler)
+  ↓
+application/services.VMService
+  ↓
+infrastructure/vm.Client ───→ VictoriaMetrics API
+  ↓                                         ↑
+application/services.ExportService          │
+  ↓                                         │
+infrastructure/obfuscation.Manager          │
+  ↓                                         │
+infrastructure/archive.Writer ──────────────┘
+  ↓
+ZIP archive → browser download
 ```
 
-## API Endpoints
+## API surface
 
-### POST /api/validate
-Validates VictoriaMetrics connection.
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/validate` | Checks reachability, auth, and returns detected VM flavour + version. |
+| `POST /api/discover` | Finds available components and jobs via `vm_app_version`. |
+| `POST /api/sample` | Fetches preview metrics (up to a safe limit) for UI confirmation. |
+| `POST /api/export` | Executes the export workflow, streaming data into a temporary archive. |
+| `GET /api/download?path=…` | Returns the generated ZIP file. |
 
-**Request:**
-```json
-{
-  "url": "http://localhost:8428",
-  "auth": {"type": "none"}
-}
-```
+All endpoints accept/return JSON with error details suitable for UI presentation.
 
-**Response:**
-```json
-{
-  "success": true,
-  "version": "v1.95.1",
-  "vm_components": ["vmsingle"]
-}
-```
+## Obfuscation
 
-### POST /api/discover
-Discovers VM components and jobs.
+- **IPs** – replaced with `777.777.X.Y`, retaining port numbers and component grouping.
+- **Jobs** – renamed to `<component>-job-<n>` while keeping the original component prefix.
+- **Custom labels** – user-provided keys; mappings kept in memory for the session, not persisted.
+- **Deterministic** – the same input within a session maps to the same output so support can correlate metrics.
 
-**Response:**
-```json
-{
-  "components": [
-    {
-      "name": "vmstorage",
-      "jobs": ["vmstorage-0", "vmstorage-1"]
-    }
-  ]
-}
-```
+## Security characteristics
 
-### POST /api/sample
-Fetches sample metrics for preview.
+- Credentials remain in memory only for the duration of the call and are never written to disk.
+- The HTTP server binds to `localhost` and random ports to lower the risk surface.
+- Temporary files are removed immediately after the bundle is downloaded or when the process exits.
 
-**Response:**
-```json
-{
-  "metrics": [
-    {
-      "name": "vm_rows",
-      "labels": {"instance": "localhost:8482", "job": "vmstorage"}
-    }
-  ]
-}
-```
+## Testing hooks
 
-### POST /api/export
-Executes full metrics export.
-
-**Response:**
-```json
-{
-  "archive_path": "/tmp/export_123.zip",
-  "sample_data": [...]
-}
-```
-
-### GET /api/download?path=...
-Downloads the export archive.
-
-## Obfuscation Strategy
-
-### IP Addresses
-- Original: `192.168.1.10:8482`
-- Obfuscated: `777.777.1.1:8482`
-- Port preserved for debugging
-
-### Job Names
-- Original: `production-vmstorage`
-- Obfuscated: `vmstorage-job-1`
-- Component type preserved
-
-### Custom Labels
-- User selects labels to obfuscate
-- Deterministic mapping (same input = same output)
-- Mapping stored in `obfuscation_map.json`
-
-## Security
-
-### Credentials
-- Never persisted to disk
-- Never logged
-- Transmitted only to VictoriaMetrics
-- Cleared from memory after use
-
-### TLS
-- Supports HTTPS connections
-- Optional TLS verification skip
-
-### Obfuscation
-- Deterministic (reversible with map)
-- Preserves structure for debugging
-- User controls what to obfuscate
-
-## Testing
-
-### Unit Tests (50+)
-- Domain logic
-- VM client
-- Obfuscation
-- Archive creation
-
-### E2E Tests (31)
-- Playwright browser automation
-- Full wizard flow
-- Multi-stage validation
-- Real VictoriaMetrics instances
-
-### Integration Tests (14 scenarios)
-- Docker Compose environment
-- VMSingle, VMCluster, VMAuth
-- Various authentication methods
-- Multitenant configurations
-
-## Performance
-
-### Memory
-- Streaming architecture
-- No full dataset in memory
-- Suitable for large exports
-
-### Speed
-- Parallel processing where possible
-- Efficient JSONL parsing
-- Compressed output
-
-
+- Unit tests cover domain logic, VM API client edge cases, obfuscation permutations, and archive writing.
+- Integration tests spin up VictoriaMetrics flavours through `local-test-env`.
+- Playwright E2E suites exercise the complete wizard flow, ensuring API contracts stay stable.

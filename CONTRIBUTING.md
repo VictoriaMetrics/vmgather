@@ -1,77 +1,81 @@
 # Contributing to VMExporter
 
-Thank you for your interest in contributing to VMExporter!
+Thanks for helping improve the VictoriaMetrics toolchain! The guidelines below mirror the workflow we use across other VictoriaMetrics repositories.
 
-## Reporting Issues
+## Report bugs and feature requests
 
-Please use GitHub Issues to report bugs or request features.
+- Use [GitHub Issues](https://github.com/VictoriaMetrics/support/issues) for all defects, regressions, and feature proposals.
+- Please attach:
+  - VMExporter version (binary name or git commit),
+  - OS / architecture,
+  - VictoriaMetrics flavour (single / cluster / managed) and version,
+  - Exact repro steps and expected behaviour,
+  - Logs or screenshots if applicable.
 
-When reporting bugs, include:
-- VMExporter version
-- Operating system and architecture
-- VictoriaMetrics version
-- Steps to reproduce
-- Expected vs actual behavior
-- Relevant logs
+Security-sensitive problems should be reported privately via `info@victoriametrics.com`. See [SECURITY.md](SECURITY.md).
 
-## Development Setup
+## Development environment
 
-### Prerequisites
+Prerequisites:
 
-- Go 1.21 or later
-- Make
-- Docker (for integration tests)
+- Go 1.21 or newer,
+- GNU Make,
+- Docker (integration tests),
+- Node.js 18+ and npm (E2E UI tests).
 
-### Building
+Bootstrap:
 
 ```bash
-# Clone repository
 git clone https://github.com/VictoriaMetrics/support.git
-cd vmexporter
-
-# Build
+cd support
+make deps        # optional helper to download UI deps
 make build
-
-# Run tests
-make test
-
-# Run E2E tests
-make test-e2e
 ```
 
-### Project Structure
+`./vmexporter` starts the local UI on a random port.
+
+## Project layout
 
 ```
-cmd/vmexporter/        - Main application entry point
-internal/domain/       - Domain models and types
-internal/application/  - Business logic services
-internal/infrastructure/ - External integrations (VM client, obfuscation, archive)
-internal/server/       - HTTP server and API
-tests/e2e/            - End-to-end tests (Playwright)
+cmd/vmexporter/             - CLI entry point
+internal/server/            - HTTP server + embedded static assets
+internal/application/       - services orchestrating validation/export
+internal/infrastructure/    - VictoriaMetrics client, obfuscation, archive writer
+internal/domain/            - shared types and config
+tests/e2e/                  - Playwright specs
+local-test-env/             - docker-compose for VictoriaMetrics scenarios
+docs/                       - public documentation
+dist/                       - release artifacts (generated)
 ```
 
-### Code Style
+## Coding standards
 
-- Follow standard Go conventions
-- Add tests for new functionality
-- Update CHANGELOG.md for significant changes
-- Keep commits focused and atomic
+- Run `make lint` to execute Go linters consistent with VictoriaMetrics defaults.
+- All new functionality must include unit tests; UI changes should include E2E coverage when practical.
+- Update [docs](docs/) and [CHANGELOG.md](CHANGELOG.md) when observable behaviour changes.
+- Keep commits focused; large features should be split into logical pieces.
 
-### Pull Requests
+## Testing checklist
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add/update tests
-5. Ensure all tests pass
-6. Update documentation if needed
-7. Submit pull request
+```bash
+make test             # Go unit tests
+INTEGRATION_TEST=1 go test ./tests/integration/...
+make test-e2e         # Playwright (requires local-test-env)
+make test-scenarios   # runs curated Docker scenarios
+```
 
-## Questions?
+Use `local-test-env/README.md` to spin up VictoriaMetrics flavours before E2E/integration runs.
 
-For questions, please open a GitHub Issue or contact info@victoriametrics.com
+## Pull requests
+
+1. Fork and create a topic branch (`feature/export-improvements`).
+2. Implement the change with tests.
+3. Run the relevant test suites and linting commands.
+4. Update docs/CHANGELOG as needed.
+5. Fill out `.github/PULL_REQUEST_TEMPLATE.md` and submit a PR.
+
+Maintainers will review for correctness, style, and release impact. We may ask for additional tests or documentation before merging.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under Apache 2.0.
-
+By contributing, you agree that your work is licensed under the [Apache 2.0 License](LICENSE), the same as the rest of the project.

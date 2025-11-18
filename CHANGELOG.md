@@ -1,27 +1,25 @@
 # Changelog
 
-## v0.9.0-beta (2025-11-12)
+All notable changes to VMExporter are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and versions adhere to semantic versioning.
 
-Initial beta release.
+## [v0.9.0-beta] - 2025-11-12
 
-**Features:**
-- Web-based wizard UI (6-step flow)
-- VictoriaMetrics metrics export via /api/v1/export
-- Data obfuscation (IP addresses with 777.777.x.x, job names)
-- Multi-tenant support
-- Cross-platform binaries (8 architectures)
-- Multiple authentication methods (Basic, Bearer, Header, None)
-- Automatic component discovery
-- Real-time export progress
+### Added
+- Embedded 6-step wizard UI with automatic browser launch.
+- VictoriaMetrics discovery across vmagent, vmalert, vmstorage, vminsert, vmselect, and vmsingle.
+- Deterministic obfuscation for IPs, job labels, and user-selected labels.
+- Multi-tenant authentication (Basic, Bearer, VMAuth header passthrough).
+- Streaming export through `/api/v1/export` with ZIP packaging and metadata manifest.
+- Cross-platform build matrix covering Linux, macOS, and Windows (amd64/arm64/386).
 
-**Testing:**
-- 50+ unit tests
-- 31 E2E tests (Playwright)
-- 14 Docker test scenarios
+### Testing
+- 50+ unit tests across domain logic and infrastructure adapters.
+- 31 Playwright E2E tests spanning happy path, auth failures, and retries.
+- 14 curated Docker scenarios in `local-test-env` to emulate VictoriaMetrics single/cluster/managed setups.
 
-**Known Issues:**
-- Limited production testing
-- API may change in future versions
-- Documentation is minimal
+### Known issues
+- Beta quality: API contract may change before v1.0.
+- Limited production telemetry; feedback is welcome.
+- UI localisation and accessibility are not final.
 
-**Feedback:** Please report issues on GitHub.
+Please report regressions or feature requests via GitHub issues or info@victoriametrics.com.

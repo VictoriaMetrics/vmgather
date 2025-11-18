@@ -1,116 +1,93 @@
-# VMExporter User Guide
+# VMExporter user guide
 
-## Overview
+Official walkthrough for the VictoriaMetrics metrics export wizard.
 
-VMExporter is a tool for exporting VictoriaMetrics internal metrics to help support teams diagnose issues.
+## Contents
 
-## Installation
+1. [Before you start](#before-you-start)
+2. [Launch and connection](#launch-and-connection)
+3. [Wizard steps](#wizard-steps)
+4. [Export bundle](#export-bundle)
+5. [Troubleshooting](#troubleshooting)
+6. [Support](#support)
 
-### Download Binary
+## Before you start
 
-1. Go to [Releases](https://github.com/VictoriaMetrics/support/releases)
-2. Download binary for your platform
-3. Make it executable: `chmod +x vmexporter-*`
+- Download the latest binary from the [Releases page](https://github.com/VictoriaMetrics/support/releases).
+- Verify the SHA256 checksum using the `checksums.txt` file.
+- Ensure you have reachability to your VictoriaMetrics endpoints (single, cluster, VMAuth, or managed).
+- Have credentials ready for tenants that require authentication.
 
-### Verify Download
+## Launch and connection
 
-Check SHA256 checksum:
-```bash
-sha256sum vmexporter-linux-amd64
-# Compare with checksums.txt from release
-```
+1. Run the binary for your platform (`./vmexporter-vX.Y.Z-linux-amd64`, `vmexporter-vX.Y.Z-windows-amd64.exe`, etc.).
+2. The application opens a browser window at `http://localhost:<random-port>`.
+3. The landing page shows the 6-step wizard with the current step highlighted.
 
-## Usage
+### Supported target URLs
 
-### Step 1: Start VMExporter
+- VMSingle: `https://vm.example.com:8428`
+- VMCluster (tenant 0): `https://vmselect.example.com:8481/select/0/prometheus`
+- VMCluster + VMAuth: `https://vmauth.example.com/select/0/prometheus`
+- VictoriaMetrics Managed / MaaS: `https://<tenant>.victoriametrics.cloud/<tenant-id>/rw/prometheus`
 
-```bash
-./vmexporter-darwin-arm64  # macOS
-# or
-./vmexporter-linux-amd64   # Linux
-# or
-vmexporter-windows-amd64.exe  # Windows
-```
+### Authentication
 
-Browser opens automatically at http://localhost:8080
-
-### Step 2: Select Time Range
-
-Choose time range for metrics export:
-- Preset options: Last 15min, 1h, 6h, 24h
-- Custom range: Use datetime picker
-
-### Step 3: Configure Connection
-
-Enter VictoriaMetrics connection details:
-
-**URL Examples:**
-- VMSingle: `http://localhost:8428`
-- VMCluster: `http://vmselect:8481/select/0/prometheus`
-- Multitenant: `http://vmselect:8481/select/multitenant`
-
-**Authentication:**
-- None
+- None (default)
 - Basic Auth (username/password)
 - Bearer Token
-- Custom Header
+- Custom header (key + value) for VMAuth deployments
 
-### Step 4: Test Connection
+## Wizard steps
 
-Click "Test Connection" to verify:
-- URL is reachable
-- Authentication works
-- VictoriaMetrics is detected
+| Step | Description |
+| --- | --- |
+| 1. **Time range** | Choose presets (15m, 1h, 6h, 24h) or define custom start/end timestamps. |
+| 2. **Connection** | Enter URL + auth method. |
+| 3. **Validation** | Click **Test connection**. VMExporter checks reachability, detects product flavour, and confirms `/api/v1/export` availability. |
+| 4. **Component discovery** | Select which VictoriaMetrics components, tenants, and jobs to include. UI lists everything found via `vm_app_version` metrics. |
+| 5. **Obfuscation** | Enable anonymisation for IPs, job labels, or add custom label keys. Mapping remains deterministic during the export session. |
+| 6. **Summary** | Review time range, target, authentication, and components before exporting. |
 
-### Step 5: Select Components
+Each card contains hints and sample values matching VictoriaMetrics defaults.
 
-Choose which VM components to export:
-- vmstorage
-- vmselect
-- vminsert
-- vmagent
-- vmalert
-- vmsingle
+## Export bundle
 
-### Step 6: Configure Obfuscation (Optional)
+Click **Start export** to execute the workflow:
 
-Protect sensitive data:
-- **IP Addresses**: Replace with 777.777.x.x
-- **Job Names**: Replace with generic names
-- **Custom Labels**: Select any label for obfuscation
+1. VMExporter streams data via `/api/v1/export` (and falls back to `query_range` when needed).
+2. Data is obfuscated on the fly.
+3. Archive contents are written to a temporary directory:
+   - `metrics.jsonl` – raw metrics dump.
+   - `metadata.json` – VictoriaMetrics versions, selected components, timeframe, and checksums.
+   - `README.txt` – human-readable summary for support.
+4. A ZIP archive is produced with SHA256 checksum displayed on completion.
 
-### Step 7: Export
-
-Click "Start Export" to:
-1. Fetch metrics from VictoriaMetrics
-2. Apply obfuscation (if enabled)
-3. Create ZIP archive
-4. Download to your computer
+Downloads start automatically in the browser; you can also retrieve the archive via the **Download again** button.
 
 ## Troubleshooting
 
-### Connection Failed
+### “Connection failed”
 
-- Verify URL is correct
-- Check authentication credentials
-- Ensure VictoriaMetrics is accessible
-- Check firewall rules
+- Confirm the URL is reachable with `curl`.
+- Validate credentials (VMAuth may require a tenant prefix).
+- For managed clusters, ensure path rewriting is correct (`/rw/prometheus` vs `/prometheus`).
 
-### No Components Found
+### “No components discovered”
 
-- Verify VictoriaMetrics is running
-- Check `vm_app_version` metric exists
-- Try different time range
+- Check that `vm_app_version` metrics are available.
+- Confirm the time range overlaps with active scraping.
+- For multi-tenant cases, ensure you selected the correct tenant ID or VMAuth route.
 
-### Export Too Large
+### “Export timed out” / archive too large
 
-- Reduce time range
-- Select fewer components
-- Export specific jobs only
+- Narrow the time range or deselect unused components/jobs.
+- Use the scenario environment described in `local-test-env/README.md` to reproduce locally.
+- Inspect browser console logs for network failures if the UI becomes unresponsive.
 
 ## Support
 
-- GitHub Issues: https://github.com/VictoriaMetrics/support/issues
+- Documentation updates: [docs/](../docs/)
+- Issues: https://github.com/VictoriaMetrics/support/issues
 - Email: info@victoriametrics.com
 - Slack: https://slack.victoriametrics.com/
-
