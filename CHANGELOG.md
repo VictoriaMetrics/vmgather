@@ -2,6 +2,23 @@
 
 All notable changes to VMExporter are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and versions adhere to semantic versioning.
 
+## [v0.9.7-beta] - 2025-11-18
+
+### Added
+- Summary card on the obfuscation step with per-component and per-job series estimates (backed by new job metrics in discovery API).
+- Full-sample obfuscation pipeline: advanced label picker, preview data, and exported ZIP now share the same settings.
+- Playwright regression spec for connection validation quirks and IPv4-friendly test helpers for stable CI.
+
+### Changed
+- Step 3 help starts collapsed and the URL validator now rejects malformed strings instead of blindly prepending `http://`.
+- README, user guide, and architecture notes document the stricter validation, sample handling, and release workflow updates.
+- VMAuth integration test uses the production credentials and `/1011/rw/prometheus` path that customers actually hit.
+
+### Fixed
+- Sample API responses always include a `name` field and apply obfuscation immediately, eliminating `undefined` labels in the UI.
+- Export metadata now records unique components/jobs, UTC timestamps, and the actual binary version.
+- `/api/sample` and Playwright error scenarios show consistent loading/error states, keeping the wizard responsive.
+
 ## [v0.9.0-beta] - 2025-11-12
 
 ### Added
