@@ -294,6 +294,173 @@
             margin-top: 6px;
         }
 
+        .dir-input-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            position: relative;
+        }
+
+        .dir-input-row input {
+            flex: 1;
+        }
+
+        .btn-inline {
+            padding: 10px 16px;
+            border-radius: 6px;
+            border: 1px solid #d0d0d0;
+            background: #fff;
+            cursor: pointer;
+        }
+
+        .btn-inline:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-danger {
+            background: #ffebee;
+            border: 1px solid #f44336;
+            color: #c62828;
+        }
+
+        .btn-danger:hover:not(:disabled) {
+            background: #ffcdd2;
+        }
+
+        .dir-picker-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .dir-picker-overlay.visible {
+            display: flex;
+        }
+
+        .dir-picker-popover {
+            width: min(420px, 92vw);
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 18px 50px rgba(0,0,0,0.25);
+            padding: 16px;
+        }
+
+        .dir-picker-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 6px;
+        }
+
+        .dir-picker-current {
+            font-size: 13px;
+            color: #222;
+            font-weight: 600;
+            word-break: break-all;
+        }
+
+        .dir-picker-actions {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+
+        .dir-picker-list {
+            max-height: 220px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .dir-picker-list button {
+            width: 100%;
+            text-align: left;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid #eee;
+            background: #fafafa;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .dir-picker-list button:hover {
+            background: #f7f9ff;
+        }
+
+        .dir-picker-list button.readonly {
+            color: #888;
+            border-style: dashed;
+        }
+
+        .dir-picker-status {
+            font-size: 12px;
+            color: #666;
+            margin-top: 6px;
+        }
+
+        .dir-picker-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .export-progress-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 10px;
+        }
+.export-progress {
+    margin-top: 20px;
+    padding: 16px;
+    border: 1px solid #dfe3eb;
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.export-progress.hidden {
+    display: none;
+}
+
+.export-progress-header {
+    display: flex;
+    justify-content: space-between;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #1f2933;
+}
+
+.export-progress-bar {
+    width: 100%;
+    height: 10px;
+    background: #e3e8f0;
+    border-radius: 5px;
+    overflow: hidden;
+    margin-bottom: 10px;
+}
+
+#exportProgressFill {
+    height: 100%;
+    background: linear-gradient(90deg, #2962FF 0%, #00BCD4 100%);
+    width: 0%;
+    transition: width 0.4s ease;
+}
+
+.export-progress-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.9em;
+    color: #4a5568;
+}
+
         .success-box {
             padding: 30px;
             background: #E8F5E9;
@@ -838,16 +1005,65 @@
                             <h4>📦 Estimated Export Volume</h4>
                             <p class="summary-placeholder">Select components above to see per-component and per-job series counts.</p>
                         </div>
+
                     </div>
 
                     <div class="warning-box">
                         <strong>ℹ️ Note:</strong> Obfuscation mappings will be included in metadata.json for reference.
                     </div>
+
+                        <div class="form-group">
+                        <label for="stagingDir">Staging directory for partial export</label>
+                        <div class="dir-input-row">
+                            <input type="text" id="stagingDir" placeholder="/tmp/vmexporter">
+                            <button type="button" class="btn-inline" id="stagingDirBrowse" onclick="openDirectoryPicker()">Browse…</button>
+                            <button type="button" class="btn-inline" onclick="useDefaultStagingDir()">Use default</button>
+                            <button type="button" class="btn-inline" id="createStagingDirBtn" onclick="createStagingDir()" style="display: none;">Create</button>
+                        </div>
+                        <span class="input-hint" id="stagingDirHint">VMExporter streams batched data into this directory so partial files survive interruptions.</span>
+                        </div>
+
+                    <div class="form-group">
+                        <label for="metricStep">Metric sampling step</label>
+                        <select id="metricStep">
+                            <option value="auto">Auto (based on time range)</option>
+                            <option value="30">30 seconds</option>
+                            <option value="60">1 minute</option>
+                            <option value="300">5 minutes</option>
+                        </select>
+                        <span class="input-hint" id="metricStepHint">Recommended step: 1 min</span>
+                    </div>
+
+                    <div id="exportProgressPanel" class="export-progress hidden">
+                        <div class="export-progress-header">
+                            <span id="exportProgressPercent">0%</span>
+                            <span id="exportProgressEta"></span>
+                        </div>
+                        <div class="export-progress-bar">
+                            <div id="exportProgressFill"></div>
+                        </div>
+                        <div class="export-progress-meta">
+                            <span id="exportProgressBatches">0 / 0 batches</span>
+                            <span id="exportProgressMetrics">Waiting for export…</span>
+                        </div>
+                        <div class="export-progress-meta">
+                            <span id="exportBatchWindow"></span>
+                            <span id="exportProgressSummary"></span>
+                        </div>
+                        <div class="export-progress-meta">
+                            <span>Staging file:</span>
+                            <span id="exportProgressPath" style="word-break: break-all;"></span>
+                        </div>
+                        <div class="export-progress-footer">
+                            <button type="button" class="btn-inline btn-danger" id="cancelExportBtn" onclick="cancelExportJob()">Cancel export</button>
+                            <span id="exportCancelNotice" class="input-hint" style="color:#c62828;"></span>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="button-group">
                     <button class="btn-secondary" onclick="prevStep()">← Back</button>
-                    <button class="btn-primary" onclick="exportMetrics(this)">Start Export</button>
+                    <button class="btn-primary" onclick="exportMetrics(this)">Prepare Support Bundle</button>
                 </div>
             </div>
 
@@ -867,7 +1083,7 @@
                         </div>
 
                         <button class="btn-success" onclick="downloadArchive()" id="downloadBtn" style="width: 100%; margin: 20px 0; padding: 15px; font-size: 18px;">
-                            📦 Download Archive
+                            📦 Generate ZIP package
                         </button>
 
                         <button class="btn-secondary" onclick="location.reload()" style="width: 100%;">
@@ -889,5 +1105,27 @@
     </div>
 
     <script src="/static/app.js"></script>
+
 </body>
+<div id="dirPickerOverlay" class="dir-picker-overlay">
+    <div class="dir-picker-popover">
+        <div class="dir-picker-header">
+            <div>
+                <div style="font-size:12px;color:#666;">Browsing</div>
+                <div id="dirPickerCurrent" class="dir-picker-current"></div>
+            </div>
+            <button class="btn-inline" onclick="closeDirectoryPicker()">Close</button>
+        </div>
+        <div class="dir-picker-actions">
+            <button type="button" class="btn-inline" id="dirPickerParentBtn" onclick="navigateDirectoryParent()">⬆ Up one level</button>
+            <button type="button" class="btn-inline" onclick="refreshDirectoryPicker()">Refresh</button>
+        </div>
+        <div id="dirPickerList" class="dir-picker-list"></div>
+        <div id="dirPickerStatus" class="dir-picker-status"></div>
+        <div class="dir-picker-footer">
+            <button class="btn-primary" type="button" onclick="selectCurrentDirectory()">Use this directory</button>
+            <button class="btn-inline" type="button" onclick="closeDirectoryPicker()">Cancel</button>
+        </div>
+    </div>
+</div>
 </html>

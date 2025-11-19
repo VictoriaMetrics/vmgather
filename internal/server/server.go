@@ -4,11 +4,14 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -25,6 +28,7 @@ var staticFiles embed.FS
 type Server struct {
 	vmService     services.VMService
 	exportService services.ExportService
+	jobManager    *ExportJobManager
 	outputDir     string
 	version       string
 }
@@ -34,12 +38,15 @@ func NewServer(outputDir, version string) *Server {
 	if version == "" {
 		version = "dev"
 	}
-	return &Server{
+	server := &Server{
 		vmService:     services.NewVMService(),
 		exportService: services.NewExportService(outputDir, version),
+		jobManager:    nil,
 		outputDir:     outputDir,
 		version:       version,
 	}
+	server.jobManager = NewExportJobManager(server.exportService)
+	return server
 }
 
 // respondWithError sends JSON error response
@@ -62,6 +69,12 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("/api/discover", s.handleDiscoverComponents)
 	mux.HandleFunc("/api/sample", s.handleGetSample)
 	mux.HandleFunc("/api/export", s.handleExport)
+	mux.HandleFunc("/api/export/start", s.handleExportStart)
+	mux.HandleFunc("/api/export/status", s.handleExportStatus)
+	mux.HandleFunc("/api/fs/list", s.handleListDirectory)
+	mux.HandleFunc("/api/fs/check", s.handleCheckDirectory)
+	mux.HandleFunc("/api/export/cancel", s.handleExportCancel)
+	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/download", s.handleDownload)
 	mux.HandleFunc("/api/health", s.handleHealth)
 
@@ -80,6 +93,24 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status":  "ok",
 		"version": s.version,
 	})
+}
+
+func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	defaultDir := recommendedStagingDir()
+	response := map[string]interface{}{
+		"version":              s.version,
+		"default_staging_dir":  defaultDir,
+		"os":                   runtime.GOOS,
+		"output_dir":           s.outputDir,
+		"supports_dir_picker":  true,
+		"supports_dir_prepare": true,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // handleValidateConnection validates VM connection
@@ -395,6 +426,8 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ensureBatchDefaults(&config)
+
 	// 🔍 DEBUG: Log export request
 	log.Printf("📤 Metrics Export:")
 	log.Printf("  Time Range: %s to %s", config.TimeRange.Start.Format(time.RFC3339), config.TimeRange.End.Format(time.RFC3339))
@@ -446,6 +479,403 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	// Return export result
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(response)
+}
+
+func (s *Server) handleExportStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var config domain.ExportConfig
+	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err))
+		return
+	}
+
+	ensureBatchDefaults(&config)
+	jobID := fmt.Sprintf("job-%d", time.Now().UnixNano())
+	stagingDir := config.StagingDir
+	if stagingDir == "" {
+		stagingDir = recommendedStagingDir()
+	}
+	absDir, err := filepath.Abs(stagingDir)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid staging directory: %v", err))
+		return
+	}
+	stagingDir = absDir
+	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to prepare staging directory: %v", err))
+		return
+	}
+	// Check write permission by creating temp file
+	testFile := filepath.Join(stagingDir, ".vmexporter-write-test")
+	testHandle, err := os.Create(testFile)
+	if err != nil {
+		respondWithError(w, http.StatusForbidden, fmt.Sprintf("Cannot write to staging directory %s: %v", stagingDir, err))
+		return
+	}
+	_ = testHandle.Close()
+	_ = os.Remove(testFile)
+
+	config.StagingDir = stagingDir
+	config.StagingFile = filepath.Join(stagingDir, fmt.Sprintf("%s.partial.jsonl", jobID))
+
+	status, err := s.jobManager.StartJob(r.Context(), jobID, config)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to start export: %v", err))
+		return
+	}
+
+	response := map[string]interface{}{
+		"job_id":               status.ID,
+		"state":                status.State,
+		"total_batches":        status.TotalBatches,
+		"batch_window_seconds": status.BatchWindowSeconds,
+		"staging_path":         config.StagingFile,
+		"obfuscation_enabled":  status.ObfuscationEnabled,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+func (s *Server) handleExportStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	jobID := r.URL.Query().Get("id")
+	if jobID == "" {
+		respondWithError(w, http.StatusBadRequest, "Missing id parameter")
+		return
+	}
+
+	status, ok := s.jobManager.GetStatus(jobID)
+	if !ok {
+		respondWithError(w, http.StatusNotFound, fmt.Sprintf("Job %s not found", jobID))
+		return
+	}
+
+	response := map[string]interface{}{
+		"job_id":                      status.ID,
+		"state":                       status.State,
+		"total_batches":               status.TotalBatches,
+		"completed_batches":           status.CompletedBatches,
+		"progress":                    status.Progress,
+		"metrics_processed":           status.MetricsProcessed,
+		"batch_window_seconds":        status.BatchWindowSeconds,
+		"average_batch_seconds":       status.AverageBatchSeconds,
+		"last_batch_duration_seconds": status.LastBatchDurationSeconds,
+	}
+	if status.StagingPath != "" {
+		response["staging_path"] = status.StagingPath
+	}
+
+	if status.StartedAt != nil {
+		response["started_at"] = status.StartedAt.Format(time.RFC3339)
+	}
+	if status.CompletedAt != nil {
+		response["completed_at"] = status.CompletedAt.Format(time.RFC3339)
+	}
+	if status.ETA != nil {
+		response["eta"] = status.ETA.Format(time.RFC3339)
+	}
+	if status.Error != "" {
+		response["error"] = status.Error
+	}
+	if status.Result != nil {
+		response["result"] = status.Result
+	}
+	if status.CurrentRange != nil {
+		response["current_range"] = map[string]string{
+			"start": status.CurrentRange.Start.Format(time.RFC3339),
+			"end":   status.CurrentRange.End.Format(time.RFC3339),
+		}
+	}
+	if status.StagingPath != "" {
+		response["staging_path"] = status.StagingPath
+	}
+	response["obfuscation_enabled"] = status.ObfuscationEnabled
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+func (s *Server) handleExportCancel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req struct {
+		JobID string `json:"job_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err))
+		return
+	}
+	if req.JobID == "" {
+		respondWithError(w, http.StatusBadRequest, "job_id is required")
+		return
+	}
+	if err := s.jobManager.CancelJob(req.JobID); err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"canceled": true,
+		"job_id":   req.JobID,
+	})
+}
+
+func ensureBatchDefaults(config *domain.ExportConfig) {
+	settings := &config.Batching
+	if !settings.Enabled && settings.Strategy == "" && settings.CustomIntervalSecs == 0 {
+		settings.Enabled = true
+	}
+	if settings.Strategy == "" {
+		settings.Strategy = "auto"
+	}
+	if settings.CustomIntervalSecs < 0 {
+		settings.CustomIntervalSecs = 0
+	}
+	minSeconds := services.MinBatchIntervalSeconds
+	maxSeconds := services.MaxBatchIntervalSeconds
+	if settings.CustomIntervalSecs > 0 && settings.CustomIntervalSecs < minSeconds {
+		settings.CustomIntervalSecs = minSeconds
+	}
+	if settings.CustomIntervalSecs > maxSeconds {
+		settings.CustomIntervalSecs = maxSeconds
+	}
+	if config.MetricStepSeconds <= 0 {
+		config.MetricStepSeconds = services.RecommendedMetricStepSeconds(config.TimeRange)
+	}
+	if !config.Obfuscation.Enabled {
+		config.Obfuscation = domain.ObfuscationConfig{}
+	}
+}
+
+func recommendedStagingDir() string {
+	homeDir, _ := os.UserHomeDir()
+	switch runtime.GOOS {
+	case "darwin":
+		if homeDir != "" {
+			return filepath.Join(homeDir, "Library", "Application Support", "VMExporter", "Staging")
+		}
+	case "windows":
+		if local := os.Getenv("LOCALAPPDATA"); local != "" {
+			return filepath.Join(local, "VMExporter", "Staging")
+		}
+		if homeDir != "" {
+			return filepath.Join(homeDir, "AppData", "Local", "VMExporter", "Staging")
+		}
+	default:
+		if homeDir != "" {
+			return filepath.Join(homeDir, ".vmexporter", "staging")
+		}
+	}
+	return filepath.Join(os.TempDir(), "vmexporter")
+}
+
+func ensureWritableDirectory(path string) error {
+	testFile := filepath.Join(path, fmt.Sprintf(".vmexporter-check-%d", time.Now().UnixNano()))
+	file, err := os.Create(testFile)
+	if err != nil {
+		return err
+	}
+	_ = file.Close()
+	return os.Remove(testFile)
+}
+
+func canCreateDirectory(path string) bool {
+	dir := filepath.Clean(path)
+	for {
+		parent := filepath.Dir(dir)
+		if parent == "" || parent == dir {
+			break
+		}
+		info, err := os.Stat(parent)
+		if err == nil && info.IsDir() {
+			testDir := filepath.Join(parent, fmt.Sprintf(".vmexporter-create-%d", time.Now().UnixNano()))
+			if err := os.Mkdir(testDir, 0o755); err != nil {
+				return false
+			}
+			_ = os.RemoveAll(testDir)
+			return true
+		}
+		dir = parent
+	}
+	return false
+}
+
+func (s *Server) handleListDirectory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	requested := r.URL.Query().Get("path")
+	if requested == "" {
+		requested = "/"
+	}
+	absPath, err := filepath.Abs(requested)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid path: %v", err))
+		return
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			parent := filepath.Dir(absPath)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"path":    absPath,
+				"parent":  parent,
+				"entries": []interface{}{},
+				"exists":  false,
+			})
+			return
+		}
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Failed to access directory: %v", err))
+		return
+	}
+
+	if !info.IsDir() {
+		respondWithError(w, http.StatusBadRequest, "Path is not a directory")
+		return
+	}
+
+	entries, err := os.ReadDir(absPath)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Failed to list directory: %v", err))
+		return
+	}
+
+	type dirEntry struct {
+		Name     string `json:"name"`
+		Path     string `json:"path"`
+		Writable bool   `json:"writable"`
+	}
+
+	result := []dirEntry{}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		childPath := filepath.Join(absPath, entry.Name())
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		mode := info.Mode()
+		writable := mode&0o200 != 0
+		result = append(result, dirEntry{
+			Name:     entry.Name(),
+			Path:     childPath,
+			Writable: writable,
+		})
+	}
+
+	parent := filepath.Dir(absPath)
+	if absPath == "/" {
+		parent = ""
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"path":    absPath,
+		"parent":  parent,
+		"entries": result,
+		"exists":  true,
+	})
+}
+
+func (s *Server) handleCheckDirectory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req struct {
+		Path   string `json:"path"`
+		Ensure bool   `json:"ensure,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err))
+		return
+	}
+	if req.Path == "" {
+		respondWithError(w, http.StatusBadRequest, "Path is required")
+		return
+	}
+	absPath, err := filepath.Abs(req.Path)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid path: %v", err))
+		return
+	}
+	absPath = filepath.Clean(absPath)
+
+	info, err := os.Stat(absPath)
+	if err != nil && !os.IsNotExist(err) {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Failed to access directory: %v", err))
+		return
+	}
+
+	dirExists := err == nil
+	if dirExists && !info.IsDir() {
+		respondWithError(w, http.StatusBadRequest, "Path is not a directory")
+		return
+	}
+
+	if !dirExists {
+		if !req.Ensure {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok":         false,
+				"abs_path":   absPath,
+				"exists":     false,
+				"can_create": canCreateDirectory(absPath),
+				"message":    "Directory does not exist",
+			})
+			return
+		}
+		if err := os.MkdirAll(absPath, 0o755); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok":         false,
+				"abs_path":   absPath,
+				"exists":     false,
+				"can_create": false,
+				"message":    fmt.Sprintf("Failed to create directory: %v", err),
+			})
+			return
+		}
+	}
+
+	if err := ensureWritableDirectory(absPath); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":         false,
+			"abs_path":   absPath,
+			"exists":     true,
+			"can_create": false,
+			"message":    fmt.Sprintf("Cannot write to directory: %v", err),
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":         true,
+		"abs_path":   absPath,
+		"exists":     true,
+		"can_create": true,
+	})
 }
 
 // getSampleDataFromResult retrieves sample data for preview

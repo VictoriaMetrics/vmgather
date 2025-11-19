@@ -1,11 +1,15 @@
 package services
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,6 +18,8 @@ import (
 	"github.com/VictoriaMetrics/support/internal/infrastructure/obfuscation"
 	"github.com/VictoriaMetrics/support/internal/infrastructure/vm"
 )
+
+const defaultBatchTimeout = 2 * time.Minute
 
 // ExportService interface for full export operations
 type ExportService interface {
@@ -45,47 +51,94 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 	// Generate export ID
 	exportID := s.generateExportID()
 
-	// Step 1: Export metrics from VictoriaMetrics
+	// Step 1: Prepare staging file for incremental writes
+	stagingDir := config.StagingDir
+	if stagingDir == "" {
+		stagingDir = filepath.Join(s.archiveWriter.OutputDir(), "staging")
+	}
+	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
+		return nil, fmt.Errorf("failed to prepare staging directory: %w", err)
+	}
+	if config.StagingFile == "" {
+		config.StagingFile = filepath.Join(stagingDir, fmt.Sprintf("%s.partial.jsonl", exportID))
+	}
+	stagingHandle, err := os.OpenFile(config.StagingFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create staging file: %w", err)
+	}
+	defer func() { _ = stagingHandle.Close() }()
+	stagingWriter := bufio.NewWriter(stagingHandle)
+	defer func() {
+		_ = stagingWriter.Flush()
+		_ = stagingHandle.Close()
+	}()
+
+	// Step 2: Export metrics from VictoriaMetrics in batches
 	client := s.clientFactory(config.Connection)
 	selector := s.buildSelector(config.Jobs)
+	batchWindows := CalculateBatchWindows(config.TimeRange, config.Batching)
+	metricsCount := 0
+	var obfuscator *obfuscation.Obfuscator
+	if config.Obfuscation.Enabled {
+		obfuscator = obfuscation.NewObfuscator()
+	}
 
-	// Try direct export first
-	fmt.Printf("📤 Attempting direct export via /api/v1/export...\n")
-	exportReader, err := client.Export(ctx, selector, config.TimeRange.Start, config.TimeRange.End)
-
-	// Check if export failed due to missing route (export API not available)
-	if err != nil && s.isMissingRouteError(err) {
-		fmt.Printf("⚠️  Export API not available (error: %v)\n", err)
-		fmt.Println("⚠️  Falling back to query_range method")
-
-		// Fallback to query_range
-		exportReader, err = s.exportViaQueryRange(ctx, client, selector, config.TimeRange)
-		if err != nil {
-			fmt.Printf("❌ Query_range fallback failed: %v\n", err)
-			return nil, fmt.Errorf("export via query_range fallback failed: %w", err)
+	for batchIndex, window := range batchWindows {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
 		}
-		fmt.Println("✅ Fallback export data ready")
-	} else if err != nil {
-		fmt.Printf("❌ Direct export failed: %v\n", err)
-		return nil, fmt.Errorf("export failed: %w", err)
-	} else {
-		fmt.Println("✅ Direct export successful")
-	}
-	defer func() { _ = exportReader.Close() }()
 
-	// Step 2: Process metrics (with optional obfuscation)
-	fmt.Printf("🔄 Processing metrics (obfuscation: %v)...\n", config.Obfuscation.Enabled)
-	processStartTime := time.Now()
-	processedReader, metricsCount, obfuscationMaps, err := s.processMetrics(exportReader, config.Obfuscation)
-	if err != nil {
-		fmt.Printf("❌ Metrics processing failed: %v\n", err)
-		return nil, fmt.Errorf("metrics processing failed: %w", err)
+		fmt.Printf("📦 Processing batch %d/%d (%s - %s)\n",
+			batchIndex+1, len(batchWindows), window.Start.Format(time.RFC3339), window.End.Format(time.RFC3339))
+		batchStart := time.Now()
+
+		batchCtx, cancelBatch := context.WithTimeout(ctx, defaultBatchTimeout)
+		exportReader, err := s.fetchBatch(batchCtx, client, selector, window, config.MetricStepSeconds)
+		cancelBatch()
+		if err != nil {
+			return nil, err
+		}
+
+		batchCount, err := s.processMetricsIntoWriter(exportReader, config.Obfuscation, obfuscator, stagingWriter)
+		_ = exportReader.Close()
+		if err != nil {
+			fmt.Printf("❌ Metrics processing failed for batch %d: %v\n", batchIndex+1, err)
+			return nil, fmt.Errorf("metrics processing failed: %w", err)
+		}
+		if err := stagingWriter.Flush(); err != nil {
+			return nil, fmt.Errorf("failed to flush staging file: %w", err)
+		}
+
+		metricsCount += batchCount
+		batchDuration := time.Since(batchStart)
+		fmt.Printf("✅ Batch %d processed in %v (%d metrics)\n", batchIndex+1, batchDuration, batchCount)
+
+		ReportBatchProgress(ctx, BatchProgress{
+			BatchIndex:   batchIndex + 1,
+			TotalBatches: len(batchWindows),
+			TimeRange:    window,
+			Metrics:      batchCount,
+			Duration:     batchDuration,
+		})
 	}
-	fmt.Printf("✅ Metrics processed in %v: %d metrics\n", time.Since(processStartTime), metricsCount)
+
+	obfuscationMaps := make(map[string]map[string]string)
+	if obfuscator != nil {
+		instanceMap, jobMap := obfuscator.GetMappings()
+		obfuscationMaps["instance"] = instanceMap
+		obfuscationMaps["job"] = jobMap
+	}
 
 	// Step 3: Create archive
 	fmt.Printf("📦 Creating archive...\n")
 	metadata := s.buildArchiveMetadata(exportID, config, metricsCount, obfuscationMaps)
+	processedReader, err := os.Open(config.StagingFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open staging file for archive: %w", err)
+	}
+	defer processedReader.Close()
 
 	archiveStartTime := time.Now()
 	archivePath, sha256sum, err := s.archiveWriter.CreateArchive(exportID, processedReader, metadata)
@@ -103,6 +156,10 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 	}
 	fmt.Printf("📊 Archive size: %.2f MB\n", float64(archiveSize)/(1024*1024))
 	fmt.Printf("🔐 SHA256: %s\n", sha256sum)
+
+	if err := os.Remove(config.StagingFile); err != nil {
+		log.Printf("⚠️  Failed to remove staging file %s: %v", config.StagingFile, err)
+	}
 
 	// Build result
 	result := &domain.ExportResult{
@@ -124,43 +181,17 @@ func (s *exportServiceImpl) processMetrics(
 	reader io.Reader,
 	obfConfig domain.ObfuscationConfig,
 ) (io.Reader, int, map[string]map[string]string, error) {
-	decoder := vm.NewExportDecoder(reader)
 	var processedMetrics bytes.Buffer
-	metricsCount := 0
-
-	// Initialize obfuscator if needed
 	var obfuscator *obfuscation.Obfuscator
 	if obfConfig.Enabled {
 		obfuscator = obfuscation.NewObfuscator()
 	}
 
-	// Process each metric
-	for {
-		metric, err := decoder.Decode()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, 0, nil, fmt.Errorf("decode error: %w", err)
-		}
-
-		// Apply obfuscation if enabled
-		if obfuscator != nil {
-			s.applyObfuscation(metric, obfuscator, obfConfig)
-		}
-
-		// Write processed metric as JSONL
-		data, err := json.Marshal(metric)
-		if err != nil {
-			return nil, 0, nil, fmt.Errorf("marshal error: %w", err)
-		}
-
-		processedMetrics.Write(data)
-		processedMetrics.WriteByte('\n')
-		metricsCount++
+	metricsCount, err := s.processMetricsIntoWriter(reader, obfConfig, obfuscator, &processedMetrics)
+	if err != nil {
+		return nil, 0, nil, err
 	}
 
-	// Build obfuscation maps
 	obfuscationMaps := make(map[string]map[string]string)
 	if obfuscator != nil {
 		instanceMap, jobMap := obfuscator.GetMappings()
@@ -169,6 +200,49 @@ func (s *exportServiceImpl) processMetrics(
 	}
 
 	return &processedMetrics, metricsCount, obfuscationMaps, nil
+}
+
+// processMetricsIntoWriter decodes metrics stream, applies obfuscation (if enabled) and appends JSONL lines into the provided writer.
+func (s *exportServiceImpl) processMetricsIntoWriter(
+	reader io.Reader,
+	obfConfig domain.ObfuscationConfig,
+	obfuscator *obfuscation.Obfuscator,
+	writer io.Writer,
+) (int, error) {
+	decoder := vm.NewExportDecoder(reader)
+	metricsCount := 0
+
+	for {
+		metric, err := decoder.Decode()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return 0, fmt.Errorf("decode error: %w", err)
+		}
+
+		if obfConfig.Enabled {
+			if obfuscator == nil {
+				obfuscator = obfuscation.NewObfuscator()
+			}
+			s.applyObfuscation(metric, obfuscator, obfConfig)
+		}
+
+		data, err := json.Marshal(metric)
+		if err != nil {
+			return 0, fmt.Errorf("marshal error: %w", err)
+		}
+
+		if _, err := writer.Write(data); err != nil {
+			return 0, fmt.Errorf("write error: %w", err)
+		}
+		if _, err := writer.Write([]byte{'\n'}); err != nil {
+			return 0, fmt.Errorf("write error: %w", err)
+		}
+		metricsCount++
+	}
+
+	return metricsCount, nil
 }
 
 // applyObfuscation applies obfuscation to a metric
@@ -347,23 +421,25 @@ func uniqueStrings(values []string) []string {
 	return result
 }
 
+func determineQueryRangeStep(tr domain.TimeRange, overrideSeconds int) time.Duration {
+	if overrideSeconds > 0 {
+		step := time.Duration(overrideSeconds) * time.Second
+		if step < minBatchInterval {
+			return minBatchInterval
+		}
+		if step > maxBatchInterval {
+			return maxBatchInterval
+		}
+		return step
+	}
+	return recommendedIntervalForDuration(tr.End.Sub(tr.Start))
+}
+
 // exportViaQueryRange exports metrics using query_range as fallback when /api/v1/export is not available
 // This method queries all series matching the selector and reconstructs export format
-func (s *exportServiceImpl) exportViaQueryRange(ctx context.Context, client *vm.Client, selector string, timeRange domain.TimeRange) (io.ReadCloser, error) {
-	// Calculate appropriate step based on time range
-	// For short ranges (< 1 hour): 15s step
-	// For medium ranges (1-24 hours): 1m step
-	// For long ranges (> 24 hours): 5m step
+func (s *exportServiceImpl) exportViaQueryRange(ctx context.Context, client *vm.Client, selector string, timeRange domain.TimeRange, overrideSeconds int) (io.ReadCloser, error) {
+	step := determineQueryRangeStep(timeRange, overrideSeconds)
 	duration := timeRange.End.Sub(timeRange.Start)
-	var step time.Duration
-	switch {
-	case duration < time.Hour:
-		step = 15 * time.Second
-	case duration < 24*time.Hour:
-		step = 1 * time.Minute
-	default:
-		step = 5 * time.Minute
-	}
 
 	fmt.Printf("🔄 Starting query_range fallback:\n")
 	fmt.Printf("   Time range: %s to %s (duration: %v)\n", timeRange.Start.Format(time.RFC3339), timeRange.End.Format(time.RFC3339), duration)
@@ -444,6 +520,19 @@ func (s *exportServiceImpl) exportViaQueryRange(ctx context.Context, client *vm.
 
 	// Return as ReadCloser
 	return io.NopCloser(&buf), nil
+}
+
+func (s *exportServiceImpl) fetchBatch(ctx context.Context, client *vm.Client, selector string, tr domain.TimeRange, metricStepSeconds int) (io.ReadCloser, error) {
+	fmt.Printf("📤 Attempting export for batch: %s -> %s\n", tr.Start.Format(time.RFC3339), tr.End.Format(time.RFC3339))
+	reader, err := client.Export(ctx, selector, tr.Start, tr.End)
+	if err != nil && s.isMissingRouteError(err) {
+		fmt.Printf("⚠️  Export API not available for current batch, falling back to query_range\n")
+		return s.exportViaQueryRange(ctx, client, selector, tr, metricStepSeconds)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("export failed: %w", err)
+	}
+	return reader, nil
 }
 
 // generateExportID generates a unique export ID

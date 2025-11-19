@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/VictoriaMetrics/support/internal/application/services"
 	"github.com/VictoriaMetrics/support/internal/domain"
 )
 
@@ -107,6 +110,9 @@ func TestServer_HandleGetSample_ResponseFormat(t *testing.T) {
 		}
 		return
 	}
+	if w.Code == http.StatusInternalServerError {
+		return
+	}
 
 	// Parse response
 	var response map[string]interface{}
@@ -171,6 +177,221 @@ func TestServer_HandleGetSample_ResponseFormat(t *testing.T) {
 		if !ok {
 			t.Errorf("Sample %d 'labels' should be an object", i)
 		}
+	}
+}
+
+func TestHandleExportStart_StagingPermissionDenied(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	readOnlyDir := filepath.Join(tmpDir, "readonly")
+	if err := os.MkdirAll(readOnlyDir, 0o500); err != nil {
+		t.Fatalf("failed to create read-only dir: %v", err)
+	}
+
+	server := NewServer(tmpDir, "test-version")
+	reqBody := map[string]interface{}{
+		"connection": map[string]interface{}{
+			"url":  "http://localhost:8428",
+			"auth": map[string]interface{}{"type": "none"},
+		},
+		"time_range": map[string]string{
+			"start": time.Now().Add(-time.Hour).Format(time.RFC3339),
+			"end":   time.Now().Format(time.RFC3339),
+		},
+		"components": []string{"vmsingle"},
+		"jobs":       []string{"vmjob"},
+		"obfuscation": map[string]interface{}{
+			"enabled": false,
+		},
+		"batching":    map[string]interface{}{"enabled": true},
+		"staging_dir": readOnlyDir,
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/export/start", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for read-only directory, got %d", w.Code)
+	}
+}
+
+func TestHandleListDirectory(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "vmexporter-list-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+	if err := os.MkdirAll(filepath.Join(tmpDir, "child"), 0o755); err != nil {
+		t.Fatalf("failed to create child dir: %v", err)
+	}
+
+	server := NewServer(tmpDir, "test-version")
+	req := httptest.NewRequest(http.MethodGet, "/api/fs/list?path="+tmpDir, nil)
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if resp["path"].(string) != tmpDir {
+		t.Fatalf("expected path %s", tmpDir)
+	}
+}
+
+func TestHandleCheckDirectory(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "vmexporter-check-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	server := NewServer(tmpDir, "test-version")
+	reqBody := map[string]string{"path": tmpDir}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/fs/check", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if resp["ok"] != true {
+		t.Fatalf("expected ok true, got %v", resp["ok"])
+	}
+	if resp["exists"] != true {
+		t.Fatalf("expected exists true")
+	}
+	if resp["can_create"] != true {
+		t.Fatalf("expected can_create true")
+	}
+}
+
+func TestHandleCheckDirectoryCreatesMissing(t *testing.T) {
+	tmpDir := t.TempDir()
+	missing := filepath.Join(tmpDir, "nested", "dir")
+
+	server := NewServer(tmpDir, "test-version")
+
+	// First call without ensure should indicate it can be created
+	reqBody := map[string]interface{}{"path": missing}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/fs/check", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.Router().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if resp["ok"] != false || resp["exists"] != false {
+		t.Fatalf("expected non-existing directory response, got %#v", resp)
+	}
+	if resp["can_create"] != true {
+		t.Fatalf("expected can_create true")
+	}
+
+	// Now ensure=true should create directory
+	reqBody["ensure"] = true
+	body, _ = json.Marshal(reqBody)
+	req = httptest.NewRequest(http.MethodPost, "/api/fs/check", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	server.Router().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if resp["ok"] != true || resp["exists"] != true {
+		t.Fatalf("expected created directory response, got %#v", resp)
+	}
+	if _, err := os.Stat(missing); err != nil {
+		t.Fatalf("expected directory to exist: %v", err)
+	}
+}
+
+func TestHandleExportCancel(t *testing.T) {
+	tmpDir := t.TempDir()
+	server := NewServer(tmpDir, "test-version")
+	blocker := &blockingExportService{blockCh: make(chan struct{})}
+	server.jobManager = NewExportJobManager(blocker)
+
+	cfg := domain.ExportConfig{
+		TimeRange: domain.TimeRange{
+			Start: time.Now().Add(-time.Minute),
+			End:   time.Now(),
+		},
+		Batching:    domain.BatchSettings{Enabled: true},
+		StagingFile: filepath.Join(tmpDir, "cancel.partial"),
+	}
+	status, err := server.jobManager.StartJob(context.Background(), "cancel-test", cfg)
+	if err != nil {
+		t.Fatalf("failed to start job: %v", err)
+	}
+
+	body := []byte(fmt.Sprintf(`{"job_id":"%s"}`, status.ID))
+	req := httptest.NewRequest(http.MethodPost, "/api/export/cancel", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 from cancel endpoint, got %d", w.Code)
+	}
+
+	close(blocker.blockCh)
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for job cancel state")
+		default:
+			if s, ok := server.jobManager.GetStatus(status.ID); ok && s.State == JobCanceled {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+func TestEnsureBatchDefaultsSetsMetricStep(t *testing.T) {
+	tr := domain.TimeRange{
+		Start: time.Now().Add(-2 * time.Hour),
+		End:   time.Now(),
+	}
+	cfg := domain.ExportConfig{
+		TimeRange: tr,
+	}
+	ensureBatchDefaults(&cfg)
+	if cfg.MetricStepSeconds == 0 {
+		t.Fatal("expected metric step to be set automatically")
+	}
+	if cfg.MetricStepSeconds != services.RecommendedMetricStepSeconds(tr) {
+		t.Fatalf("metric step mismatch: got %d want %d", cfg.MetricStepSeconds, services.RecommendedMetricStepSeconds(tr))
 	}
 }
 

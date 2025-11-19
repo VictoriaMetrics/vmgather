@@ -2,13 +2,50 @@
 // State
 let currentStep = 1;
 const totalSteps = 6;
+let DEFAULT_STAGING_DIR = '/tmp/vmexporter';
 let connectionValid = false;
 let discoveredComponents = [];
 let sampleMetrics = [];
 let exportResult = null;
+let currentExportJobId = null;
+let exportStatusTimer = null;
+let sampleReloadTimer = null;
+let sampleAbortController = null;
+const selectedCustomLabels = new Set();
+let exportStagingPath = '';
+let currentJobObfuscationEnabled = false;
+let stagingDirValidationTimer = null;
+let directoryPickerPath = '';
+let directoryPickerParent = '';
+let directoryPickerCloseHandler = null;
+let appConfigLoaded = false;
+let currentExportButton = null;
+let cancelRequestInFlight = false;
+
+async function bootstrapAppConfig() {
+    if (appConfigLoaded) {
+        return;
+    }
+    try {
+        const resp = await fetch('/api/config');
+        if (resp.ok) {
+            const data = await resp.json();
+            window.__vmAppConfig = data;
+            if (data.default_staging_dir) {
+                DEFAULT_STAGING_DIR = data.default_staging_dir;
+            }
+        }
+    } catch (err) {
+        console.warn('Failed to load app config', err);
+    } finally {
+        appConfigLoaded = true;
+    }
+}
 
 // Initialize
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+	await bootstrapAppConfig();
+
     // Set default timezone to user's browser timezone
     initializeTimezone();
     
@@ -20,6 +57,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
     initializeUrlValidation();
     updateSelectionSummary();
+
+	document.addEventListener('change', (event) => {
+        const target = event.target;
+        if (!target || !target.classList || !target.classList.contains('obf-label-checkbox')) {
+            return;
+        }
+
+        const label = target.dataset.label;
+        if (label && label !== 'instance' && label !== 'job') {
+            if (target.checked) {
+                selectedCustomLabels.add(label);
+            } else {
+                selectedCustomLabels.delete(label);
+            }
+        }
+
+        scheduleSampleReload();
+    });
+
+	initializeStagingDirInput();
+	initializeMetricStepSelector();
+    disableCancelButton();
 });
 
 // Initialize timezone selector with user's default timezone
@@ -217,6 +276,7 @@ function nextStep() {
     if (currentStep === 4) {
         discoverComponents();
     } else if (currentStep === 5) {
+        applyRecommendedMetricStep(true);
         loadSampleMetrics();
     }
 }
@@ -863,10 +923,330 @@ function handleJobCheck(checkbox) {
     updateSelectionSummary();
 }
 
+function isObfuscationStepActive() {
+    const step = document.querySelector('.step[data-step="5"]');
+    return step && step.classList.contains('active');
+}
+
+function scheduleSampleReload() {
+    if (!isObfuscationStepActive()) {
+        return;
+    }
+    if (sampleReloadTimer) {
+        clearTimeout(sampleReloadTimer);
+    }
+    sampleReloadTimer = setTimeout(() => {
+        sampleReloadTimer = null;
+        loadSampleMetrics();
+    }, 250);
+}
+
+function initializeStagingDirInput() {
+    const input = document.getElementById('stagingDir');
+    if (!input) {
+        return;
+    }
+    input.placeholder = DEFAULT_STAGING_DIR;
+    const saved = localStorage.getItem('vmexporter_staging_dir');
+    if (saved) {
+        input.value = saved;
+        directoryPickerPath = saved;
+    } else {
+        input.value = DEFAULT_STAGING_DIR;
+        directoryPickerPath = DEFAULT_STAGING_DIR;
+    }
+    const hint = document.getElementById('stagingDirHint');
+    if (hint) {
+        hint.textContent = `Partial batches live under ${DEFAULT_STAGING_DIR}. Use “Browse…” to reuse an existing folder or “Use default” for a safe fallback.`;
+    }
+    validateStagingDir(true);
+    input.addEventListener('input', () => validateStagingDir(false));
+    input.addEventListener('blur', () => validateStagingDir(true));
+}
+
+function initializeMetricStepSelector() {
+    const timeFrom = document.getElementById('timeFrom');
+    const timeTo = document.getElementById('timeTo');
+    [timeFrom, timeTo].forEach(el => {
+        if (el) {
+            el.addEventListener('change', () => applyRecommendedMetricStep(false));
+        }
+    });
+    applyRecommendedMetricStep(true);
+}
+
+function getRecommendedMetricStepSeconds() {
+    const fromValue = document.getElementById('timeFrom')?.value;
+    const toValue = document.getElementById('timeTo')?.value;
+    if (!fromValue || !toValue) {
+        return 60;
+    }
+    const from = new Date(fromValue);
+    const to = new Date(toValue);
+    const durationMs = Math.max(0, to - from);
+    const durationMinutes = durationMs / 60000;
+    if (durationMinutes <= 15) {
+        return 30;
+    }
+    if (durationMinutes <= 360) {
+        return 60;
+    }
+    return 300;
+}
+
+function applyRecommendedMetricStep(forceApply) {
+    const select = document.getElementById('metricStep');
+    const hint = document.getElementById('metricStepHint');
+    if (!select) {
+        return;
+    }
+    const recommended = getRecommendedMetricStepSeconds();
+    if (hint) {
+        hint.textContent = `Current data step (minimum): ${formatStepLabel(recommended)}`;
+    }
+    if (forceApply && (!select.value || select.value === '')) {
+        select.value = String(recommended);
+    }
+}
+
+function getSelectedMetricStepSeconds() {
+    const select = document.getElementById('metricStep');
+    if (!select) {
+        return 0;
+    }
+    const value = select.value;
+    if (!value || value === 'auto') {
+        return 0;
+    }
+    const parsed = parseInt(value, 10);
+    return isNaN(parsed) ? 0 : parsed;
+}
+
+function formatStepLabel(seconds) {
+    if (!seconds || seconds < 60) {
+        return `${seconds}s`;
+    }
+    const minutes = seconds / 60;
+    if (minutes >= 1 && Number.isInteger(minutes)) {
+        return `${minutes} min`;
+    }
+    return `${seconds}s`;
+}
+
+function setStagingDirValue(value) {
+    const input = document.getElementById('stagingDir');
+    if (!input) {
+        return;
+    }
+    input.value = value;
+    directoryPickerPath = value;
+    localStorage.setItem('vmexporter_staging_dir', value);
+    validateStagingDir(true);
+}
+
+function useDefaultStagingDir() {
+    setStagingDirValue(DEFAULT_STAGING_DIR);
+}
+
+function openDirectoryPicker() {
+    const overlay = document.getElementById('dirPickerOverlay');
+    if (!overlay) {
+        return;
+    }
+    const inputValue = document.getElementById('stagingDir')?.value.trim();
+    directoryPickerPath = inputValue || DEFAULT_STAGING_DIR;
+    overlay.classList.add('visible');
+    loadDirectoryListing(directoryPickerPath);
+    if (!directoryPickerCloseHandler) {
+        directoryPickerCloseHandler = (event) => {
+            if (event.target === overlay) {
+                closeDirectoryPicker();
+            }
+        };
+        overlay.addEventListener('click', directoryPickerCloseHandler);
+    }
+}
+
+function refreshDirectoryPicker() {
+    if (directoryPickerPath) {
+        loadDirectoryListing(directoryPickerPath);
+    }
+}
+
+function navigateDirectoryParent() {
+    if (directoryPickerParent) {
+        loadDirectoryListing(directoryPickerParent);
+    }
+}
+
+async function loadDirectoryListing(path) {
+    const list = document.getElementById('dirPickerList');
+    const current = document.getElementById('dirPickerCurrent');
+    const status = document.getElementById('dirPickerStatus');
+    const parentBtn = document.getElementById('dirPickerParentBtn');
+    if (!list || !current) {
+        return;
+    }
+    list.innerHTML = '<div style="padding: 8px; color: #666;">Loading…</div>';
+    if (status) {
+        status.textContent = '';
+    }
+    try {
+        const resp = await fetch(`/api/fs/list?path=${encodeURIComponent(path)}`);
+        if (!resp.ok) {
+            let message = `Failed to list directory (${resp.status})`;
+            try {
+                const err = await resp.json();
+                if (err && err.error) {
+                    message = err.error;
+                }
+            } catch (parseErr) {
+                console.warn('Failed to parse directory list error', parseErr);
+            }
+            throw new Error(message);
+        }
+        const data = await resp.json();
+        directoryPickerPath = data.path || path;
+        directoryPickerParent = data.parent || '';
+        if (parentBtn) {
+            parentBtn.disabled = !directoryPickerParent;
+        }
+        current.textContent = directoryPickerPath;
+        list.innerHTML = '';
+        const entries = data.entries || [];
+        if (data.exists === false && status) {
+            status.textContent = 'Directory does not exist yet.';
+        } else if (status) {
+            status.textContent = '';
+        }
+        if (entries.length === 0) {
+            list.innerHTML = '<div style="padding: 8px; color: #666;">No subdirectories</div>';
+            return;
+        }
+        entries.forEach(entry => {
+            const btn = document.createElement('button');
+            btn.textContent = entry.name;
+            if (!entry.writable) {
+                btn.classList.add('readonly');
+            }
+            btn.onclick = () => {
+                loadDirectoryListing(entry.path);
+            };
+            list.appendChild(btn);
+        });
+    } catch (err) {
+        list.innerHTML = '';
+        if (status) {
+            status.textContent = err.message;
+        }
+    }
+}
+
+function closeDirectoryPicker() {
+    const overlay = document.getElementById('dirPickerOverlay');
+    if (overlay) {
+        overlay.classList.remove('visible');
+    }
+    if (directoryPickerCloseHandler && overlay) {
+        overlay.removeEventListener('click', directoryPickerCloseHandler);
+        directoryPickerCloseHandler = null;
+    }
+}
+
+function selectCurrentDirectory() {
+    if (!directoryPickerPath) {
+        return;
+    }
+    setStagingDirValue(directoryPickerPath);
+    closeDirectoryPicker();
+}
+
+function createStagingDir() {
+    validateStagingDir(true, { ensure: true });
+}
+
+function validateStagingDir(immediate = false, options = {}) {
+    const input = document.getElementById('stagingDir');
+    const hint = document.getElementById('stagingDirHint');
+    const createBtn = document.getElementById('createStagingDirBtn');
+    if (!input || !hint) {
+        return;
+    }
+    const ensure = Boolean(options.ensure);
+    const value = input.value.trim();
+    if (!value) {
+        hint.textContent = 'Enter directory path';
+        hint.style.color = '#c62828';
+        window.__vmStagingHint = hint.textContent;
+        return;
+    }
+    const updateHint = (text, color) => {
+        hint.textContent = text;
+        hint.style.color = color;
+        window.__vmStagingHint = text;
+    };
+    const updateCreateButton = (visible) => {
+        if (!createBtn) {
+            return;
+        }
+        createBtn.style.display = visible ? 'inline-flex' : 'none';
+        createBtn.disabled = !visible;
+    };
+    const perform = async () => {
+        try {
+            updateHint(ensure ? 'Preparing directory…' : 'Validating directory…', '#555');
+            updateCreateButton(false);
+            const resp = await fetch('/api/fs/check', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: value, ensure })
+            });
+            const data = await resp.json();
+            if (resp.ok && data.ok) {
+                updateHint(`Ready: ${data.abs_path}`, '#2E7D32');
+                updateCreateButton(false);
+                if (input.value !== data.abs_path) {
+                    input.value = data.abs_path;
+                    localStorage.setItem('vmexporter_staging_dir', data.abs_path);
+                }
+            } else {
+                if (data.exists === false && data.can_create) {
+                    updateHint(`Directory will be created at ${data.abs_path}. Click "Create directory".`, '#ED6C02');
+                    updateCreateButton(true);
+                } else {
+                    updateHint(data.message || 'Directory is not writable', '#c62828');
+                    updateCreateButton(false);
+                }
+            }
+        } catch (err) {
+            updateHint(`Failed to validate directory: ${err.message}`, '#c62828');
+            updateCreateButton(false);
+        }
+    };
+
+    if (immediate) {
+        perform();
+        return;
+    }
+
+    if (stagingDirValidationTimer) {
+        clearTimeout(stagingDirValidationTimer);
+    }
+    stagingDirValidationTimer = setTimeout(perform, 400);
+}
+
 // Sample Metrics Loading
 async function loadSampleMetrics() {
     const advancedLabelsContainer = document.getElementById('advancedLabels');
     const samplePreviewContainer = document.getElementById('samplePreview');
+    
+    if (sampleAbortController) {
+        try {
+            sampleAbortController.abort();
+        } catch (e) {
+            console.warn('Failed to abort previous sample request', e);
+        }
+    }
     
     // Show loading state
     advancedLabelsContainer.innerHTML = `
@@ -897,6 +1277,7 @@ async function loadSampleMetrics() {
         
         // Add timeout (30 seconds)
         const controller = new AbortController();
+        sampleAbortController = controller;
         const timeoutId = setTimeout(() => controller.abort(), 30000);
         
         // Get obfuscation config for samples too
@@ -947,7 +1328,21 @@ async function loadSampleMetrics() {
         renderSamplePreview(sampleMetrics);
         renderAdvancedLabels(sampleMetrics);
         updateSelectionSummary();
+        window.__vm_samples_version = (window.__vm_samples_version || 0) + 1;
     } catch (err) {
+        if (err && err.name === 'AbortError') {
+            console.info('Sample request aborted due to newer request');
+            console.groupEnd();
+            const waitingHtml = `
+                <div style="text-align: center; color: #888; padding: 16px;">
+                    <div class="loading-spinner" style="display: inline-block;"></div>
+                    <p style="margin-top: 8px;">Refreshing sample metrics…</p>
+                </div>
+            `;
+            advancedLabelsContainer.innerHTML = waitingHtml;
+            samplePreviewContainer.innerHTML = waitingHtml;
+            return;
+        }
         console.error('❌ Sample loading failed:', err);
         console.groupEnd();
         
@@ -972,6 +1367,8 @@ async function loadSampleMetrics() {
                 <p style="margin-top: 8px; color: #555;">Failed to load sample metrics. Please check connection and try again.</p>
             </div>
         `;
+    } finally {
+        sampleAbortController = null;
     }
 }
 
@@ -1032,13 +1429,15 @@ function renderAdvancedLabels(samples) {
         return;
     }
     
+    const availableLabels = new Set(filteredLabels);
     let html = '';
     filteredLabels.forEach(label => {
         const sample = labelSamples[label] || 'example_value';
+        const checkedAttr = selectedCustomLabels.has(label) ? 'checked' : '';
         html += `
             <div class="label-item">
                 <label>
-                    <input type="checkbox" class="obf-label-checkbox" data-label="${label}">
+                    <input type="checkbox" class="obf-label-checkbox" data-label="${label}" ${checkedAttr}>
                     <strong>${label}</strong>
                     <span class="label-sample">(e.g., ${sample})</span>
                 </label>
@@ -1047,13 +1446,34 @@ function renderAdvancedLabels(samples) {
     });
     
     container.innerHTML = html;
+
+    // Prune selections that are no longer available
+    Array.from(selectedCustomLabels).forEach(label => {
+        if (!availableLabels.has(label)) {
+            selectedCustomLabels.delete(label);
+        }
+    });
 }
 
 function toggleObfuscation() {
     const enabled = document.getElementById('enableObfuscation').checked;
     const options = document.getElementById('obfuscationOptions');
     
-    options.style.display = enabled ? 'block' : 'none';
+    if (enabled) {
+        options.style.display = 'block';
+        const instanceCheckbox = document.querySelector('.obf-label-checkbox[data-label="instance"]');
+        const jobCheckbox = document.querySelector('.obf-label-checkbox[data-label="job"]');
+        if (instanceCheckbox && !instanceCheckbox.checked) {
+            instanceCheckbox.checked = true;
+        }
+        if (jobCheckbox && !jobCheckbox.checked) {
+            jobCheckbox.checked = true;
+        }
+    } else {
+        options.style.display = 'none';
+    }
+
+    scheduleSampleReload();
 }
 
 function getSelectedComponents() {
@@ -1227,21 +1647,25 @@ function getObfuscationConfig() {
     }
     
     // Get selected labels for obfuscation
-    const selectedLabels = [];
+    const selectedLabels = new Set();
     document.querySelectorAll('.obf-label-checkbox:checked').forEach(cb => {
-        selectedLabels.push(cb.dataset.label);
+        const label = cb.dataset.label;
+        if (label) {
+            selectedLabels.add(label);
+        }
     });
+    selectedCustomLabels.forEach(label => selectedLabels.add(label));
     
     // Separate standard labels (instance, job) from custom labels (pod, namespace, etc.)
-    const customLabels = selectedLabels.filter(label => 
+    const customLabels = Array.from(selectedLabels).filter(label => 
         label !== 'instance' && label !== 'job'
     );
     
     // Map labels to backend format
     return {
         enabled: true,
-        obfuscate_instance: selectedLabels.includes('instance'),
-        obfuscate_job: selectedLabels.includes('job'),
+        obfuscate_instance: selectedLabels.has('instance'),
+        obfuscate_job: selectedLabels.has('job'),
         preserve_structure: true,
         custom_labels: customLabels  // pod, namespace, etc.
     };
@@ -1249,19 +1673,21 @@ function getObfuscationConfig() {
 
 // Export
 async function exportMetrics(buttonElement) {
-    const btn = buttonElement || event?.target;
-    if (!btn) {
-        console.error('No button element provided to exportMetrics');
-        return;
-    }
-    const originalText = btn.textContent;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="loading-spinner"></span> Exporting...';
-    
-    try {
-        const config = getConnectionConfig();
-        const from = new Date(document.getElementById('timeFrom').value).toISOString();
-        const to = new Date(document.getElementById('timeTo').value).toISOString();
+	const btn = buttonElement || event?.target;
+	if (!btn) {
+		console.error('No button element provided to exportMetrics');
+		return;
+	}
+	const originalText = btn.textContent || 'Prepare Support Bundle';
+    currentExportButton = btn;
+    btn.dataset.originalText = originalText;
+	btn.disabled = true;
+	btn.innerHTML = '<span class="loading-spinner"></span> Collecting metrics...';
+
+	try {
+		const config = getConnectionConfig();
+		const from = new Date(document.getElementById('timeFrom').value).toISOString();
+		const to = new Date(document.getElementById('timeTo').value).toISOString();
         const selected = getSelectedComponents();
         if (selected.length === 0) {
             throw new Error('No components selected. Please go back to Step 4.');
@@ -1284,58 +1710,234 @@ async function exportMetrics(buttonElement) {
         console.log('🎯 Selected components:', uniqueComponents);
         console.log('💼 Selected jobs:', selectedJobs);
         
-        const response = await fetch('/api/export', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                connection: config,
-                time_range: { start: from, end: to },
-                components: uniqueComponents,
-                jobs: selectedJobs,
-                obfuscation: obfuscation
-            })
-        });
-        
-        console.log('📡 Response Status:', response.status, response.statusText);
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error || 'Export failed');
+        const stagingDirValue = document.getElementById('stagingDir')?.value.trim() || '';
+        if (!stagingDirValue) {
+            throw new Error('Please provide a staging directory');
         }
-        
-        console.log('📦 Export Result:', {
-            export_id: data.export_id,
-            metrics_count: data.metrics_count,
-            archive_size_kb: (data.archive_size / 1024).toFixed(2),
-            obfuscation_applied: data.obfuscation_applied,
-            sample_data_count: data.sample_data?.length || 0
-        });
-        console.log('✅ Export complete');
+        const metricStepSeconds = getSelectedMetricStepSeconds();
+        const batchWindowSeconds = metricStepSeconds || getRecommendedMetricStepSeconds();
+        const batchingConfig = {
+            enabled: true,
+            strategy: 'custom',
+            custom_interval_secs: batchWindowSeconds,
+        };
+
+        const response = await fetch('/api/export/start', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				connection: config,
+				time_range: { start: from, end: to },
+				components: uniqueComponents,
+				jobs: selectedJobs,
+				obfuscation: obfuscation,
+				staging_dir: stagingDirValue,
+					metric_step_seconds: metricStepSeconds,
+                    batching: batchingConfig
+				})
+			});
+		
+		console.log('📡 Response Status:', response.status, response.statusText);
+		
+		const data = await response.json();
+		
+		if (!response.ok) {
+			throw new Error(data.error || 'Export failed');
+		}
+		
+		console.log('🚀 Export job started:', data.job_id);
+		currentExportJobId = data.job_id;
+		showExportProgressPanel(data);
+		await monitorExportJob(btn);
         console.groupEnd();
-        
-        exportResult = data;
-        showExportResult(data);
-        nextStep();
-    } catch (err) {
-        console.error('❌ Export failed:', err);
-        console.groupEnd();
-        
-        alert('Export failed: ' + err.message + '\n\nCheck browser console (F12) for details');
-        btn.disabled = false;
-        btn.textContent = originalText;
-    }
+	} catch (err) {
+		console.error('❌ Export failed:', err);
+		console.groupEnd();
+		
+		alert('Export failed: ' + err.message + '\n\nCheck browser console (F12) for details');
+		btn.disabled = false;
+		btn.textContent = 'Prepare Support Bundle';
+        currentExportButton = null;
+	}
+}
+
+async function monitorExportJob(btn) {
+	if (!currentExportJobId) {
+		return;
+	}
+
+	const fetchStatus = async () => {
+		try {
+			const resp = await fetch(`/api/export/status?id=${encodeURIComponent(currentExportJobId)}`);
+			const status = await resp.json();
+			if (!resp.ok) {
+				throw new Error(status.error || 'Failed to fetch status');
+			}
+			updateExportProgress(status);
+			if (status.state === 'completed') {
+				cleanupExportPolling();
+				exportResult = status.result;
+				if (exportResult) {
+					showExportResult(exportResult);
+					nextStep();
+				}
+				btn.disabled = false;
+				btn.textContent = btn.dataset.originalText || 'Prepare Support Bundle';
+                currentExportButton = null;
+                disableCancelButton();
+                showCancelNotice('');
+			} else if (status.state === 'failed') {
+				cleanupExportPolling();
+				btn.disabled = false;
+				btn.textContent = btn.dataset.originalText || 'Prepare Support Bundle';
+                currentExportButton = null;
+				alert('Export failed: ' + (status.error || 'Unknown error'));
+                disableCancelButton();
+                showCancelNotice('');
+			} else if (status.state === 'canceled') {
+                cleanupExportPolling();
+                btn.disabled = false;
+                btn.textContent = btn.dataset.originalText || 'Prepare Support Bundle';
+                currentExportButton = null;
+                disableCancelButton();
+                showCancelNotice('Export canceled. Adjust parameters and start again.');
+            }
+		} catch (err) {
+			console.error('Failed to fetch export status', err);
+		}
+	};
+
+	await fetchStatus();
+	exportStatusTimer = setInterval(fetchStatus, 2000);
 }
 
 function showExportResult(data) {
-    document.getElementById('exportId').textContent = data.export_id || 'N/A';
-    document.getElementById('metricsCount').textContent = (data.metrics_count || 0).toLocaleString();
-    document.getElementById('archiveSize').textContent = ((data.archive_size || 0) / 1024).toFixed(2);
+    const panel = document.getElementById('exportProgressPanel');
+    if (panel) {
+        panel.classList.add('hidden');
+        panel.style.display = 'none';
+    }
+    renderExportStagingPath('');
+	document.getElementById('exportId').textContent = data.export_id || data.exportID || 'N/A';
+    const metricsValue = data.metrics_count ?? data.metrics_exported ?? 0;
+    document.getElementById('metricsCount').textContent = (metricsValue || 0).toLocaleString();
+    const archiveSizeValue = data.archive_size ?? data.archive_size_bytes ?? 0;
+    document.getElementById('archiveSize').textContent = ((archiveSizeValue || 0) / 1024).toFixed(2);
     document.getElementById('archiveSha256').textContent = data.sha256 || 'N/A';
     
     // Render spoilers with sample data
     if (data.sample_data && data.sample_data.length > 0) {
         renderExportSpoilers(data.sample_data);
+    }
+}
+
+function showExportProgressPanel(meta) {
+	const panel = document.getElementById('exportProgressPanel');
+	const percent = document.getElementById('exportProgressPercent');
+	const batches = document.getElementById('exportProgressBatches');
+	const metrics = document.getElementById('exportProgressMetrics');
+	const eta = document.getElementById('exportProgressEta');
+	const windowInfo = document.getElementById('exportBatchWindow');
+	const fill = document.getElementById('exportProgressFill');
+
+	if (panel) {
+		panel.classList.remove('hidden');
+		panel.style.display = 'block';
+	}
+	if (percent) {
+		percent.textContent = '0%';
+	}
+	if (batches) {
+		batches.textContent = `0 / ${meta.total_batches || 1} batches`;
+	}
+	if (metrics) {
+		metrics.textContent = 'Waiting for first batch...';
+	}
+	if (eta) {
+		eta.textContent = 'Estimating time to completion…';
+	}
+	if (windowInfo && meta.batch_window_seconds) {
+		windowInfo.textContent = `Batch window ≈ ${Math.round(meta.batch_window_seconds)}s`;
+	}
+	if (fill) {
+		fill.style.width = '0%';
+	}
+    if (meta.staging_path) {
+        exportStagingPath = meta.staging_path;
+    }
+    if (typeof meta.obfuscation_enabled === 'boolean') {
+        currentJobObfuscationEnabled = meta.obfuscation_enabled;
+    } else {
+        currentJobObfuscationEnabled = false;
+    }
+    renderExportStagingPath(exportStagingPath);
+    const cancelBtn = document.getElementById('cancelExportBtn');
+    if (cancelBtn) {
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = 'Cancel export';
+    }
+    showCancelNotice('');
+}
+
+function updateExportProgress(status) {
+	const fill = document.getElementById('exportProgressFill');
+	const percentEl = document.getElementById('exportProgressPercent');
+	const batchesEl = document.getElementById('exportProgressBatches');
+	const metricsEl = document.getElementById('exportProgressMetrics');
+	const etaEl = document.getElementById('exportProgressEta');
+	const summaryEl = document.getElementById('exportProgressSummary');
+
+	const percentage = Math.min(100, Math.round((status.progress || 0) * 100));
+	if (fill) {
+		fill.style.width = percentage + '%';
+	}
+	if (percentEl) {
+		percentEl.textContent = percentage + '%';
+	}
+	if (batchesEl) {
+		batchesEl.textContent = `${status.completed_batches || 0} / ${status.total_batches || 1} batches`;
+	}
+	if (metricsEl) {
+        const descriptor = (status.obfuscation_enabled ?? currentJobObfuscationEnabled) ? 'obfuscated' : 'processed';
+		metricsEl.textContent = `${(status.metrics_processed || 0).toLocaleString()} series ${descriptor}`;
+	}
+	if (etaEl) {
+		etaEl.textContent = status.eta ? `ETA ${new Date(status.eta).toLocaleTimeString()}` : '';
+	}
+	if (summaryEl) {
+		const last = typeof status.last_batch_duration_seconds === 'number'
+			? status.last_batch_duration_seconds.toFixed(1)
+			: '0.0';
+		const avg = typeof status.average_batch_seconds === 'number'
+			? status.average_batch_seconds.toFixed(1)
+			: '0.0';
+		summaryEl.textContent = `Last batch ${last}s • Avg ${avg}s`;
+	}
+    if (typeof status.obfuscation_enabled === 'boolean') {
+        currentJobObfuscationEnabled = status.obfuscation_enabled;
+    }
+    if (status.staging_path) {
+        exportStagingPath = status.staging_path;
+    }
+    renderExportStagingPath(exportStagingPath);
+}
+
+function cleanupExportPolling() {
+	if (exportStatusTimer) {
+		clearInterval(exportStatusTimer);
+		exportStatusTimer = null;
+	}
+    exportStagingPath = '';
+    currentJobObfuscationEnabled = false;
+    currentExportJobId = null;
+    renderExportStagingPath('');
+    disableCancelButton();
+}
+
+function renderExportStagingPath(path) {
+    const el = document.getElementById('exportProgressPath');
+    if (el) {
+        el.textContent = path || '—';
     }
 }
 
@@ -1370,9 +1972,9 @@ function renderExportSpoilers(samples) {
                 </div>
             </div>
         `;
-    });
-    
-    container.innerHTML = html;
+	});
+	
+	container.innerHTML = html;
 }
 
 function toggleSpoiler(header) {
@@ -1385,6 +1987,57 @@ function toggleSpoiler(header) {
     } else {
         content.classList.add('open');
         arrow.textContent = '▲';
+    }
+}
+
+function showCancelNotice(message, color = '#c62828') {
+    const el = document.getElementById('exportCancelNotice');
+    if (el) {
+        el.textContent = message || '';
+        el.style.color = color;
+    }
+}
+
+function disableCancelButton() {
+    const cancelBtn = document.getElementById('cancelExportBtn');
+    if (cancelBtn) {
+        cancelBtn.disabled = true;
+        cancelBtn.textContent = 'Cancel export';
+    }
+}
+
+async function cancelExportJob() {
+    if (!currentExportJobId || cancelRequestInFlight) {
+        return;
+    }
+    cancelRequestInFlight = true;
+    const cancelBtn = document.getElementById('cancelExportBtn');
+    if (cancelBtn) {
+        cancelBtn.disabled = true;
+        cancelBtn.textContent = 'Canceling…';
+    }
+    showCancelNotice('Sending cancellation request…');
+    try {
+        const resp = await fetch('/api/export/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_id: currentExportJobId }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+            throw new Error(data.error || 'Failed to cancel export');
+        }
+        showCancelNotice('Cancellation requested. Waiting for exporter to stop…');
+    } catch (err) {
+        console.error('Cancel export failed', err);
+        alert('Failed to cancel export: ' + err.message);
+        if (cancelBtn) {
+            cancelBtn.disabled = false;
+            cancelBtn.textContent = 'Cancel export';
+        }
+        showCancelNotice('');
+    } finally {
+        cancelRequestInFlight = false;
     }
 }
 
