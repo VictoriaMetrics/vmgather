@@ -1,4 +1,9 @@
-.PHONY: test test-fast test-full test-llm build build-safe build-all clean fmt lint help test-env test-env-up test-env-down test-env-logs test-scenarios
+.PHONY: test test-fast test-full test-llm build build-safe build-all clean fmt lint help test-env test-env-up test-env-down test-env-logs test-scenarios docker-build docker-build-vmexporter docker-build-vmimporter
+
+VERSION ?= $(shell git describe --tags --always --dirty)
+PLATFORMS ?= linux/amd64,linux/arm64
+GO_VERSION ?= 1.22
+DOCKER_OUTPUT ?= type=docker
 
 # Default target: show help
 .DEFAULT_GOAL := help
@@ -15,6 +20,7 @@ help:
 	@echo "  make build        - Build binary (with automatic tests)"
 	@echo "  make build-safe   - Build with full test suite + linting"
 	@echo "  make build-all    - Build for all platforms (8 targets)"
+	@echo "  make docker-build - Build multi-arch Docker images (vmexporter + vmimporter)"
 	@echo "  make clean        - Clean build artifacts"
 	@echo ""
 	@echo "🧪 TEST COMMANDS:"
@@ -205,8 +211,11 @@ build: test-fast
 	@echo "🔨 Building binary..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@go build -o vmexporter ./cmd/vmexporter
+	@go build -o vmimporter ./cmd/vmimporter
 	@echo "✅ Build complete: ./vmexporter"
 	@ls -lh vmexporter | awk '{print "📦 Size:", $$5}'
+	@echo "✅ Build complete: ./vmimporter"
+	@ls -lh vmimporter | awk '{print "📦 Size:", $$5}'
 
 # Build with full test suite and linting (recommended for releases)
 build-safe: test-full lint
@@ -215,7 +224,9 @@ build-safe: test-full lint
 	@echo "🔨 Building binary (safe mode)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@go build -o vmexporter ./cmd/vmexporter
+	@go build -o vmimporter ./cmd/vmimporter
 	@echo "✅ Build complete (all checks passed): ./vmexporter"
+	@echo "✅ Build complete (all checks passed): ./vmimporter"
 
 # Build for all platforms
 build-all: test-fast
@@ -232,9 +243,33 @@ build-all: test-fast
 # Clean build artifacts
 clean:
 	@echo "🧹 Cleaning build artifacts..."
-	@rm -f vmexporter coverage.out
+	@rm -f vmexporter vmimporter coverage.out
 	@rm -rf dist/
 	@echo "✅ Clean complete"
+
+# =============================================================================
+# DOCKER TARGETS
+# =============================================================================
+
+docker-build: docker-build-vmexporter docker-build-vmimporter
+
+docker-build-vmexporter:
+	@echo "🐳 Building vmexporter image for $(PLATFORMS)..."
+	@docker buildx build --platform $(PLATFORMS) \
+		--build-arg GO_VERSION=$(GO_VERSION) \
+		-f build/docker/Dockerfile.vmexporter \
+		-t vmexporter:$(VERSION) \
+		--output=$(DOCKER_OUTPUT) .
+	@echo "✅ Docker image vmexporter:$(VERSION) built."
+
+docker-build-vmimporter:
+	@echo "🐳 Building vmimporter image for $(PLATFORMS)..."
+	@docker buildx build --platform $(PLATFORMS) \
+		--build-arg GO_VERSION=$(GO_VERSION) \
+		-f build/docker/Dockerfile.vmimporter \
+		-t vmimporter:$(VERSION) \
+		--output=$(DOCKER_OUTPUT) .
+	@echo "✅ Docker image vmimporter:$(VERSION) built."
 
 # Format code
 fmt:
@@ -315,4 +350,3 @@ test-env: test-env-up test-scenarios
 	@echo ""
 	@echo "✅ All E2E tests completed!"
 	@echo "Run 'make test-env-down' to stop the environment"
-

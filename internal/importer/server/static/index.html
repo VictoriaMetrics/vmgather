@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VMImport - VictoriaMetrics Bundle Importer</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+    <style>
+        body {
+            font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #1d2671, #c33764);
+            min-height: 100vh;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 30px;
+        }
+        .card {
+            width: min(960px, 95vw);
+            background: #fff;
+            border-radius: 18px;
+            box-shadow: 0 30px 80px rgba(0,0,0,0.35);
+            padding: 40px;
+        }
+        h1 {
+            margin: 0;
+            font-size: 30px;
+            color: #1d1d1f;
+        }
+        .subtitle {
+            color: #5f6368;
+            margin-top: 6px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            color: #202124;
+            margin-bottom: 6px;
+        }
+        input[type="text"], input[type="password"], input[type="file"], select {
+            width: 100%;
+            padding: 12px 14px;
+            border-radius: 10px;
+            border: 1px solid #dadce0;
+            font-size: 15px;
+            margin-bottom: 12px;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: #1a73e8;
+            box-shadow: 0 0 0 3px rgba(26,115,232,0.15);
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 18px;
+        }
+        .button {
+            width: 100%;
+            border: none;
+            border-radius: 12px;
+            padding: 16px;
+            font-size: 17px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.1s ease;
+        }
+        .button.primary {
+            background: #1a73e8;
+            color: #fff;
+        }
+        .button.primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .button.secondary {
+            background: #f1f3f4;
+            color: #1f1f1f;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 16px;
+            border-radius: 12px;
+            background: #f8f9fa;
+            border: 1px solid #e0e0e0;
+            word-break: break-word;
+        }
+        .status.success { border-color: #1e8e3e; background: #e9f5ee; color: #137333; }
+        .status.error { border-color: #d93025; background: #fce8e6; color: #a50e0e; }
+        .drop-zone {
+            border: 2px dashed #dadce0;
+            border-radius: 12px;
+            padding: 30px;
+            text-align: center;
+            color: #5f6368;
+            cursor: pointer;
+            transition: border-color 0.2s ease, background 0.2s ease;
+        }
+        .drop-zone.dragover {
+            border-color: #1a73e8;
+            background: rgba(26,115,232,0.05);
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>VMImport</h1>
+        <p class="subtitle">Upload VMExporter bundles (.jsonl or .zip) straight into VictoriaMetrics endpoints.</p>
+
+        <div class="grid" style="margin-top: 20px;">
+            <div>
+                <label for="endpoint">VictoriaMetrics endpoint</label>
+                <input type="text" id="endpoint" placeholder="https://victoria.example.com">
+            </div>
+            <div>
+                <label for="tenantId">Tenant / Account ID</label>
+                <input type="text" id="tenantId" placeholder="0">
+            </div>
+            <div>
+                <label for="username">Username (optional)</label>
+                <input type="text" id="username" placeholder="basic auth username">
+            </div>
+            <div>
+                <label for="password">Password / Token</label>
+                <input type="password" id="password" placeholder="••••••">
+            </div>
+        </div>
+
+        <label style="display:flex;align-items:center;gap:8px;margin:16px 0;">
+            <input type="checkbox" id="skipTls">
+            Skip TLS verification (air-gapped environments)
+        </label>
+
+        <label>Bundle file (.jsonl or .zip)</label>
+        <div class="drop-zone" id="dropZone">
+            <strong>Drop file here</strong> or click to browse
+            <input type="file" id="bundleFile" accept=".jsonl,.zip" style="display:none;" />
+        </div>
+
+        <div style="margin-top: 24px; display:flex; gap:16px;">
+            <button class="button secondary" onclick="resetForm()">Reset</button>
+            <button class="button primary" onclick="uploadBundle()" id="uploadBtn">Send bundle</button>
+        </div>
+
+        <div class="status" id="statusPanel" style="display:none;"></div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

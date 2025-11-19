@@ -14,6 +14,7 @@ A high-level breakdown of how the VictoriaMetrics metrics exporter is structured
 | Layer | Package | Responsibility |
 | --- | --- | --- |
 | Presentation | `internal/server` | Hosts the HTTP server, serves static assets, exposes REST endpoints to the UI. |
+| Presentation | `internal/importer/server` | Standalone VMImport UI & API for uploading bundles back into VictoriaMetrics. |
 | Application | `internal/application/services` | Orchestrates validation, discovery, sampling, and export workflows. |
 | Infrastructure | `internal/infrastructure/vm` | VictoriaMetrics client (query, export APIs, auth, multitenancy). |
 | Infrastructure | `internal/infrastructure/obfuscation` | Deterministic obfuscation for IPs/jobs/custom labels. |
@@ -85,3 +86,17 @@ All endpoints accept/return JSON with error details suitable for UI presentation
 - Unit tests cover domain logic, VM API client edge cases, obfuscation permutations, and archive writing.
 - Integration tests spin up VictoriaMetrics flavours through `local-test-env`.
 - Playwright E2E suites exercise the complete wizard flow, ensuring API contracts stay stable.
+
+## VMImport companion flow
+
+VMImport is purposely isolated from the exporter codebase to minimise coupling: aside from sharing the repo and build tooling it does not import exporter packages. Its flow is intentionally short:
+
+```
+Browser (drop zone + endpoint form)
+  ↓ /api/upload (multipart form)
+internal/importer/server
+  ↓
+sendToEndpoint → VictoriaMetrics /api/v1/import
+```
+
+The UI mirrors VMExporter's connection card but introduces tenant/account ID fields and a drag-and-drop area for `.jsonl`/`.zip` bundles. The backend treats uploaded data as opaque bytes and re-streams it to VictoriaMetrics, reusing the same auth/TLS toggles. Tests reuse `local-test-env` so uploads can be validated against real vmselect/vminsert setups before releasing.
