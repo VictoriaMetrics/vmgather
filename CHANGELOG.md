@@ -40,3 +40,14 @@ All notable changes to VMExporter are documented here. The format follows [Keep 
 - UI localisation and accessibility are not final.
 
 Please report regressions or feature requests via GitHub issues or info@victoriametrics.com.
+## [Unreleased]
+
+### Added
+- VMImport – a companion UI/binary/Docker image that replays VMExporter bundles back into VictoriaMetrics (`cmd/vmimporter`, `internal/importer/server`). Includes tenant-aware endpoint form, drag-and-drop uploader, and unit tests.
+- Official Dockerfiles for both utilities with Buildx-compatible multi-arch builds (`build/docker/Dockerfile.vmexporter` and `build/docker/Dockerfile.vmimporter`), plus Make targets to produce amd64+arm64 images in CI.
+- Builder script now emits vmexporter **and** vmimporter binaries across the entire platform matrix with combined checksums.
+
+### Documentation
+- README now covers Docker usage, VMImport quick start, and the expanded release workflow.
+- Architecture and development guides document the importer flow, repository layout updates, and new build commands.
+- Batch export testing report tracks importer/Docker smoke tests alongside the existing suite.

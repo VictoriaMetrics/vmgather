@@ -14,8 +14,9 @@ Step-by-step instructions for hacking on VMExporter like any other VictoriaMetri
 ```bash
 git clone https://github.com/VictoriaMetrics/support.git
 cd support
-make build           # compiles ./vmexporter
-./vmexporter         # launches the local UI
+make build           # compiles ./vmexporter and ./vmimporter
+./vmexporter         # launches the export wizard
+./vmimporter         # launches the bundle uploader
 ```
 
 `make deps` installs JS dependencies for E2E tests if needed.
@@ -23,8 +24,10 @@ make build           # compiles ./vmexporter
 ## Repository layout
 
 ```
-cmd/vmexporter/           - CLI entry point
-internal/server/          - HTTP server + handlers + embedded static files
+cmd/vmexporter/           - Export wizard entry point
+cmd/vmimporter/           - Bundle uploader entry point
+internal/server/          - Exporter HTTP server + embedded UI
+internal/importer/server/ - Importer HTTP server + embedded UI
 internal/application/     - services orchestrating validation/export flows
 internal/infrastructure/  - VictoriaMetrics client, obfuscation, archive writer
 internal/domain/          - shared structs/enums
@@ -61,6 +64,7 @@ make test-e2e
 | `make test` | Run Go unit tests with race detector disabled (faster for CI). |
 | `make test-coverage` | Produce `coverage.out`. |
 | `INTEGRATION_TEST=1 go test ./tests/integration/...` | Exercises VM client against dockerised VictoriaMetrics. |
+| `go test ./internal/importer/server` | Quick importer-only tests. |
 | `make test-env-up` / `make test-env-down` | Start/stop the `local-test-env`. |
 | `make test-scenarios` | Runs the curated scenario script across VM flavours. |
 | `make test-e2e` | Playwright UI suite (requires local-test-env). |
@@ -75,11 +79,12 @@ make test-e2e
 ## Release builds
 
 ```bash
-make build          # local platform
-make build-all      # linux/macos/windows matrices + checksums
+make build             # local platform (vmexporter + vmimporter)
+make build-all         # linux/macos/windows matrices + checksums for both binaries
+make docker-build      # buildx multi-arch images (linux/amd64 + linux/arm64)
 ```
 
-Artifacts are placed in `dist/` and uploaded to GitHub releases. Ensure [CHANGELOG.md](../CHANGELOG.md) reflects user-visible changes before tagging.
+Artifacts are placed in `dist/` and uploaded to GitHub releases. Docker images land in your local Buildx cache (or registry when `DOCKER_OUTPUT=type=registry`). Ensure [CHANGELOG.md](../CHANGELOG.md) reflects user-visible changes before tagging.
 
 ## Debug tips
 

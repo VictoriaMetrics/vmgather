@@ -12,10 +12,7 @@ import (
 	"time"
 )
 
-const (
-	binaryName = "vmexporter"
-	distDir    = "dist"
-)
+const distDir = "dist"
 
 var version = getVersion()
 
@@ -29,6 +26,7 @@ type Platform struct {
 
 // BuildResult contains build output information
 type BuildResult struct {
+	Binary     string
 	Platform   Platform
 	OutputPath string
 	Size       int64
@@ -37,16 +35,26 @@ type BuildResult struct {
 	Error      error
 }
 
+type BinaryTarget struct {
+	Name string
+	Main string
+}
+
+var binaries = []BinaryTarget{
+	{Name: "vmexporter", Main: "./cmd/vmexporter"},
+	{Name: "vmimporter", Main: "./cmd/vmimporter"},
+}
+
 var platforms = []Platform{
 	// Linux
 	{GOOS: "linux", GOARCH: "amd64", Ext: ""},
 	{GOOS: "linux", GOARCH: "arm64", Ext: ""},
 	{GOOS: "linux", GOARCH: "386", Ext: ""},
-	
+
 	// macOS
 	{GOOS: "darwin", GOARCH: "amd64", Ext: "", Alias: "macos-intel"},
 	{GOOS: "darwin", GOARCH: "arm64", Ext: "", Alias: "macos-apple-silicon"},
-	
+
 	// Windows
 	{GOOS: "windows", GOARCH: "amd64", Ext: ".exe"},
 	{GOOS: "windows", GOARCH: "arm64", Ext: ".exe"},
@@ -54,8 +62,8 @@ var platforms = []Platform{
 }
 
 func main() {
-	fmt.Printf("🚀 VMExporter Build System v%s\n", version)
-	fmt.Printf("📦 Building for %d platforms...\n\n", len(platforms))
+	fmt.Printf("🚀 Support Bundle Build System v%s\n", version)
+	fmt.Printf("📦 Building %d binaries across %d platforms...\n\n", len(binaries), len(platforms))
 
 	// Create dist directory
 	if err := os.RemoveAll(distDir); err != nil && !os.IsNotExist(err) {
@@ -65,25 +73,28 @@ func main() {
 		fatal("Failed to create dist directory: %v", err)
 	}
 
-	// Build for all platforms
-	results := make([]BuildResult, 0, len(platforms))
+	results := make([]BuildResult, 0, len(platforms)*len(binaries))
 	successCount := 0
 
-	for _, platform := range platforms {
-		result := buildPlatform(platform)
-		results = append(results, result)
+	for _, binary := range binaries {
+		fmt.Printf("=== %s ===\n", binary.Name)
+		for _, platform := range platforms {
+			result := buildPlatform(binary, platform)
+			results = append(results, result)
 
-		if result.Error == nil {
-			successCount++
-			fmt.Printf("✅ %s/%s: %s (%.2f MB, %s)\n",
-				platform.GOOS,
-				platform.GOARCH,
-				result.OutputPath,
-				float64(result.Size)/1024/1024,
-				result.BuildTime.Round(time.Millisecond),
-			)
-		} else {
-			fmt.Printf("❌ %s/%s: %v\n", platform.GOOS, platform.GOARCH, result.Error)
+			if result.Error == nil {
+				successCount++
+				fmt.Printf("✅ %s %s/%s: %s (%.2f MB, %s)\n",
+					result.Binary,
+					platform.GOOS,
+					platform.GOARCH,
+					result.OutputPath,
+					float64(result.Size)/1024/1024,
+					result.BuildTime.Round(time.Millisecond),
+				)
+			} else {
+				fmt.Printf("❌ %s %s/%s: %v\n", result.Binary, platform.GOOS, platform.GOARCH, result.Error)
+			}
 		}
 	}
 
@@ -94,7 +105,7 @@ func main() {
 
 	// Print summary
 	fmt.Printf("\n📊 Build Summary:\n")
-	fmt.Printf("   Success: %d/%d\n", successCount, len(platforms))
+	fmt.Printf("   Success: %d/%d\n", successCount, len(platforms)*len(binaries))
 	fmt.Printf("   Output:  %s/\n", distDir)
 	fmt.Printf("   Files:   %s\n", strings.Join(listDistFiles(), ", "))
 
@@ -104,12 +115,12 @@ func main() {
 }
 
 // buildPlatform builds binary for specified platform
-func buildPlatform(platform Platform) BuildResult {
+func buildPlatform(binary BinaryTarget, platform Platform) BuildResult {
 	start := time.Now()
 
 	// Generate output filename
 	filename := fmt.Sprintf("%s-v%s-%s-%s%s",
-		binaryName,
+		binary.Name,
 		version,
 		platform.GOOS,
 		platform.GOARCH,
@@ -121,7 +132,7 @@ func buildPlatform(platform Platform) BuildResult {
 	cmd := exec.Command("go", "build",
 		"-o", outputPath,
 		"-ldflags", fmt.Sprintf("-s -w -X main.version=%s", version),
-		"./cmd/vmexporter",
+		binary.Main,
 	)
 
 	// Set environment for cross-compilation
@@ -167,13 +178,13 @@ func buildPlatform(platform Platform) BuildResult {
 	// Create alias copy if specified (e.g., macos-apple-silicon)
 	if platform.Alias != "" {
 		aliasFilename := fmt.Sprintf("%s-v%s-%s%s",
-			binaryName,
+			binary.Name,
 			version,
 			platform.Alias,
 			platform.Ext,
 		)
 		aliasPath := filepath.Join(distDir, aliasFilename)
-		
+
 		// Copy file
 		if err := copyFile(outputPath, aliasPath); err == nil {
 			fmt.Printf("   📋 Created alias: %s\n", aliasFilename)
@@ -181,6 +192,7 @@ func buildPlatform(platform Platform) BuildResult {
 	}
 
 	return BuildResult{
+		Binary:     binary.Name,
 		Platform:   platform,
 		OutputPath: outputPath,
 		Size:       info.Size(),
@@ -214,7 +226,7 @@ func generateChecksums(results []BuildResult) error {
 	}
 	defer func() { _ = file.Close() }()
 
-	_, _ = fmt.Fprintf(file, "# VMExporter v%s - SHA256 Checksums\n", version)
+	_, _ = fmt.Fprintf(file, "# Support bundle utilities v%s - SHA256 Checksums\n", version)
 	_, _ = fmt.Fprintf(file, "# Generated: %s\n\n", time.Now().Format(time.RFC3339))
 
 	for _, result := range results {
@@ -280,4 +292,3 @@ func copyFile(src, dst string) error {
 	_, err = io.Copy(destFile, sourceFile)
 	return err
 }
-

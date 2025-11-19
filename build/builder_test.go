@@ -137,7 +137,7 @@ func TestBuildPlatform_InvalidPlatform(t *testing.T) {
 		Ext:    "",
 	}
 
-	result := buildPlatform(invalidPlatform)
+	result := buildPlatform(binaries[0], invalidPlatform)
 
 	// Should have error
 	if result.Error == nil {
@@ -171,7 +171,7 @@ func TestListDistFiles(t *testing.T) {
 	// This test is limited because listDistFiles uses const distDir
 	// Just verify it doesn't crash
 	files := listDistFiles()
-	
+
 	// Should return slice (may be empty)
 	if files == nil {
 		t.Error("expected non-nil slice")
@@ -190,18 +190,21 @@ func TestGenerateChecksums(t *testing.T) {
 	// Mock results
 	results := []BuildResult{
 		{
-			Platform: Platform{GOOS: "linux", GOARCH: "amd64"},
+			Binary:     "vmexporter",
+			Platform:   Platform{GOOS: "linux", GOARCH: "amd64"},
 			OutputPath: filepath.Join(tmpDir, "vmexporter-linux-amd64"),
-			SHA256: "abc123",
+			SHA256:     "abc123",
 		},
 		{
-			Platform: Platform{GOOS: "windows", GOARCH: "amd64"},
-			OutputPath: filepath.Join(tmpDir, "vmexporter-windows-amd64.exe"),
-			SHA256: "def456",
+			Binary:     "vmimporter",
+			Platform:   Platform{GOOS: "windows", GOARCH: "amd64"},
+			OutputPath: filepath.Join(tmpDir, "vmimporter-windows-amd64.exe"),
+			SHA256:     "def456",
 		},
 		{
+			Binary:   "vmimporter",
 			Platform: Platform{GOOS: "darwin", GOARCH: "arm64"},
-			Error: os.ErrNotExist, // This one failed
+			Error:    os.ErrNotExist, // This one failed
 		},
 	}
 
@@ -230,6 +233,7 @@ func TestGenerateChecksums(t *testing.T) {
 // TestBuildResult_Structure tests BuildResult struct
 func TestBuildResult_Structure(t *testing.T) {
 	result := BuildResult{
+		Binary: "vmexporter",
 		Platform: Platform{
 			GOOS:   "linux",
 			GOARCH: "amd64",
@@ -259,7 +263,7 @@ func TestBuildResult_Structure(t *testing.T) {
 func TestPlatformCount(t *testing.T) {
 	// We should have at least 6 platforms (Linux/macOS/Windows x amd64/arm64)
 	minPlatforms := 6
-	
+
 	if len(platforms) < minPlatforms {
 		t.Errorf("expected at least %d platforms, got %d", minPlatforms, len(platforms))
 	}
@@ -291,14 +295,14 @@ func TestVersionConstant(t *testing.T) {
 	}
 }
 
-// TestBinaryNameConstant tests binary name constant
-func TestBinaryNameConstant(t *testing.T) {
-	if binaryName == "" {
-		t.Error("binaryName constant is empty")
+func TestBinaryTargetsDefined(t *testing.T) {
+	if len(binaries) == 0 {
+		t.Fatal("no binaries defined")
 	}
-
-	if binaryName != "vmexporter" {
-		t.Errorf("binaryName = %s, want vmexporter", binaryName)
+	for _, target := range binaries {
+		if target.Name == "" || target.Main == "" {
+			t.Fatalf("invalid binary target %+v", target)
+		}
 	}
 }
 
@@ -312,4 +316,3 @@ func TestDistDirConstant(t *testing.T) {
 		t.Error("distDir should not contain parent directory references")
 	}
 }
-
