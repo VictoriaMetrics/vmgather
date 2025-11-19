@@ -59,7 +59,9 @@ ZIP archive → browser download
 | `POST /api/validate` | Checks reachability, auth, and returns detected VM flavour + version. |
 	| `POST /api/discover` | Finds available components, per-job series estimates, and jobs via `vm_app_version`. |
 | `POST /api/sample` | Fetches preview metrics (up to a safe limit) for UI confirmation. |
-| `POST /api/export` | Executes the export workflow, streaming data into a temporary archive. |
+| `POST /api/export` | Legacy synchronous export used by CLI tools. Still available for compatibility. |
+| `POST /api/export/start` | Starts a batched export job, including optional `staging_dir` and `metric_step_seconds` hints, and returns job meta (batches/ETA/staging path). |
+| `GET /api/export/status` | Polls the state of a running export job (progress, ETA, final archive metadata). |
 | `GET /api/download?path=…` | Returns the generated ZIP file. |
 
 All endpoints accept/return JSON with error details suitable for UI presentation.

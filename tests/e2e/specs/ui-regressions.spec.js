@@ -84,11 +84,39 @@ test.describe('UI regressions', () => {
       });
     });
 
-    await page.route('**/api/export', route => {
+    await page.route('**/api/export/start', route => {
+      const payload = route.request().postDataJSON();
+      expect(payload.staging_dir).toBe('/tmp/ui-regression');
       route.fulfill({
         status: 200,
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
+          job_id: 'job-ui-regression',
+          total_batches: 2,
+          batch_window_seconds: 30,
+          staging_path: '/tmp/ui-regression',
+        }),
+      });
+    });
+
+    let pollCount = 0;
+    await page.route('**/api/export/status**', route => {
+      pollCount += 1;
+      const running = pollCount < 2;
+      const body = {
+        job_id: 'job-ui-regression',
+        state: running ? 'running' : 'completed',
+        total_batches: 2,
+        completed_batches: running ? 1 : 2,
+        progress: running ? 0.5 : 1,
+        metrics_processed: running ? 50 : 100,
+        batch_window_seconds: 30,
+        average_batch_seconds: running ? 28 : 30,
+        last_batch_duration_seconds: 28,
+        staging_path: '/tmp/ui-regression',
+      };
+      if (!running) {
+        body.result = {
           export_id: 'test',
           archive_path: '/tmp/export.zip',
           archive_size: 1024,
@@ -104,7 +132,12 @@ test.describe('UI regressions', () => {
               },
             },
           ],
-        }),
+        };
+      }
+      route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
       });
     });
 
@@ -122,8 +155,11 @@ test.describe('UI regressions', () => {
     const step5 = page.locator('.step[data-step="5"]');
     await expect(step5.locator('#selectionSummary')).toContainText('42 series');
     await expect(step5.locator('#samplePreview')).toContainText('777.777.1.1');
+    await step5.locator('#stagingDir').fill('/tmp/ui-regression');
+    await step5.locator('#metricStep').selectOption('60');
 
     await step5.locator('button.btn-primary:has-text("Start Export")').click();
+    await expect(page.locator('#exportProgressPath')).toContainText('/tmp/ui-regression');
 
     const step6 = page.locator('.step[data-step="6"]');
     await expect(step6.locator('#exportSpoilers')).toContainText('777.777.1.1:8080');

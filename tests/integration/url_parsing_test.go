@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -13,6 +14,9 @@ import (
 // URL: https://vm.example.com/1011/rw/prometheus
 // Locally via nginx: http://vm.example.com:8888/1011/rw/prometheus
 func TestRealScenario_VMAuthWithTenant(t *testing.T) {
+	if os.Getenv("VMEXPORTER_INTEGRATION") == "" {
+		t.Skip("skipping real VM integration test; set VMEXPORTER_INTEGRATION=1 to enable")
+	}
 	// This is the EXACT config user has (but via nginx proxy with domain)
 	config := domain.ExportConfig{
 		Connection: domain.VMConnection{

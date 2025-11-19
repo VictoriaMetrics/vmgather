@@ -48,6 +48,13 @@ type VMComponent struct {
 	JobMetrics           map[string]int `json:"job_metrics,omitempty"`
 }
 
+// BatchSettings controls batching for long-running exports
+type BatchSettings struct {
+	Enabled            bool   `json:"enabled"`
+	Strategy           string `json:"strategy,omitempty"` // e.g. "auto"
+	CustomIntervalSecs int    `json:"custom_interval_seconds,omitempty"`
+}
+
 // MetricSample represents a sample metric for preview
 type MetricSample struct {
 	MetricName string            `json:"metric_name"`
@@ -74,12 +81,16 @@ type OutputSettings struct {
 
 // ExportConfig contains full export configuration
 type ExportConfig struct {
-	Connection     VMConnection      `json:"connection"`
-	TimeRange      TimeRange         `json:"time_range"`
-	Components     []string          `json:"components"`
-	Jobs           []string          `json:"jobs"`
-	Obfuscation    ObfuscationConfig `json:"obfuscation"`
-	OutputSettings OutputSettings    `json:"output_settings"`
+	Connection        VMConnection      `json:"connection"`
+	TimeRange         TimeRange         `json:"time_range"`
+	Components        []string          `json:"components"`
+	Jobs              []string          `json:"jobs"`
+	Obfuscation       ObfuscationConfig `json:"obfuscation"`
+	Batching          BatchSettings     `json:"batching"`
+	StagingDir        string            `json:"staging_dir,omitempty"`
+	StagingFile       string            `json:"staging_file,omitempty"`
+	MetricStepSeconds int               `json:"metric_step_seconds,omitempty"`
+	OutputSettings    OutputSettings    `json:"output_settings"`
 }
 
 // ExportResult represents the result of an export operation

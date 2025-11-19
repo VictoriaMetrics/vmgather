@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,44 @@ func TestNewExportService(t *testing.T) {
 
 	// Verify service implements interface
 	var _ ExportService = service
+}
+
+func TestCalculateBatchWindows(t *testing.T) {
+	now := time.Now()
+	tr := domain.TimeRange{Start: now.Add(-10 * time.Minute), End: now}
+	windows := CalculateBatchWindows(tr, domain.BatchSettings{Enabled: true})
+	if len(windows) == 0 {
+		t.Fatal("expected batch windows")
+	}
+	for i := 1; i < len(windows); i++ {
+		if !windows[i].Start.Equal(windows[i-1].End) {
+			t.Fatalf("windows not contiguous: %v -> %v", windows[i-1], windows[i])
+		}
+	}
+
+	custom := CalculateBatchWindows(tr, domain.BatchSettings{Enabled: true, CustomIntervalSecs: 120})
+	if custom[0].End.Sub(custom[0].Start) != 2*time.Minute {
+		t.Fatalf("expected 2m batches, got %v", custom[0].End.Sub(custom[0].Start))
+	}
+}
+
+func TestRecommendedMetricStepSeconds(t *testing.T) {
+	now := time.Now()
+	cases := []struct {
+		duration time.Duration
+		expected int
+	}{
+		{10 * time.Minute, 30},
+		{2 * time.Hour, 60},
+		{12 * time.Hour, 300},
+	}
+	for _, tc := range cases {
+		tr := domain.TimeRange{Start: now.Add(-tc.duration), End: now}
+		got := RecommendedMetricStepSeconds(tr)
+		if got != tc.expected {
+			t.Fatalf("duration %v => %d, want %d", tc.duration, got, tc.expected)
+		}
+	}
 }
 
 // TestExportService_BuildSelector tests selector building
@@ -248,6 +287,23 @@ func TestExportService_BuildArchiveMetadata(t *testing.T) {
 	}
 }
 
+func TestDetermineQueryRangeStep(t *testing.T) {
+	now := time.Now()
+	tr := domain.TimeRange{Start: now.Add(-2 * time.Hour), End: now}
+	step := determineQueryRangeStep(tr, 0)
+	if step != time.Minute {
+		t.Fatalf("expected default 1m step, got %v", step)
+	}
+	step = determineQueryRangeStep(tr, 300)
+	if step != 5*time.Minute {
+		t.Fatalf("expected override to 5m, got %v", step)
+	}
+	step = determineQueryRangeStep(tr, 5)
+	if step < 30*time.Second {
+		t.Fatalf("expected minimum 30s, got %v", step)
+	}
+}
+
 // TestExportService_ProcessMetrics_NoObfuscation tests processing without obfuscation
 func TestExportService_ProcessMetrics_NoObfuscation(t *testing.T) {
 	service := &exportServiceImpl{}
@@ -335,6 +391,35 @@ func TestExportService_ProcessMetrics_WithObfuscation(t *testing.T) {
 	// Verify output is valid JSONL
 	if processedReader == nil {
 		t.Fatal("processedReader is nil")
+	}
+}
+
+func TestProcessMetricsIntoWriterFile(t *testing.T) {
+	service := &exportServiceImpl{}
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "partial.jsonl")
+	handle, err := os.Create(file)
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+
+	metricsData := `{"metric":{"__name__":"up","instance":"a","job":"j"},"values":[1],"timestamps":[1000]}`
+	count, err := service.processMetricsIntoWriter(strings.NewReader(metricsData), domain.ObfuscationConfig{}, nil, handle)
+	if err != nil {
+		t.Fatalf("processMetricsIntoWriter failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 metric, got %d", count)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatalf("failed to close temp file: %v", err)
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("failed to read temp file: %v", err)
+	}
+	if !strings.Contains(string(data), `"__name__":"up"`) {
+		t.Fatalf("expected metric contents in staging file, got %s", string(data))
 	}
 }
 

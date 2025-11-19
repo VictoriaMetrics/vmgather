@@ -19,6 +19,10 @@ type Writer struct {
 	outputDir string
 }
 
+func (w *Writer) OutputDir() string {
+	return w.outputDir
+}
+
 // NewWriter creates a new archive writer
 func NewWriter(outputDir string) *Writer {
 	return &Writer{
@@ -30,29 +34,29 @@ func NewWriter(outputDir string) *Writer {
 // Note: InstanceMap and JobMap are intentionally excluded from archive metadata
 // per issue #10 - mapping should not be included in the archive sent to customers
 type ArchiveMetadata struct {
-	ExportID       string                 `json:"export_id"`
-	ExportDate     time.Time              `json:"export_date"`
-	TimeRange      domain.TimeRange       `json:"time_range"`
-	Components     []string               `json:"components"`
-	Jobs           []string               `json:"jobs"`
-	MetricsCount   int                    `json:"metrics_count"`
-	Obfuscated     bool                   `json:"obfuscated"`
-	InstanceMap    map[string]string      `json:"instance_map,omitempty"` // Internal use only, not included in archive
-	JobMap         map[string]string      `json:"job_map,omitempty"`      // Internal use only, not included in archive
-	VMExporterVersion string              `json:"vmexporter_version"`
-}
-
-// archiveMetadataPublic is the public version of metadata without obfuscation maps
-// This is what gets included in the archive sent to customers
-type archiveMetadataPublic struct {
 	ExportID          string            `json:"export_id"`
 	ExportDate        time.Time         `json:"export_date"`
 	TimeRange         domain.TimeRange  `json:"time_range"`
 	Components        []string          `json:"components"`
 	Jobs              []string          `json:"jobs"`
-	MetricsCount     int               `json:"metrics_count"`
+	MetricsCount      int               `json:"metrics_count"`
 	Obfuscated        bool              `json:"obfuscated"`
+	InstanceMap       map[string]string `json:"instance_map,omitempty"` // Internal use only, not included in archive
+	JobMap            map[string]string `json:"job_map,omitempty"`      // Internal use only, not included in archive
 	VMExporterVersion string            `json:"vmexporter_version"`
+}
+
+// archiveMetadataPublic is the public version of metadata without obfuscation maps
+// This is what gets included in the archive sent to customers
+type archiveMetadataPublic struct {
+	ExportID          string           `json:"export_id"`
+	ExportDate        time.Time        `json:"export_date"`
+	TimeRange         domain.TimeRange `json:"time_range"`
+	Components        []string         `json:"components"`
+	Jobs              []string         `json:"jobs"`
+	MetricsCount      int              `json:"metrics_count"`
+	Obfuscated        bool             `json:"obfuscated"`
+	VMExporterVersion string           `json:"vmexporter_version"`
 }
 
 // CreateArchive creates a ZIP archive with metrics data
@@ -220,4 +224,3 @@ func (w *Writer) GetArchiveSize(archivePath string) (int64, error) {
 	}
 	return info.Size(), nil
 }
-

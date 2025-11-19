@@ -21,6 +21,9 @@ VMExporter collects VictoriaMetrics internal metrics, obfuscates sensitive data,
 - **Single binary UI** – embedded web interface with a VictoriaMetrics-style 6-step wizard.
 - **Automatic discovery** – detects vmagent, vmstorage, vminsert, vmselect, vmalert, and vmsingle instances.
 - **Deterministic obfuscation** – configurable anonymisation for IPs, jobs, tenants, and custom labels.
+- **Disk-safe staging** – streams export batches to a user-selected directory so partial files survive crashes or manual interrupts.
+- **Adjustable metric cadence** – pick 30s/1m/5m deduplication steps per export to trim payload size on slow environments.
+- **Batched exports with ETA** – splits long ranges into 30s/1m/5m windows and shows progress + forecasted completion.
 - **Wide auth surface** – Basic, Bearer, custom headers, and multi-tenant VMAuth flows.
 - **Cross-platform builds** – Linux, macOS, Windows (amd64/arm64/386) with identical CLI flags.
 - **First-run ready** – opens browser on launch and guides through validation, sampling, and export.
@@ -96,7 +99,7 @@ make build
 3. **Validate** credentials and detect components.
 4. **Preview** metrics via sampling API calls.
 5. **Configure obfuscation** for IPs, jobs, or extra labels and review the estimated number of series that will be exported per component/job.
-6. **Export** – the backend streams `/api/v1/export`, obfuscates records (including sample previews), and creates a zip bundle with metadata + checksums.
+6. **Export** – pick a staging directory + metric step, watch the live progress/ETA (with the current partial file path), and let the backend stream batches to disk before archiving/obfuscating into a final bundle.
 
 See [docs/user-guide.md](docs/user-guide.md) for UI screenshots and parameter descriptions.
 

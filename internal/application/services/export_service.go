@@ -138,7 +138,9 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 	if err != nil {
 		return nil, fmt.Errorf("failed to open staging file for archive: %w", err)
 	}
-	defer processedReader.Close()
+	defer func() {
+		_ = processedReader.Close()
+	}()
 
 	archiveStartTime := time.Now()
 	archivePath, sha256sum, err := s.archiveWriter.CreateArchive(exportID, processedReader, metadata)
@@ -177,6 +179,7 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 
 // processMetrics processes exported metrics with optional obfuscation
 // Returns processed reader, metrics count, and obfuscation maps
+// nolint:unused // kept for advanced tests that need direct access to the processor
 func (s *exportServiceImpl) processMetrics(
 	reader io.Reader,
 	obfConfig domain.ObfuscationConfig,

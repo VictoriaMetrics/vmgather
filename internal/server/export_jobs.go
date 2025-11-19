@@ -291,13 +291,6 @@ func (m *ExportJobManager) cleanupLocked(now time.Time) {
 	}
 }
 
-// forceCleanup is used in tests to trigger retention cleanup.
-func (m *ExportJobManager) forceCleanup() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.cleanupLocked(time.Now())
-}
-
 type jobProgressReporter struct {
 	manager *ExportJobManager
 	jobID   string
