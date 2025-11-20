@@ -5,7 +5,7 @@ test.describe('Timezone Support', () => {
         await page.goto('http://localhost:8080');
         
         // Navigate to Time Range step
-        await page.click('button:has-text("Get Started")');
+        await page.click('button:has-text("Next")');
         
         // Check timezone selector exists
         const timezoneSelect = page.locator('#timezone');
@@ -17,7 +17,7 @@ test.describe('Timezone Support', () => {
 
     test('should have all major timezones available', async ({ page }) => {
         await page.goto('http://localhost:8080');
-        await page.click('button:has-text("Get Started")');
+        await page.click('button:has-text("Next")');
         
         const timezoneSelect = page.locator('#timezone');
         const options = await timezoneSelect.locator('option').allTextContents();
@@ -32,7 +32,7 @@ test.describe('Timezone Support', () => {
 
     test('should update time inputs when timezone changes', async ({ page }) => {
         await page.goto('http://localhost:8080');
-        await page.click('button:has-text("Get Started")');
+        await page.click('button:has-text("Next")');
         
         // Get initial time value
         const initialFrom = await page.locator('#timeFrom').inputValue();
@@ -54,7 +54,7 @@ test.describe('Timezone Support', () => {
 
     test('should apply timezone to preset buttons', async ({ page }) => {
         await page.goto('http://localhost:8080');
-        await page.click('button:has-text("Get Started")');
+        await page.click('button:has-text("Next")');
         
         // Select UTC timezone
         await page.selectOption('#timezone', 'UTC');
@@ -75,7 +75,7 @@ test.describe('Timezone Support', () => {
 
     test('should preserve timezone selection when using presets', async ({ page }) => {
         await page.goto('http://localhost:8080');
-        await page.click('button:has-text("Get Started")');
+        await page.click('button:has-text("Next")');
         
         // Select Europe/London
         await page.selectOption('#timezone', 'Europe/London');
@@ -95,7 +95,7 @@ test.describe('Timezone Support', () => {
 
     test('should format times correctly for different timezones', async ({ page }) => {
         await page.goto('http://localhost:8080');
-        await page.click('button:has-text("Get Started")');
+        await page.click('button:has-text("Next")');
         
         const timezones = ['local', 'UTC', 'America/New_York', 'Asia/Tokyo'];
         
@@ -115,4 +115,3 @@ test.describe('Timezone Support', () => {
         }
     });
 });
-

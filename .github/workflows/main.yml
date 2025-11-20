@@ -43,6 +43,70 @@ jobs:
           version: v1.59.1
           args: --timeout=5m
 
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Run integration suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            make test-env-down || true
+          }
+          trap cleanup EXIT
+          make test-env-up
+          INTEGRATION_TEST=1 go test ./tests/integration/...
+
+  docker-images:
+    name: Docker Images
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker images (smoke)
+        run: make docker-build PLATFORMS=linux/amd64
+
+  e2e-smoke:
+    name: Playwright Smoke
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build binaries
+        run: make build
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Playwright deps
+        run: |
+          cd tests/e2e
+          npm ci
+          npx playwright install --with-deps
+
+      - name: Run smoke tests
+        run: |
+          cd tests/e2e
+          npm run test:smoke
   # E2E tests disabled in CI - require Docker environment
   # Run locally with: make test-e2e
   # e2e:
@@ -74,4 +138,3 @@ jobs:
   #       with:
   #         name: playwright-report
   #         path: tests/e2e/playwright-report/
-

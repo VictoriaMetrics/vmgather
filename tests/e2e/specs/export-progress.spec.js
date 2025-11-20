@@ -137,7 +137,7 @@ test.beforeEach(async ({ page }) => {
 async function goToObfuscationStep(page) {
   await page.goto('http://localhost:8080');
   await page.waitForLoadState('networkidle');
-  await page.locator('button.btn-primary:has-text("Get Started")').click();
+  await page.locator('button.btn-primary:has-text("Next")').click();
   await page.waitForTimeout(200);
   const stepAfterClick = await page.evaluate(() => document.querySelector('.step.active')?.getAttribute('data-step') || null);
   if (stepAfterClick !== '2') {

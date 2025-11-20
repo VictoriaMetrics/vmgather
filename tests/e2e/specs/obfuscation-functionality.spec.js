@@ -75,7 +75,7 @@ async function goToObfuscation(page, url = 'http://localhost:8428', options = {}
     await ensureDefaultNetworkMocks(page, options);
     await page.goto('http://localhost:8080');
     await page.waitForLoadState('networkidle');
-    await page.locator('button.btn-primary:has-text("Get Started")').click();
+    await page.locator('button.btn-primary:has-text("Next")').click();
     await page.waitForTimeout(200);
     const current = await page.evaluate(() => document.querySelector('.step.active')?.getAttribute('data-step') || null);
     if (current !== '2') {

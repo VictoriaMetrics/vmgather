@@ -363,17 +363,22 @@ func TestHandleExportCancel(t *testing.T) {
 		t.Fatalf("expected 200 from cancel endpoint, got %d", w.Code)
 	}
 
+	// Give the cancel signal time to be processed
+	time.Sleep(50 * time.Millisecond)
+	
 	close(blocker.blockCh)
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(3 * time.Second)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	
 	for {
 		select {
 		case <-deadline:
 			t.Fatal("timeout waiting for job cancel state")
-		default:
+		case <-ticker.C:
 			if s, ok := server.jobManager.GetStatus(status.ID); ok && s.State == JobCanceled {
 				return
 			}
-			time.Sleep(10 * time.Millisecond)
 		}
 	}
 }

@@ -44,21 +44,21 @@ async function bootstrapAppConfig() {
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
-	await bootstrapAppConfig();
+    await bootstrapAppConfig();
 
     // Set default timezone to user's browser timezone
     initializeTimezone();
-    
+
     // Set default time range (last 1 hour)
     setPreset('1h');
-    
+
     // Initialize datetime-local inputs
     initializeDateTimePickers();
 
     initializeUrlValidation();
     updateSelectionSummary();
 
-	document.addEventListener('change', (event) => {
+    document.addEventListener('change', (event) => {
         const target = event.target;
         if (!target || !target.classList || !target.classList.contains('obf-label-checkbox')) {
             return;
@@ -76,8 +76,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         scheduleSampleReload();
     });
 
-	initializeStagingDirInput();
-	initializeMetricStepSelector();
+    initializeStagingDirInput();
+    initializeMetricStepSelector();
     disableCancelButton();
 });
 
@@ -87,11 +87,11 @@ function initializeTimezone() {
     if (!timezoneSelect) {
         return;
     }
-    
+
     // Get user's browser timezone
     try {
         const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        
+
         // Try to find matching option
         const options = timezoneSelect.options;
         for (let i = 0; i < options.length; i++) {
@@ -100,7 +100,7 @@ function initializeTimezone() {
                 return;
             }
         }
-        
+
         // If exact match not found, default to "local"
         timezoneSelect.value = 'local';
     } catch (e) {
@@ -115,7 +115,7 @@ function initializeDateTimePickers() {
     const timezone = document.getElementById('timezone')?.value || 'local';
     const now = new Date();
     const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
-    
+
     document.getElementById('timeTo').value = formatDateTimeLocal(now, timezone);
     document.getElementById('timeFrom').value = formatDateTimeLocal(oneHourAgo, timezone);
 }
@@ -123,19 +123,19 @@ function initializeDateTimePickers() {
 function formatDateTimeLocal(date, timezone = 'local') {
     // Format: YYYY-MM-DDTHH:mm
     let targetDate = date;
-    
+
     if (timezone !== 'local') {
         // Convert to target timezone
         const dateStr = date.toLocaleString('en-US', { timeZone: timezone });
         targetDate = new Date(dateStr);
     }
-    
+
     const year = targetDate.getFullYear();
     const month = String(targetDate.getMonth() + 1).padStart(2, '0');
     const day = String(targetDate.getDate()).padStart(2, '0');
     const hours = String(targetDate.getHours()).padStart(2, '0');
     const minutes = String(targetDate.getMinutes()).padStart(2, '0');
-    
+
     return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
@@ -144,7 +144,7 @@ function updateTimezoneTimes() {
     const timezone = document.getElementById('timezone').value;
     const now = new Date();
     const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
-    
+
     document.getElementById('timeTo').value = formatDateTimeLocal(now, timezone);
     document.getElementById('timeFrom').value = formatDateTimeLocal(oneHourAgo, timezone);
 }
@@ -260,18 +260,18 @@ function isValidHost(host) {
 // Navigation
 function nextStep() {
     if (currentStep >= totalSteps) return;
-    
+
     // Validate current step
     if (!validateStep(currentStep)) return;
-    
+
     // Move to next step
     const steps = document.querySelectorAll('.step');
     steps[currentStep - 1].classList.remove('active');
     currentStep++;
     steps[currentStep - 1].classList.add('active');
-    
+
     updateProgress();
-    
+
     // Load data for specific steps
     if (currentStep === 4) {
         discoverComponents();
@@ -283,25 +283,25 @@ function nextStep() {
 
 function prevStep() {
     if (currentStep <= 1) return;
-    
+
     const steps = document.querySelectorAll('.step');
     steps[currentStep - 1].classList.remove('active');
     currentStep--;
     steps[currentStep - 1].classList.add('active');
-    
+
     updateProgress();
 }
 
 function updateProgress() {
     const progress = ((currentStep - 1) / (totalSteps - 1)) * 100;
     document.getElementById('progress').style.width = progress + '%';
-    
+
     const stepNames = ['Welcome', 'Time Range', 'VM Connection', 'Select Components', 'Obfuscation', 'Complete'];
     document.getElementById('stepInfo').textContent = `Step ${currentStep} of ${totalSteps}: ${stepNames[currentStep - 1]}`;
 }
 
 function validateStep(step) {
-    switch(step) {
+    switch (step) {
         case 2:
             // Validate time range
             const from = document.getElementById('timeFrom').value;
@@ -315,7 +315,7 @@ function validateStep(step) {
                 return false;
             }
             return true;
-            
+
         case 3:
             // Validate connection
             if (!connectionValid) {
@@ -323,7 +323,7 @@ function validateStep(step) {
                 return false;
             }
             return true;
-            
+
         case 4:
             // Validate component selection
             const selected = document.querySelectorAll('.component-item input[type="checkbox"]:checked');
@@ -332,7 +332,7 @@ function validateStep(step) {
                 return false;
             }
             return true;
-            
+
         default:
             return true;
     }
@@ -343,8 +343,8 @@ function setPreset(preset, clickedButton) {
     const now = new Date();
     const timezone = document.getElementById('timezone').value;
     let from;
-    
-    switch(preset) {
+
+    switch (preset) {
         case '15m':
             from = new Date(now.getTime() - 15 * 60 * 1000);
             break;
@@ -364,10 +364,10 @@ function setPreset(preset, clickedButton) {
             from = new Date(now.getTime() - 24 * 60 * 60 * 1000);
             break;
     }
-    
+
     document.getElementById('timeFrom').value = formatDateTimeLocal(from, timezone);
     document.getElementById('timeTo').value = formatDateTimeLocal(now, timezone);
-    
+
     // Update button states
     document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
     if (clickedButton) {
@@ -379,10 +379,10 @@ function setPreset(preset, clickedButton) {
 function toggleAuthFields() {
     const authType = document.getElementById('authType').value;
     const authFields = document.getElementById('authFields');
-    
+
     let html = '';
-    
-    switch(authType) {
+
+    switch (authType) {
         case 'basic':
             html = `
                 <div class="form-group">
@@ -416,7 +416,7 @@ function toggleAuthFields() {
             `;
             break;
     }
-    
+
     authFields.innerHTML = html;
 }
 
@@ -426,9 +426,9 @@ async function testConnection() {
     const result = document.getElementById('connectionResult');
     const nextBtn = document.getElementById('step3Next');
     const buttonWrapper = document.getElementById('testConnectionBtn');
-    
+
     btn.innerHTML = '<span class="loading-spinner"></span> Testing...';
-    
+
     const urlAssessment = analyzeVmUrl(document.getElementById('vmUrl').value);
     if (!urlAssessment.valid) {
         result.innerHTML = `
@@ -444,11 +444,11 @@ async function testConnection() {
         }
         return;
     }
-    
+
     result.innerHTML = '<div id="validationSteps"></div>';
-    
+
     const stepsContainer = document.getElementById('validationSteps');
-    
+
     // Helper to add validation step
     function addStep(icon, text, status = 'pending') {
         const stepId = `step-${Date.now()}-${Math.random()}`;
@@ -464,7 +464,7 @@ async function testConnection() {
             success: '✅',
             error: '❌'
         };
-        
+
         const stepHtml = `
             <div id="${stepId}" style="padding: 8px; margin: 5px 0; border-left: 3px solid ${colors[status]}; background: #f5f5f5; font-size: 13px;">
                 <span style="margin-right: 8px;">${icons[status]}</span>
@@ -474,7 +474,7 @@ async function testConnection() {
         stepsContainer.insertAdjacentHTML('beforeend', stepHtml);
         return stepId;
     }
-    
+
     function updateStep(stepId, icon, text, status) {
         const step = document.getElementById(stepId);
         if (step) {
@@ -494,30 +494,30 @@ async function testConnection() {
             step.innerHTML = `<span style="margin-right: 8px;">${icons[status]}</span><span>${text}</span>`;
         }
     }
-    
+
     try {
         const config = getConnectionConfig();
-        
+
         // 🔍 DEBUG: Log connection config
         console.group('🔌 Multi-Stage Connection Test');
         console.log('📋 Connection Config:', config);
-        
+
         // Step 1: Parse URL
         const step1 = addStep('🔍', 'Parsing URL...', 'progress');
         await new Promise(resolve => setTimeout(resolve, 300));
-        
+
         if (!config.url) {
             updateStep(step1, '❌', 'URL parsing failed: Empty URL', 'error');
             throw new Error('URL is required');
         }
-        
+
         updateStep(step1, '✅', `URL parsed: ${config.url}${config.api_base_path || ''}`, 'success');
         console.log('✅ Step 1: URL parsed');
-        
+
         // Step 2: DNS/Network check
         const step2 = addStep('🌐', 'Checking network connectivity...', 'progress');
         await new Promise(resolve => setTimeout(resolve, 300));
-        
+
         try {
             // Try to reach the host
             const hostCheck = await fetch(config.url + '/metrics', {
@@ -525,7 +525,7 @@ async function testConnection() {
                 mode: 'no-cors', // Allow cross-origin for basic connectivity check
                 cache: 'no-cache'
             }).catch(() => null);
-            
+
             updateStep(step2, '✅', 'Host is reachable', 'success');
             console.log('✅ Step 2: Host reachable');
         } catch (e) {
@@ -533,38 +533,38 @@ async function testConnection() {
             updateStep(step2, '✅', 'Host is reachable (CORS protected)', 'success');
             console.log('✅ Step 2: Host reachable (CORS)');
         }
-        
+
         // Step 3: Detect VictoriaMetrics
         const step3 = addStep('🔍', 'Detecting VictoriaMetrics...', 'progress');
         await new Promise(resolve => setTimeout(resolve, 300));
-        
+
         // This will be done by the backend
         updateStep(step3, '🔄', 'Querying VictoriaMetrics API...', 'progress');
         console.log('🔄 Step 3: Querying VM API');
-        
+
         // Step 4: Test connection with auth
         const step4 = addStep('🔐', 'Testing connection with authentication...', 'progress');
-        
+
         const response = await fetch('/api/validate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ connection: config })
         });
-        
+
         console.log('📡 Response Status:', response.status, response.statusText);
-        
+
         const data = await response.json();
         console.log('📦 Response Data:', data);
-        
+
         if (response.ok && data.success) {
             // Check if VictoriaMetrics was detected
             if (data.is_victoria_metrics === false) {
                 updateStep(step3, '⚠️', 'Warning: Not VictoriaMetrics', 'error');
                 updateStep(step4, '✅', 'Connection successful, but...', 'success');
-                
+
                 console.log('⚠️  Warning: Not VictoriaMetrics');
                 console.groupEnd();
-                
+
                 // Add warning summary
                 stepsContainer.insertAdjacentHTML('beforeend', `
                     <div style="margin-top: 15px; padding: 15px; background: #fff3cd; border-radius: 4px; border-left: 4px solid #ff9800;">
@@ -578,19 +578,19 @@ async function testConnection() {
                         </div>
                     </div>
                 `);
-                
+
                 connectionValid = false;
                 nextBtn.disabled = true;
                 return;
             }
-            
+
             updateStep(step3, '✅', `VictoriaMetrics detected! (${data.vm_components ? data.vm_components.join(', ') : 'components found'})`, 'success');
             updateStep(step4, '✅', `Connection successful! Version: ${data.version || 'Unknown'}`, 'success');
-            
+
             console.log('✅ All steps passed!');
             console.log('📦 VM Components:', data.vm_components);
             console.groupEnd();
-            
+
             // Add final summary
             stepsContainer.insertAdjacentHTML('beforeend', `
                 <div style="margin-top: 15px; padding: 15px; background: #e8f5e9; border-radius: 4px; border-left: 4px solid #4CAF50;">
@@ -604,7 +604,7 @@ async function testConnection() {
                     </div>
                 </div>
             `);
-            
+
             connectionValid = true;
             nextBtn.disabled = false;
         } else {
@@ -615,11 +615,11 @@ async function testConnection() {
         console.error('❌ Connection failed:', error);
         console.error('❌ Error stack:', error.stack);
         console.groupEnd();
-        
+
         // Better error message
         let errorMsg = error.message;
         let errorDetails = '';
-        
+
         if (error.message.includes('Failed to fetch')) {
             errorMsg = 'Network error: Cannot reach the server';
             errorDetails = 'Check if the URL is correct and the server is accessible';
@@ -636,7 +636,7 @@ async function testConnection() {
             errorMsg = 'Not found (404)';
             errorDetails = 'Check the URL path - the endpoint may not exist';
         }
-        
+
         result.innerHTML = `
             <div class="error-message">
                 ❌ ${errorMsg}
@@ -703,17 +703,17 @@ function parseVMUrl(rawUrl) {
 function getConnectionConfig() {
     const authType = document.getElementById('authType').value;
     const rawUrl = document.getElementById('vmUrl').value;
-    
+
     // 🔍 DEBUG: Log raw input
     console.log('🔧 Building connection config:', { rawUrl, authType });
-    
+
     const parsedUrl = parseVMUrl(rawUrl);
     console.log('🔧 Parsed URL:', parsedUrl);
-    
+
     // Build auth object based on type
     const auth = { type: authType };
-    
-    switch(authType) {
+
+    switch (authType) {
         case 'basic':
             auth.username = document.getElementById('username').value;
             auth.password = document.getElementById('password').value;
@@ -733,7 +733,7 @@ function getConnectionConfig() {
             console.log('🔧 Auth: None');
             break;
     }
-    
+
     const config = {
         url: parsedUrl.baseUrl,
         api_base_path: parsedUrl.apiBasePath,
@@ -743,9 +743,9 @@ function getConnectionConfig() {
         auth: auth,
         skip_tls_verify: false
     };
-    
+
     console.log('✅ Final config:', config);
-    
+
     return config;
 }
 
@@ -754,16 +754,16 @@ async function discoverComponents() {
     const loading = document.getElementById('componentsLoading');
     const list = document.getElementById('componentsList');
     const error = document.getElementById('componentsError');
-    
+
     loading.style.display = 'block';
     list.style.display = 'none';
     error.classList.add('hidden');
-    
+
     try {
         const config = getConnectionConfig();
         const from = new Date(document.getElementById('timeFrom').value).toISOString();
         const to = new Date(document.getElementById('timeTo').value).toISOString();
-        
+
         // 🔍 DEBUG: Log discovery request
         console.group('🔎 Component Discovery');
         console.log('📋 Time Range:', { from, to });
@@ -772,7 +772,7 @@ async function discoverComponents() {
             tenant_id: config.tenant_id,
             is_multitenant: config.is_multitenant
         });
-        
+
         const response = await fetch('/api/discover', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -781,31 +781,31 @@ async function discoverComponents() {
                 time_range: { start: from, end: to }
             })
         });
-        
+
         console.log('📡 Response Status:', response.status, response.statusText);
-        
+
         const data = await response.json();
         console.log('📦 Discovered Components:', data.components?.length || 0);
-        
+
         if (!response.ok) {
             throw new Error(data.error || 'Discovery failed');
         }
-        
+
         discoveredComponents = data.components || [];
-        
+
         // Log component summary
         const componentTypes = [...new Set(discoveredComponents.map(c => c.component))];
         console.log('✅ Component Types:', componentTypes);
         console.groupEnd();
-        
+
         renderComponents(discoveredComponents);
-        
+
         loading.style.display = 'none';
         list.style.display = 'block';
     } catch (err) {
         console.error('❌ Discovery failed:', err);
         console.groupEnd();
-        
+
         loading.style.display = 'none';
         error.textContent = err.message + ' (Check console F12 for details)';
         error.classList.remove('hidden');
@@ -814,14 +814,14 @@ async function discoverComponents() {
 
 function renderComponents(components) {
     const list = document.getElementById('componentsList');
-    
+
     if (components.length === 0) {
         list.innerHTML = '<p style="text-align:center;color:#888;">No components found</p>';
         return;
     }
-    
+
     let html = '';
-    
+
     // Backend already returns grouped data - no need to re-group
     // Each component has a 'jobs' array
     components.sort((a, b) => a.component.localeCompare(b.component)).forEach(comp => {
@@ -831,7 +831,7 @@ function renderComponents(components) {
             ? `${comp.metrics_count_estimate.toLocaleString()} series`
             : 'series unknown';
         const jobListText = allJobs.length > 0 ? allJobs.join(', ') : 'n/a';
-        
+
         html += `
             <div class="component-item" onclick="toggleComponent(this)">
                 <div class="component-header">
@@ -848,20 +848,20 @@ function renderComponents(components) {
             </div>
         `;
     });
-    
+
     list.innerHTML = html;
     updateSelectionSummary();
 }
 
 function renderJobsGroup(componentType, jobs, totalInstances, jobMetrics = {}) {
     let html = '<div class="jobs-group">';
-    
+
     jobs.forEach(job => {
         const estimatedInstances = Math.ceil(totalInstances / jobs.length);
         const seriesForJob = typeof jobMetrics[job] === 'number' && jobMetrics[job] >= 0
             ? `${jobMetrics[job].toLocaleString()} series`
             : 'series unknown';
-        
+
         html += `
             <div class="job-item">
                 <label onclick="event.stopPropagation();">
@@ -910,7 +910,7 @@ function handleJobCheck(checkbox) {
     const componentCheckbox = item.querySelector('.component-header input[type="checkbox"]');
     const allJobs = item.querySelectorAll('.job-item input[type="checkbox"]');
     const checkedJobs = item.querySelectorAll('.job-item input[type="checkbox"]:checked');
-    
+
     // Update component checkbox based on job checkboxes
     if (checkedJobs.length > 0) {
         componentCheckbox.checked = true;
@@ -1239,7 +1239,7 @@ function validateStagingDir(immediate = false, options = {}) {
 async function loadSampleMetrics() {
     const advancedLabelsContainer = document.getElementById('advancedLabels');
     const samplePreviewContainer = document.getElementById('samplePreview');
-    
+
     if (sampleAbortController) {
         try {
             sampleAbortController.abort();
@@ -1247,7 +1247,7 @@ async function loadSampleMetrics() {
             console.warn('Failed to abort previous sample request', e);
         }
     }
-    
+
     // Show loading state
     advancedLabelsContainer.innerHTML = `
         <div style="text-align: center; color: #888; padding: 20px;">
@@ -1255,12 +1255,12 @@ async function loadSampleMetrics() {
             <p style="margin-top: 10px;">Loading sample metrics...</p>
         </div>
     `;
-    
+
     try {
         const config = getConnectionConfig();
         const from = new Date(document.getElementById('timeFrom').value).toISOString();
         const to = new Date(document.getElementById('timeTo').value).toISOString();
-        
+
         // Get selected components/jobs
         const selected = getSelectedComponents();
         if (selected.length === 0) {
@@ -1268,21 +1268,21 @@ async function loadSampleMetrics() {
         }
         const uniqueComponents = Array.from(new Set(selected.map(s => s.component)));
         const selectedJobs = selected.map(s => s.job).filter(Boolean);
-        
+
         // 🔍 DEBUG: Log sample request
         console.group('📊 Sample Metrics Loading');
         console.log('📋 Selected Components:', uniqueComponents.length);
         console.log('🎯 Components:', uniqueComponents);
         console.log('💼 Jobs:', selectedJobs);
-        
+
         // Add timeout (30 seconds)
         const controller = new AbortController();
         sampleAbortController = controller;
         const timeoutId = setTimeout(() => controller.abort(), 30000);
-        
+
         // Get obfuscation config for samples too
         const obfuscation = getObfuscationConfig();
-        
+
         const response = await fetch('/api/sample', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1298,33 +1298,33 @@ async function loadSampleMetrics() {
             }),
             signal: controller.signal
         });
-        
+
         clearTimeout(timeoutId);
-        
+
         console.log('📡 Response Status:', response.status, response.statusText);
-        
+
         // Check Content-Type before parsing JSON
         const contentType = response.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
             throw new Error(`Unexpected response type: ${contentType}. Expected JSON.`);
         }
-        
+
         const data = await response.json();
         console.log('📦 Samples Received:', data.samples?.length || 0);
-        
+
         if (!response.ok) {
             throw new Error(data.error || `Server error: ${response.status} ${response.statusText}`);
         }
-        
+
         sampleMetrics = data.samples || [];
-        
+
         // Log unique labels found
         const allLabels = new Set();
         sampleMetrics.forEach(s => Object.keys(s.labels || {}).forEach(l => allLabels.add(l)));
         console.log('🏷️  Unique Labels Found:', Array.from(allLabels).sort());
         console.log('✅ Sample loading complete');
         console.groupEnd();
-        
+
         renderSamplePreview(sampleMetrics);
         renderAdvancedLabels(sampleMetrics);
         updateSelectionSummary();
@@ -1345,7 +1345,7 @@ async function loadSampleMetrics() {
         }
         console.error('❌ Sample loading failed:', err);
         console.groupEnd();
-        
+
         // Show error in UI
         advancedLabelsContainer.innerHTML = `
             <div class="error-message" style="margin: 20px; padding: 15px; background: #ffebee; border-left: 4px solid #f44336; border-radius: 4px;">
@@ -1360,7 +1360,7 @@ async function loadSampleMetrics() {
                 </button>
             </div>
         `;
-        
+
         samplePreviewContainer.innerHTML = `
             <div class="error-message" style="padding: 15px; background: #ffebee; border-left: 4px solid #f44336; border-radius: 4px;">
                 <strong style="color: #c62828;">❌ Preview unavailable</strong>
@@ -1374,24 +1374,24 @@ async function loadSampleMetrics() {
 
 function renderSamplePreview(samples) {
     const preview = document.getElementById('samplePreview');
-    
+
     if (!samples || samples.length === 0) {
         preview.innerHTML = '<p style="text-align:center;color:#888;">No samples available</p>';
         return;
     }
-    
+
     const limited = samples.slice(0, 5);
     let html = '';
-    
+
     limited.forEach(sample => {
         // Handle both 'name' and 'metric_name' fields for backward compatibility
         const metricName = sample.name || sample.metric_name || 'unknown';
-        
+
         // Ensure labels exist
         const labels = Object.entries(sample.labels || {})
             .map(([k, v]) => `${k}="${v}"`)
             .join(', ');
-        
+
         html += `
             <div class="sample-metric">
                 <div class="metric-name">${metricName}</div>
@@ -1399,17 +1399,17 @@ function renderSamplePreview(samples) {
             </div>
         `;
     });
-    
+
     preview.innerHTML = html;
 }
 
 function renderAdvancedLabels(samples) {
     const container = document.getElementById('advancedLabels');
-    
+
     // Extract all unique labels
     const labelSet = new Set();
     const labelSamples = {};
-    
+
     samples.forEach(sample => {
         Object.keys(sample.labels || {}).forEach(label => {
             labelSet.add(label);
@@ -1418,17 +1418,17 @@ function renderAdvancedLabels(samples) {
             }
         });
     });
-    
+
     const labels = Array.from(labelSet).sort();
-    
+
     // Skip instance and job (already in main options)
     const filteredLabels = labels.filter(l => l !== 'instance' && l !== 'job' && !l.startsWith('__'));
-    
+
     if (filteredLabels.length === 0) {
         container.innerHTML = '<p style="text-align:center;color:#888;padding:20px;">No additional labels found</p>';
         return;
     }
-    
+
     const availableLabels = new Set(filteredLabels);
     let html = '';
     filteredLabels.forEach(label => {
@@ -1444,7 +1444,7 @@ function renderAdvancedLabels(samples) {
             </div>
         `;
     });
-    
+
     container.innerHTML = html;
 
     // Prune selections that are no longer available
@@ -1458,7 +1458,7 @@ function renderAdvancedLabels(samples) {
 function toggleObfuscation() {
     const enabled = document.getElementById('enableObfuscation').checked;
     const options = document.getElementById('obfuscationOptions');
-    
+
     if (enabled) {
         options.style.display = 'block';
         const instanceCheckbox = document.querySelector('.obf-label-checkbox[data-label="instance"]');
@@ -1478,15 +1478,15 @@ function toggleObfuscation() {
 
 function getSelectedComponents() {
     const selected = [];
-    
+
     // Get all checked component checkboxes
     document.querySelectorAll('.component-header input[type="checkbox"]:checked').forEach(cb => {
         const component = cb.dataset.component;
         const item = cb.closest('.component-item');
-        
+
         // Check if there are specific job selections
         const jobCheckboxes = item.querySelectorAll('.job-item input[type="checkbox"]:checked');
-        
+
         if (jobCheckboxes.length > 0) {
             // Add each selected job
             jobCheckboxes.forEach(jobCb => {
@@ -1500,7 +1500,7 @@ function getSelectedComponents() {
             selected.push({ component });
         }
     });
-    
+
     return selected;
 }
 
@@ -1635,9 +1635,9 @@ function computeSelectionStats(selected) {
 
 function getObfuscationConfig() {
     const enabled = document.getElementById('enableObfuscation').checked;
-    
+
     if (!enabled) {
-        return { 
+        return {
             enabled: false,
             obfuscate_instance: false,
             obfuscate_job: false,
@@ -1645,7 +1645,7 @@ function getObfuscationConfig() {
             custom_labels: []
         };
     }
-    
+
     // Get selected labels for obfuscation
     const selectedLabels = new Set();
     document.querySelectorAll('.obf-label-checkbox:checked').forEach(cb => {
@@ -1655,12 +1655,12 @@ function getObfuscationConfig() {
         }
     });
     selectedCustomLabels.forEach(label => selectedLabels.add(label));
-    
+
     // Separate standard labels (instance, job) from custom labels (pod, namespace, etc.)
-    const customLabels = Array.from(selectedLabels).filter(label => 
+    const customLabels = Array.from(selectedLabels).filter(label =>
         label !== 'instance' && label !== 'job'
     );
-    
+
     // Map labels to backend format
     return {
         enabled: true,
@@ -1673,21 +1673,21 @@ function getObfuscationConfig() {
 
 // Export
 async function exportMetrics(buttonElement) {
-	const btn = buttonElement || event?.target;
-	if (!btn) {
-		console.error('No button element provided to exportMetrics');
-		return;
-	}
-	const originalText = btn.textContent || 'Prepare Support Bundle';
+    const btn = buttonElement || event?.target;
+    if (!btn) {
+        console.error('No button element provided to exportMetrics');
+        return;
+    }
+    const originalText = btn.textContent || 'Prepare Support Bundle';
     currentExportButton = btn;
     btn.dataset.originalText = originalText;
-	btn.disabled = true;
-	btn.innerHTML = '<span class="loading-spinner"></span> Collecting metrics...';
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading-spinner"></span> Collecting metrics...';
 
-	try {
-		const config = getConnectionConfig();
-		const from = new Date(document.getElementById('timeFrom').value).toISOString();
-		const to = new Date(document.getElementById('timeTo').value).toISOString();
+    try {
+        const config = getConnectionConfig();
+        const from = new Date(document.getElementById('timeFrom').value).toISOString();
+        const to = new Date(document.getElementById('timeTo').value).toISOString();
         const selected = getSelectedComponents();
         if (selected.length === 0) {
             throw new Error('No components selected. Please go back to Step 4.');
@@ -1695,7 +1695,7 @@ async function exportMetrics(buttonElement) {
         const uniqueComponents = Array.from(new Set(selected.map(s => s.component)));
         const selectedJobs = selected.map(s => s.job).filter(Boolean);
         const obfuscation = getObfuscationConfig();
-        
+
         // 🔍 DEBUG: Log export request
         console.group('📤 Metrics Export');
         console.log('📋 Export Config:', {
@@ -1709,7 +1709,7 @@ async function exportMetrics(buttonElement) {
         });
         console.log('🎯 Selected components:', uniqueComponents);
         console.log('💼 Selected jobs:', selectedJobs);
-        
+
         const stagingDirValue = document.getElementById('stagingDir')?.value.trim() || '';
         if (!stagingDirValue) {
             throw new Error('Please provide a staging directory');
@@ -1723,78 +1723,78 @@ async function exportMetrics(buttonElement) {
         };
 
         const response = await fetch('/api/export/start', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				connection: config,
-				time_range: { start: from, end: to },
-				components: uniqueComponents,
-				jobs: selectedJobs,
-				obfuscation: obfuscation,
-				staging_dir: stagingDirValue,
-					metric_step_seconds: metricStepSeconds,
-                    batching: batchingConfig
-				})
-			});
-		
-		console.log('📡 Response Status:', response.status, response.statusText);
-		
-		const data = await response.json();
-		
-		if (!response.ok) {
-			throw new Error(data.error || 'Export failed');
-		}
-		
-		console.log('🚀 Export job started:', data.job_id);
-		currentExportJobId = data.job_id;
-		showExportProgressPanel(data);
-		await monitorExportJob(btn);
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                connection: config,
+                time_range: { start: from, end: to },
+                components: uniqueComponents,
+                jobs: selectedJobs,
+                obfuscation: obfuscation,
+                staging_dir: stagingDirValue,
+                metric_step_seconds: metricStepSeconds,
+                batching: batchingConfig
+            })
+        });
+
+        console.log('📡 Response Status:', response.status, response.statusText);
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Export failed');
+        }
+
+        console.log('🚀 Export job started:', data.job_id);
+        currentExportJobId = data.job_id;
+        showExportProgressPanel(data);
+        await monitorExportJob(btn);
         console.groupEnd();
-	} catch (err) {
-		console.error('❌ Export failed:', err);
-		console.groupEnd();
-		
-		alert('Export failed: ' + err.message + '\n\nCheck browser console (F12) for details');
-		btn.disabled = false;
-		btn.textContent = 'Prepare Support Bundle';
+    } catch (err) {
+        console.error('❌ Export failed:', err);
+        console.groupEnd();
+
+        alert('Export failed: ' + err.message + '\n\nCheck browser console (F12) for details');
+        btn.disabled = false;
+        btn.textContent = 'Prepare Support Bundle';
         currentExportButton = null;
-	}
+    }
 }
 
 async function monitorExportJob(btn) {
-	if (!currentExportJobId) {
-		return;
-	}
+    if (!currentExportJobId) {
+        return;
+    }
 
-	const fetchStatus = async () => {
-		try {
-			const resp = await fetch(`/api/export/status?id=${encodeURIComponent(currentExportJobId)}`);
-			const status = await resp.json();
-			if (!resp.ok) {
-				throw new Error(status.error || 'Failed to fetch status');
-			}
-			updateExportProgress(status);
-			if (status.state === 'completed') {
-				cleanupExportPolling();
-				exportResult = status.result;
-				if (exportResult) {
-					showExportResult(exportResult);
-					nextStep();
-				}
-				btn.disabled = false;
-				btn.textContent = btn.dataset.originalText || 'Prepare Support Bundle';
+    const fetchStatus = async () => {
+        try {
+            const resp = await fetch(`/api/export/status?id=${encodeURIComponent(currentExportJobId)}`);
+            const status = await resp.json();
+            if (!resp.ok) {
+                throw new Error(status.error || 'Failed to fetch status');
+            }
+            updateExportProgress(status);
+            if (status.state === 'completed') {
+                cleanupExportPolling();
+                exportResult = status.result;
+                if (exportResult) {
+                    showExportResult(exportResult);
+                    nextStep();
+                }
+                btn.disabled = false;
+                btn.textContent = btn.dataset.originalText || 'Prepare Support Bundle';
                 currentExportButton = null;
                 disableCancelButton();
                 showCancelNotice('');
-			} else if (status.state === 'failed') {
-				cleanupExportPolling();
-				btn.disabled = false;
-				btn.textContent = btn.dataset.originalText || 'Prepare Support Bundle';
+            } else if (status.state === 'failed') {
+                cleanupExportPolling();
+                btn.disabled = false;
+                btn.textContent = btn.dataset.originalText || 'Prepare Support Bundle';
                 currentExportButton = null;
-				alert('Export failed: ' + (status.error || 'Unknown error'));
+                alert('Export failed: ' + (status.error || 'Unknown error'));
                 disableCancelButton();
                 showCancelNotice('');
-			} else if (status.state === 'canceled') {
+            } else if (status.state === 'canceled') {
                 cleanupExportPolling();
                 btn.disabled = false;
                 btn.textContent = btn.dataset.originalText || 'Prepare Support Bundle';
@@ -1802,13 +1802,13 @@ async function monitorExportJob(btn) {
                 disableCancelButton();
                 showCancelNotice('Export canceled. Adjust parameters and start again.');
             }
-		} catch (err) {
-			console.error('Failed to fetch export status', err);
-		}
-	};
+        } catch (err) {
+            console.error('Failed to fetch export status', err);
+        }
+    };
 
-	await fetchStatus();
-	exportStatusTimer = setInterval(fetchStatus, 2000);
+    await fetchStatus();
+    exportStatusTimer = setInterval(fetchStatus, 2000);
 }
 
 function showExportResult(data) {
@@ -1818,13 +1818,13 @@ function showExportResult(data) {
         panel.style.display = 'none';
     }
     renderExportStagingPath('');
-	document.getElementById('exportId').textContent = data.export_id || data.exportID || 'N/A';
+    document.getElementById('exportId').textContent = data.export_id || data.exportID || 'N/A';
     const metricsValue = data.metrics_count ?? data.metrics_exported ?? 0;
     document.getElementById('metricsCount').textContent = (metricsValue || 0).toLocaleString();
     const archiveSizeValue = data.archive_size ?? data.archive_size_bytes ?? 0;
     document.getElementById('archiveSize').textContent = ((archiveSizeValue || 0) / 1024).toFixed(2);
     document.getElementById('archiveSha256').textContent = data.sha256 || 'N/A';
-    
+
     // Render spoilers with sample data
     if (data.sample_data && data.sample_data.length > 0) {
         renderExportSpoilers(data.sample_data);
@@ -1832,36 +1832,36 @@ function showExportResult(data) {
 }
 
 function showExportProgressPanel(meta) {
-	const panel = document.getElementById('exportProgressPanel');
-	const percent = document.getElementById('exportProgressPercent');
-	const batches = document.getElementById('exportProgressBatches');
-	const metrics = document.getElementById('exportProgressMetrics');
-	const eta = document.getElementById('exportProgressEta');
-	const windowInfo = document.getElementById('exportBatchWindow');
-	const fill = document.getElementById('exportProgressFill');
+    const panel = document.getElementById('exportProgressPanel');
+    const percent = document.getElementById('exportProgressPercent');
+    const batches = document.getElementById('exportProgressBatches');
+    const metrics = document.getElementById('exportProgressMetrics');
+    const eta = document.getElementById('exportProgressEta');
+    const windowInfo = document.getElementById('exportBatchWindow');
+    const fill = document.getElementById('exportProgressFill');
 
-	if (panel) {
-		panel.classList.remove('hidden');
-		panel.style.display = 'block';
-	}
-	if (percent) {
-		percent.textContent = '0%';
-	}
-	if (batches) {
-		batches.textContent = `0 / ${meta.total_batches || 1} batches`;
-	}
-	if (metrics) {
-		metrics.textContent = 'Waiting for first batch...';
-	}
-	if (eta) {
-		eta.textContent = 'Estimating time to completion…';
-	}
-	if (windowInfo && meta.batch_window_seconds) {
-		windowInfo.textContent = `Batch window ≈ ${Math.round(meta.batch_window_seconds)}s`;
-	}
-	if (fill) {
-		fill.style.width = '0%';
-	}
+    if (panel) {
+        panel.classList.remove('hidden');
+        panel.style.display = 'block';
+    }
+    if (percent) {
+        percent.textContent = '0%';
+    }
+    if (batches) {
+        batches.textContent = `0 / ${meta.total_batches || 1} batches`;
+    }
+    if (metrics) {
+        metrics.textContent = 'Waiting for first batch...';
+    }
+    if (eta) {
+        eta.textContent = 'Estimating time to completion…';
+    }
+    if (windowInfo && meta.batch_window_seconds) {
+        windowInfo.textContent = `Batch window ≈ ${Math.round(meta.batch_window_seconds)}s`;
+    }
+    if (fill) {
+        fill.style.width = '0%';
+    }
     if (meta.staging_path) {
         exportStagingPath = meta.staging_path;
     }
@@ -1880,39 +1880,39 @@ function showExportProgressPanel(meta) {
 }
 
 function updateExportProgress(status) {
-	const fill = document.getElementById('exportProgressFill');
-	const percentEl = document.getElementById('exportProgressPercent');
-	const batchesEl = document.getElementById('exportProgressBatches');
-	const metricsEl = document.getElementById('exportProgressMetrics');
-	const etaEl = document.getElementById('exportProgressEta');
-	const summaryEl = document.getElementById('exportProgressSummary');
+    const fill = document.getElementById('exportProgressFill');
+    const percentEl = document.getElementById('exportProgressPercent');
+    const batchesEl = document.getElementById('exportProgressBatches');
+    const metricsEl = document.getElementById('exportProgressMetrics');
+    const etaEl = document.getElementById('exportProgressEta');
+    const summaryEl = document.getElementById('exportProgressSummary');
 
-	const percentage = Math.min(100, Math.round((status.progress || 0) * 100));
-	if (fill) {
-		fill.style.width = percentage + '%';
-	}
-	if (percentEl) {
-		percentEl.textContent = percentage + '%';
-	}
-	if (batchesEl) {
-		batchesEl.textContent = `${status.completed_batches || 0} / ${status.total_batches || 1} batches`;
-	}
-	if (metricsEl) {
+    const percentage = Math.min(100, Math.round((status.progress || 0) * 100));
+    if (fill) {
+        fill.style.width = percentage + '%';
+    }
+    if (percentEl) {
+        percentEl.textContent = percentage + '%';
+    }
+    if (batchesEl) {
+        batchesEl.textContent = `${status.completed_batches || 0} / ${status.total_batches || 1} batches`;
+    }
+    if (metricsEl) {
         const descriptor = (status.obfuscation_enabled ?? currentJobObfuscationEnabled) ? 'obfuscated' : 'processed';
-		metricsEl.textContent = `${(status.metrics_processed || 0).toLocaleString()} series ${descriptor}`;
-	}
-	if (etaEl) {
-		etaEl.textContent = status.eta ? `ETA ${new Date(status.eta).toLocaleTimeString()}` : '';
-	}
-	if (summaryEl) {
-		const last = typeof status.last_batch_duration_seconds === 'number'
-			? status.last_batch_duration_seconds.toFixed(1)
-			: '0.0';
-		const avg = typeof status.average_batch_seconds === 'number'
-			? status.average_batch_seconds.toFixed(1)
-			: '0.0';
-		summaryEl.textContent = `Last batch ${last}s • Avg ${avg}s`;
-	}
+        metricsEl.textContent = `${(status.metrics_processed || 0).toLocaleString()} series ${descriptor}`;
+    }
+    if (etaEl) {
+        etaEl.textContent = status.eta ? `ETA ${new Date(status.eta).toLocaleTimeString()}` : '';
+    }
+    if (summaryEl) {
+        const last = typeof status.last_batch_duration_seconds === 'number'
+            ? status.last_batch_duration_seconds.toFixed(1)
+            : '0.0';
+        const avg = typeof status.average_batch_seconds === 'number'
+            ? status.average_batch_seconds.toFixed(1)
+            : '0.0';
+        summaryEl.textContent = `Last batch ${last}s • Avg ${avg}s`;
+    }
     if (typeof status.obfuscation_enabled === 'boolean') {
         currentJobObfuscationEnabled = status.obfuscation_enabled;
     }
@@ -1923,10 +1923,10 @@ function updateExportProgress(status) {
 }
 
 function cleanupExportPolling() {
-	if (exportStatusTimer) {
-		clearInterval(exportStatusTimer);
-		exportStatusTimer = null;
-	}
+    if (exportStatusTimer) {
+        clearInterval(exportStatusTimer);
+        exportStatusTimer = null;
+    }
     exportStagingPath = '';
     currentJobObfuscationEnabled = false;
     currentExportJobId = null;
@@ -1943,18 +1943,18 @@ function renderExportStagingPath(path) {
 
 function renderExportSpoilers(samples) {
     const container = document.getElementById('exportSpoilers');
-    
+
     const limited = samples.slice(0, 5);
     let html = '<h3 style="margin-bottom: 15px;">📊 Exported Data Samples (Top 5)</h3>';
-    
+
     limited.forEach((sample, idx) => {
         // Handle both 'name' and 'metric_name' fields for backward compatibility
         const metricName = sample.name || sample.metric_name || 'unknown';
-        
+
         const labels = Object.entries(sample.labels || {})
             .map(([k, v]) => `${k}="${v}"`)
             .join(', ');
-        
+
         html += `
             <div class="spoiler">
                 <div class="spoiler-header" onclick="toggleSpoiler(this)">
@@ -1972,15 +1972,15 @@ function renderExportSpoilers(samples) {
                 </div>
             </div>
         `;
-	});
-	
-	container.innerHTML = html;
+    });
+
+    container.innerHTML = html;
 }
 
 function toggleSpoiler(header) {
     const content = header.nextElementSibling;
     const arrow = header.querySelector('span:last-child');
-    
+
     if (content.classList.contains('open')) {
         content.classList.remove('open');
         arrow.textContent = '▼';
@@ -2048,22 +2048,22 @@ function downloadArchive() {
         alert('No archive available for download');
         return;
     }
-    
+
     // 🔍 DEBUG: Log download
     console.group('⬇️  Archive Download');
     console.log('📦 Archive Path:', exportResult.archive_path);
     console.log('📊 Archive Size:', (exportResult.archive_size / 1024).toFixed(2), 'KB');
     console.log('🔐 SHA256:', exportResult.sha256);
-    
+
     // Create download link
     const link = document.createElement('a');
     link.href = '/api/download?path=' + encodeURIComponent(exportResult.archive_path);
     link.download = exportResult.archive_path.split('/').pop();
-    
+
     console.log('🔗 Download URL:', link.href);
     console.log('✅ Initiating browser download');
     console.groupEnd();
-    
+
     // Trigger download
     document.body.appendChild(link);
     link.click();
