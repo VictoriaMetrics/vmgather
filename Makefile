@@ -4,6 +4,7 @@ VERSION ?= $(shell git describe --tags --always --dirty)
 PLATFORMS ?= linux/amd64,linux/arm64
 GO_VERSION ?= 1.22
 DOCKER_OUTPUT ?= type=docker
+DOCKER_COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo "docker compose" || echo "docker-compose")
 
 # Default target: show help
 .DEFAULT_GOAL := help
@@ -301,7 +302,7 @@ test-env-up:
 		echo "This directory is gitignored. Please ensure you have it locally."; \
 		exit 1; \
 	fi
-	@docker-compose -f local-test-env/docker-compose.test.yml up -d
+	@$(DOCKER_COMPOSE) -f local-test-env/docker-compose.test.yml up -d
 	@echo ""
 	@echo "⏳ Waiting for services to be ready (30 seconds)..."
 	@sleep 30
@@ -321,18 +322,18 @@ test-env-up:
 # Stop test environment
 test-env-down:
 	@echo "🛑 Stopping Test Environment..."
-	@docker-compose -f local-test-env/docker-compose.test.yml down
+	@$(DOCKER_COMPOSE) -f local-test-env/docker-compose.test.yml down
 	@echo "✅ Test environment stopped"
 
 # Stop and remove all data
 test-env-clean:
 	@echo "🧹 Cleaning Test Environment (including data)..."
-	@docker-compose -f local-test-env/docker-compose.test.yml down -v
+	@$(DOCKER_COMPOSE) -f local-test-env/docker-compose.test.yml down -v
 	@echo "✅ Test environment cleaned"
 
 # Show logs from test environment
 test-env-logs:
-	@docker-compose -f local-test-env/docker-compose.test.yml logs -f
+	@$(DOCKER_COMPOSE) -f local-test-env/docker-compose.test.yml logs -f
 
 # Test all scenarios against running test environment
 test-scenarios:
