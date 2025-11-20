@@ -40,14 +40,37 @@ All notable changes to VMExporter are documented here. The format follows [Keep 
 - UI localisation and accessibility are not final.
 
 Please report regressions or feature requests via GitHub issues or info@victoriametrics.com.
-## [Unreleased]
+## [v1.0.0] - 2025-11-20
 
 ### Added
 - VMImport – a companion UI/binary/Docker image that replays VMExporter bundles back into VictoriaMetrics (`cmd/vmimporter`, `internal/importer/server`). Includes tenant-aware endpoint form, drag-and-drop uploader, and unit tests.
 - Official Dockerfiles for both utilities with Buildx-compatible multi-arch builds (`build/docker/Dockerfile.vmexporter` and `build/docker/Dockerfile.vmimporter`), plus Make targets to produce amd64+arm64 images in CI.
 - Builder script now emits vmexporter **and** vmimporter binaries across the entire platform matrix with combined checksums.
+- Docker image push automation to GitHub Container Registry (GHCR) in release workflow with versioned and `latest` tags.
+- CSS variable system for consistent theming across the application (colors, spacing, typography).
+- `data-testid` attributes for deterministic E2E testing (`#startExportBtn`).
+- Checkbox spacing (`margin-right: 8px`) for improved visual clarity.
+- VMImport now exposes `/api/import/status` so the UI and external tooling can track long-running imports via job IDs.
+
+### Changed
+- **UI Modernization**: Complete CSS refactoring with modern color palette (Slate/Blue), Inter font family, refined spacing and borders.
+- **Icon Updates**: Replaced all emojis with SVG icons for professional appearance (header, success indicators, lists).
+- **Visual Design**: Removed generic gradients, flattened shadows, updated button styles for contemporary aesthetic.
+- Help section on Step 3 (Connection) now defaults to collapsed state for cleaner initial view.
+- Obfuscation checkbox on Step 5 now defaults to unchecked (correct expected behavior).
+- E2E test suite updated to match new UI defaults and button selectors.
+- CI workflow (`main.yml`) enhanced with comprehensive build matrix and smoke tests.
+- Release workflow (`release.yml`) now includes Docker image builds and pushes to GHCR.
+- VMImport import flow moved to a job-based pipeline that unpacks ZIP bundles server-side, streams JSONL in fixed-size chunks, and verifies data before marking jobs complete.
+- Import progress UI now shows live stages (uploading, extracting, streaming, verifying), compressed vs inflated size, chunk counters, and sample metric examples for better debugging feedback.
+
+### Fixed
+- **Flaky Test**: `TestHandleExportCancel` race condition resolved with proper synchronization (50ms delay, ticker-based retry).
+- **UI Regressions**: Help section attribute expectations and button selectors updated in test suite.
+- **Obfuscation Defaults**: Restored correct unchecked default state, updated all affected tests to explicitly enable when needed.
+- Test suite stability: All 63 E2E tests passing, 0 flaky tests.
+- VMImport UI no longer freezes during large uploads; it gracefully handles TLS failures, displays meaningful errors, and prevents duplicate submissions while a job is in flight.
 
 ### Documentation
 - README now covers Docker usage, VMImport quick start, and the expanded release workflow.
 - Architecture and development guides document the importer flow, repository layout updates, and new build commands.
-- Batch export testing report tracks importer/Docker smoke tests alongside the existing suite.

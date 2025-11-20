@@ -1,8 +1,11 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -549,6 +552,75 @@ func TestExportService_ProcessMetrics_ValidJSONL(t *testing.T) {
 		if err := json.Unmarshal([]byte(line), &metric); err != nil {
 			t.Errorf("invalid JSON line: %v", err)
 		}
+	}
+}
+
+func TestExportService_ExecuteExportStreamsWithoutPrematureCancellation(t *testing.T) {
+	t.Parallel()
+
+	writeResult := make(chan error, 1)
+	metrics := []string{
+		`{"metric":{"__name__":"metric_one","job":"vmagent"},"values":[1],"timestamps":[1000]}`,
+		`{"metric":{"__name__":"metric_two","job":"vmagent"},"values":[2],"timestamps":[2000]}`,
+		`{"metric":{"__name__":"metric_three","job":"vmagent"},"values":[3],"timestamps":[3000]}`,
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/export" {
+			http.NotFound(w, r)
+			writeResult <- io.EOF
+			return
+		}
+		w.Header().Set("Content-Type", "application/stream+json")
+		flusher, _ := w.(http.Flusher)
+		for _, line := range metrics {
+			if _, err := io.WriteString(w, line+"\n"); err != nil {
+				writeResult <- err
+				return
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		writeResult <- nil
+	}))
+	defer server.Close()
+
+	service := NewExportService(t.TempDir(), "test-version")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	config := domain.ExportConfig{
+		Connection: domain.VMConnection{
+			URL: server.URL,
+		},
+		TimeRange: domain.TimeRange{
+			Start: time.Unix(0, 0),
+			End:   time.Unix(60, 0),
+		},
+		Components: []string{"vmagent"},
+		Jobs:       []string{"vmagent"},
+	}
+
+	result, err := service.ExecuteExport(ctx, config)
+	if err != nil {
+		t.Fatalf("ExecuteExport returned error: %v", err)
+	}
+	if result == nil || result.ArchivePath == "" {
+		t.Fatal("expected non-nil export result with archive")
+	}
+	if result.MetricsExported != len(metrics) {
+		t.Fatalf("expected %d metrics, got %d", len(metrics), result.MetricsExported)
+	}
+
+	select {
+	case writeErr := <-writeResult:
+		if writeErr != nil {
+			t.Fatalf("server write failed: %v", writeErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("server never finished writing export payload")
 	}
 }
 

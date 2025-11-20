@@ -96,13 +96,14 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 
 		batchCtx, cancelBatch := context.WithTimeout(ctx, defaultBatchTimeout)
 		exportReader, err := s.fetchBatch(batchCtx, client, selector, window, config.MetricStepSeconds)
-		cancelBatch()
 		if err != nil {
+			cancelBatch()
 			return nil, err
 		}
 
 		batchCount, err := s.processMetricsIntoWriter(exportReader, config.Obfuscation, obfuscator, stagingWriter)
 		_ = exportReader.Close()
+		cancelBatch()
 		if err != nil {
 			fmt.Printf("❌ Metrics processing failed for batch %d: %v\n", batchIndex+1, err)
 			return nil, fmt.Errorf("metrics processing failed: %w", err)

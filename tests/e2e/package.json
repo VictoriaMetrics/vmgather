@@ -11,6 +11,7 @@
     "test:firefox": "playwright test --project=firefox",
     "test:webkit": "playwright test --project=webkit",
     "test:mobile": "playwright test --project='Mobile Chrome'",
+    "test:smoke": "playwright test specs/smoke-basic.spec.js --project=chromium --reporter=line",
     "report": "playwright show-report test-results/html",
     "update-snapshots": "playwright test --update-snapshots"
   },
@@ -21,4 +22,3 @@
     "@playwright/test": "^1.48.0"
   }
 }
-

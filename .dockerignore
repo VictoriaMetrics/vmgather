@@ -1,0 +1,16 @@
+.git
+.gitignore
+.github
+dist/
+exports/
+local-development/
+local-test-env/
+vmexporter
+vmimporter
+coverage.out
+*.partial.jsonl
+*.zip
+node_modules/
+tests/e2e/playwright-report/
+tests/e2e/test-results/
+tests/e2e/node_modules/

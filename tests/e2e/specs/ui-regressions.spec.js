@@ -158,7 +158,7 @@ test.describe('UI regressions', () => {
     await step5.locator('#stagingDir').fill('/tmp/ui-regression');
     await step5.locator('#metricStep').selectOption('60');
 
-    await step5.locator('button.btn-primary:has-text("Start Export")').click();
+    await step5.locator('#startExportBtn').click();
     await expect(page.locator('#exportProgressPath')).toContainText('/tmp/ui-regression');
 
     const step6 = page.locator('.step[data-step="6"]');
