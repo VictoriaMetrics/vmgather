@@ -48,7 +48,7 @@ func TestRealScenario_VMAuthWithTenant(t *testing.T) {
 		components, err := vmService.DiscoverComponents(ctx, config.Connection, config.TimeRange)
 
 		if err != nil {
-			t.Logf("❌ Discovery failed: %v", err)
+			t.Logf("[FAIL] Discovery failed: %v", err)
 			// Check if error contains empty URL
 			if err.Error() == "unsupported protocol scheme \"\"" {
 				t.Fatal("🔴 BUG FOUND: URL is empty! Connection.URL was not passed correctly to client")
@@ -60,7 +60,7 @@ func TestRealScenario_VMAuthWithTenant(t *testing.T) {
 			t.Fatal("Expected to discover components, got 0")
 		}
 
-		t.Logf("✅ Discovered %d components", len(components))
+		t.Logf("[OK] Discovered %d components", len(components))
 		for _, comp := range components {
 			t.Logf("  - %s (jobs: %v, instances: %d)", comp.Component, comp.Jobs, comp.InstanceCount)
 		}
@@ -74,7 +74,7 @@ func TestRealScenario_VMAuthWithTenant(t *testing.T) {
 		samples, err := vmService.GetSample(ctx, config, 5)
 
 		if err != nil {
-			t.Logf("❌ Sample failed: %v", err)
+			t.Logf("[FAIL] Sample failed: %v", err)
 			// Check if error contains empty URL
 			if err.Error() == "unsupported protocol scheme \"\"" {
 				t.Fatal("🔴 BUG FOUND: URL is empty! Connection.URL was not passed correctly to client")
@@ -86,7 +86,7 @@ func TestRealScenario_VMAuthWithTenant(t *testing.T) {
 			t.Fatal("Expected to get sample metrics, got 0")
 		}
 
-		t.Logf("✅ Got %d sample metrics", len(samples))
+		t.Logf("[OK] Got %d sample metrics", len(samples))
 		for i, sample := range samples {
 			if i < 3 { // Show first 3
 				t.Logf("  - %s = %.2f", sample.MetricName, sample.Value)
@@ -104,7 +104,7 @@ func TestRealScenario_VMAuthWithTenant(t *testing.T) {
 		result, err := exportService.ExecuteExport(ctx, config)
 
 		if err != nil {
-			t.Logf("❌ Export failed: %v", err)
+			t.Logf("[FAIL] Export failed: %v", err)
 
 			// Check for common errors
 			if err.Error() == "unsupported protocol scheme \"\"" {
@@ -122,7 +122,7 @@ func TestRealScenario_VMAuthWithTenant(t *testing.T) {
 			t.Fatal("Expected to export metrics, got 0")
 		}
 
-		t.Logf("✅ Exported %d metrics", result.MetricsExported)
+		t.Logf("[OK] Exported %d metrics", result.MetricsExported)
 		t.Logf("  Archive: %s", result.ArchivePath)
 		t.Logf("  Size: %.2f KB", float64(result.ArchiveSizeBytes)/1024)
 	})

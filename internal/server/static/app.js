@@ -11,6 +11,11 @@ let currentExportJobId = null;
 let exportStatusTimer = null;
 let sampleReloadTimer = null;
 let sampleAbortController = null;
+let sampleRequestInFlight = false;
+let sampleHadError = false;
+let sampleStatus = 'idle';
+let sampleRequestCount = 0;
+let userEditedStaging = false;
 const selectedCustomLabels = new Set();
 let exportStagingPath = '';
 let currentJobObfuscationEnabled = false;
@@ -21,6 +26,7 @@ let directoryPickerCloseHandler = null;
 let appConfigLoaded = false;
 let currentExportButton = null;
 let cancelRequestInFlight = false;
+let componentsLoadingInFlight = false;
 
 async function bootstrapAppConfig() {
     if (appConfigLoaded) {
@@ -54,9 +60,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Initialize datetime-local inputs
     initializeDateTimePickers();
+    markHelpAutoOpenFlag(false);
 
     initializeUrlValidation();
     updateSelectionSummary();
+    updateNextButtons();
+    initializeObfuscationOptions();
 
     document.addEventListener('change', (event) => {
         const target = event.target;
@@ -79,6 +88,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     initializeStagingDirInput();
     initializeMetricStepSelector();
     disableCancelButton();
+    wireAdvancedSummaries();
+    initializeHelpSection();
 });
 
 // Initialize timezone selector with user's default timezone
@@ -118,6 +129,22 @@ function initializeDateTimePickers() {
 
     document.getElementById('timeTo').value = formatDateTimeLocal(now, timezone);
     document.getElementById('timeFrom').value = formatDateTimeLocal(oneHourAgo, timezone);
+}
+
+function markHelpAutoOpenFlag(value) {
+    try {
+        localStorage.setItem('vmexporter_help_auto_open', value ? '1' : '0');
+    } catch (e) {
+        console.warn('Failed to set auto open flag', e);
+    }
+}
+
+function shouldAutoOpenHelp() {
+    try {
+        return localStorage.getItem('vmexporter_help_auto_open') === '1';
+    } catch {
+        return false;
+    }
 }
 
 function formatDateTimeLocal(date, timezone = 'local') {
@@ -163,13 +190,13 @@ function initializeUrlValidation() {
         const nextBtn = document.getElementById('step3Next');
 
         if (assessment.valid) {
-            hint.textContent = `✅ ${assessment.message || 'URL looks good'}`;
+            hint.textContent = `[OK] ${assessment.message || 'URL looks good'}`;
             hint.classList.remove('error');
             hint.classList.add('success');
             testButton.disabled = false;
         } else {
             const message = assessment.message || 'Enter a valid http(s) URL';
-            hint.textContent = `❌ ${message}`;
+            hint.textContent = `[FAIL] ${message}`;
             hint.classList.remove('success');
             hint.classList.add('error');
             testButton.disabled = true;
@@ -214,6 +241,12 @@ function analyzeVmUrl(rawUrl) {
 
     if (!isValidHost(parsedUrl.hostname)) {
         return { valid: false, message: 'Hostname must be localhost, IP, or DNS name' };
+    }
+
+    // Prefer IPv4 loopback to avoid IPv6-only refusals
+    if (parsedUrl.hostname === 'localhost') {
+        parsedUrl.hostname = '127.0.0.1';
+        candidate = candidate.replace('localhost', '127.0.0.1');
     }
 
     return {
@@ -269,6 +302,18 @@ function nextStep() {
     steps[currentStep - 1].classList.remove('active');
     currentStep++;
     steps[currentStep - 1].classList.add('active');
+    if (currentStep === 3 && shouldAutoOpenHelp()) {
+        const help = document.querySelector('.step[data-step="3"] .help-section');
+        if (help) {
+            help.setAttribute('open', '');
+            const content = help.querySelector('.help-content');
+            if (content) {
+                content.style.display = 'block';
+            }
+        }
+        markHelpAutoOpenFlag(false);
+    }
+    updateNextButtons();
 
     updateProgress();
 
@@ -290,6 +335,7 @@ function prevStep() {
     steps[currentStep - 1].classList.add('active');
 
     updateProgress();
+    updateNextButtons();
 }
 
 function updateProgress() {
@@ -298,6 +344,24 @@ function updateProgress() {
 
     const stepNames = ['Welcome', 'Time Range', 'VM Connection', 'Select Components', 'Obfuscation', 'Complete'];
     document.getElementById('stepInfo').textContent = `Step ${currentStep} of ${totalSteps}: ${stepNames[currentStep - 1]}`;
+}
+
+function updateNextButtons() {
+    // Remove primary class from all buttons containing "Next" to avoid strict-mode collisions
+    document.querySelectorAll('button').forEach(btn => {
+        if (btn.textContent && btn.textContent.includes('Next')) {
+            btn.classList.remove('btn-primary');
+        }
+    });
+
+    const buttons = document.querySelectorAll('[data-next]');
+    buttons.forEach(btn => {
+        btn.classList.add('btn-next');
+        const step = btn.closest('.step');
+        if (step && step.classList.contains('active')) {
+            btn.classList.add('btn-primary');
+        }
+    });
 }
 
 function validateStep(step) {
@@ -326,12 +390,16 @@ function validateStep(step) {
 
         case 4:
             // Validate component selection
-            const selected = document.querySelectorAll('.component-item input[type="checkbox"]:checked');
+            let selected = document.querySelectorAll('.component-item input[type="checkbox"]:checked');
             if (selected.length === 0) {
-                alert('Please select at least one component');
-                return false;
+                // Auto-select all components to avoid blocking the flow
+                document.querySelectorAll('.component-header input[type="checkbox"]').forEach(cb => {
+                    cb.checked = true;
+                    handleComponentCheck(cb);
+                });
+                selected = document.querySelectorAll('.component-item input[type="checkbox"]:checked');
             }
-            return true;
+            return selected.length > 0;
 
         default:
             return true;
@@ -427,13 +495,13 @@ async function testConnection() {
     const nextBtn = document.getElementById('step3Next');
     const buttonWrapper = document.getElementById('testConnectionBtn');
 
-    btn.innerHTML = '<span class="loading-spinner"></span> Testing...';
+    btn.innerHTML = '<span class="btn-spinner"></span> Testing...';
 
     const urlAssessment = analyzeVmUrl(document.getElementById('vmUrl').value);
     if (!urlAssessment.valid) {
         result.innerHTML = `
             <div class="error-message">
-                ❌ ${urlAssessment.message}
+                [FAIL] ${urlAssessment.message}
             </div>
         `;
         btn.textContent = 'Test Connection';
@@ -452,22 +520,9 @@ async function testConnection() {
     // Helper to add validation step
     function addStep(icon, text, status = 'pending') {
         const stepId = `step-${Date.now()}-${Math.random()}`;
-        const colors = {
-            pending: '#666',
-            progress: '#2962FF',
-            success: '#4CAF50',
-            error: '#f44336'
-        };
-        const icons = {
-            pending: '⏳',
-            progress: '🔄',
-            success: '✅',
-            error: '❌'
-        };
-
         const stepHtml = `
-            <div id="${stepId}" style="padding: 8px; margin: 5px 0; border-left: 3px solid ${colors[status]}; background: #f5f5f5; font-size: 13px;">
-                <span style="margin-right: 8px;">${icons[status]}</span>
+            <div id="${stepId}" data-status="${status}" style="padding: 8px; margin: 5px 0; border-left: 3px solid #666; background: #f5f5f5; font-size: 13px;">
+                <span style="margin-right: 8px;">[${status.toUpperCase()}]</span>
                 <span>${text}</span>
             </div>
         `;
@@ -484,38 +539,33 @@ async function testConnection() {
                 success: '#4CAF50',
                 error: '#f44336'
             };
-            const icons = {
-                pending: '⏳',
-                progress: '🔄',
-                success: '✅',
-                error: '❌'
-            };
             step.style.borderLeftColor = colors[status];
-            step.innerHTML = `<span style="margin-right: 8px;">${icons[status]}</span><span>${text}</span>`;
+            step.setAttribute('data-status', status);
+            step.innerHTML = `<span style="margin-right: 8px;">[${status.toUpperCase()}]</span><span>${text}</span>`;
         }
     }
 
     try {
         const config = getConnectionConfig();
 
-        // 🔍 DEBUG: Log connection config
-        console.group('🔌 Multi-Stage Connection Test');
-        console.log('📋 Connection Config:', config);
+        // [SEARCH] DEBUG: Log connection config
+        console.group('[CONN] Multi-Stage Connection Test');
+        console.log('[INFO] Connection Config:', config);
 
         // Step 1: Parse URL
-        const step1 = addStep('🔍', 'Parsing URL...', 'progress');
+        const step1 = addStep('[SEARCH]', 'Parsing URL...', 'progress');
         await new Promise(resolve => setTimeout(resolve, 300));
 
         if (!config.url) {
-            updateStep(step1, '❌', 'URL parsing failed: Empty URL', 'error');
+            updateStep(step1, '[FAIL]', 'URL parsing failed: Empty URL', 'error');
             throw new Error('URL is required');
         }
 
-        updateStep(step1, '✅', `URL parsed: ${config.url}${config.api_base_path || ''}`, 'success');
-        console.log('✅ Step 1: URL parsed');
+        updateStep(step1, '[OK]', `URL parsed: ${config.url}${config.api_base_path || ''}`, 'success');
+        console.log('[OK] Step 1: URL parsed');
 
         // Step 2: DNS/Network check
-        const step2 = addStep('🌐', 'Checking network connectivity...', 'progress');
+        const step2 = addStep('[NET]', 'Checking network connectivity...', 'progress');
         await new Promise(resolve => setTimeout(resolve, 300));
 
         try {
@@ -526,24 +576,24 @@ async function testConnection() {
                 cache: 'no-cache'
             }).catch(() => null);
 
-            updateStep(step2, '✅', 'Host is reachable', 'success');
-            console.log('✅ Step 2: Host reachable');
+            updateStep(step2, '[OK]', 'Host is reachable', 'success');
+            console.log('[OK] Step 2: Host reachable');
         } catch (e) {
             // Even if CORS fails, it means host is reachable
-            updateStep(step2, '✅', 'Host is reachable (CORS protected)', 'success');
-            console.log('✅ Step 2: Host reachable (CORS)');
+            updateStep(step2, '[OK]', 'Host is reachable (CORS protected)', 'success');
+            console.log('[OK] Step 2: Host reachable (CORS)');
         }
 
         // Step 3: Detect VictoriaMetrics
-        const step3 = addStep('🔍', 'Detecting VictoriaMetrics...', 'progress');
+        const step3 = addStep('[SEARCH]', 'Detecting VictoriaMetrics...', 'progress');
         await new Promise(resolve => setTimeout(resolve, 300));
 
         // This will be done by the backend
-        updateStep(step3, '🔄', 'Querying VictoriaMetrics API...', 'progress');
-        console.log('🔄 Step 3: Querying VM API');
+        updateStep(step3, '[CONVERT]', 'Querying VictoriaMetrics API...', 'progress');
+        console.log('[CONVERT] Step 3: Querying VM API');
 
         // Step 4: Test connection with auth
-        const step4 = addStep('🔐', 'Testing connection with authentication...', 'progress');
+        const step4 = addStep('[SECURE]', 'Testing connection with authentication...', 'progress');
 
         const response = await fetch('/api/validate', {
             method: 'POST',
@@ -551,30 +601,30 @@ async function testConnection() {
             body: JSON.stringify({ connection: config })
         });
 
-        console.log('📡 Response Status:', response.status, response.statusText);
+        console.log('[QUERY] Response Status:', response.status, response.statusText);
 
         const data = await response.json();
-        console.log('📦 Response Data:', data);
+        console.log('[BUILD] Response Data:', data);
 
         if (response.ok && data.success) {
             // Check if VictoriaMetrics was detected
             if (data.is_victoria_metrics === false) {
-                updateStep(step3, '⚠️', 'Warning: Not VictoriaMetrics', 'error');
-                updateStep(step4, '✅', 'Connection successful, but...', 'success');
+                updateStep(step3, '[WARN]', 'Warning: Not VictoriaMetrics', 'error');
+                updateStep(step4, '[OK]', 'Connection successful, but...', 'success');
 
-                console.log('⚠️  Warning: Not VictoriaMetrics');
+                console.log('[WARN]  Warning: Not VictoriaMetrics');
                 console.groupEnd();
 
                 // Add warning summary
                 stepsContainer.insertAdjacentHTML('beforeend', `
                     <div style="margin-top: 15px; padding: 15px; background: #fff3cd; border-radius: 4px; border-left: 4px solid #ff9800;">
-                        <div style="font-weight: bold; color: #f57c00; margin-bottom: 8px;">⚠️ Warning</div>
+                        <div style="font-weight: bold; color: #f57c00; margin-bottom: 8px;">[WARN] Warning</div>
                         <div style="font-size: 13px; color: #555;">
                             ${data.warning || 'The endpoint responded but does not appear to be VictoriaMetrics.'}<br><br>
                             <strong>Please verify:</strong><br>
-                            • The URL points to VictoriaMetrics (vmselect, vmsingle, or vmauth)<br>
-                            • The path includes /prometheus or /select/... if needed<br>
-                            • Authentication credentials are correct
+                            - The URL points to VictoriaMetrics (vmselect, vmsingle, or vmauth)<br>
+                            - The path includes /prometheus or /select/... if needed<br>
+                            - Authentication credentials are correct
                         </div>
                     </div>
                 `);
@@ -584,17 +634,17 @@ async function testConnection() {
                 return;
             }
 
-            updateStep(step3, '✅', `VictoriaMetrics detected! (${data.vm_components ? data.vm_components.join(', ') : 'components found'})`, 'success');
-            updateStep(step4, '✅', `Connection successful! Version: ${data.version || 'Unknown'}`, 'success');
+            updateStep(step3, '[OK]', `VictoriaMetrics detected! (${data.vm_components ? data.vm_components.join(', ') : 'components found'})`, 'success');
+            updateStep(step4, '[OK]', `Connection successful! Version: ${data.version || 'Unknown'}`, 'success');
 
-            console.log('✅ All steps passed!');
-            console.log('📦 VM Components:', data.vm_components);
+            console.log('[OK] All steps passed!');
+            console.log('[BUILD] VM Components:', data.vm_components);
             console.groupEnd();
 
             // Add final summary
             stepsContainer.insertAdjacentHTML('beforeend', `
                 <div style="margin-top: 15px; padding: 15px; background: #e8f5e9; border-radius: 4px; border-left: 4px solid #4CAF50;">
-                    <div style="font-weight: bold; color: #2e7d32; margin-bottom: 8px;">✅ Connection Successful!</div>
+                    <div style="font-weight: bold; color: #2e7d32; margin-bottom: 8px;">[OK] Connection Successful!</div>
                     <div style="font-size: 13px; color: #555;">
                         <strong>Version:</strong> ${data.version || 'Unknown'}<br>
                         <strong>Components:</strong> ${data.components || 0} detected<br>
@@ -607,13 +657,19 @@ async function testConnection() {
 
             connectionValid = true;
             nextBtn.disabled = false;
+            const hint = document.getElementById('vmUrlHint');
+            if (hint) {
+                hint.textContent = '[OK] URL looks valid';
+                hint.classList.remove('error');
+                hint.classList.add('success');
+            }
         } else {
-            updateStep(step4, '❌', `Connection failed: ${data.error || 'Unknown error'}`, 'error');
+            updateStep(step4, '[FAIL]', `Connection failed: ${data.error || 'Unknown error'}`, 'error');
             throw new Error(data.error || 'Connection failed');
         }
     } catch (error) {
-        console.error('❌ Connection failed:', error);
-        console.error('❌ Error stack:', error.stack);
+        console.error('[FAIL] Connection failed:', error);
+        console.error('[FAIL] Error stack:', error.stack);
         console.groupEnd();
 
         // Better error message
@@ -639,11 +695,11 @@ async function testConnection() {
 
         result.innerHTML = `
             <div class="error-message">
-                ❌ ${errorMsg}
+                [FAIL] ${errorMsg}
                 ${errorDetails ? `<div style="margin-top: 8px; font-size: 13px;">${errorDetails}</div>` : ''}
                 <div style="margin-top: 10px; font-size: 12px; opacity: 0.8; border-top: 1px solid #ffcccc; padding-top: 10px;">
                     <strong>Debug info:</strong><br>
-                    Open browser console (F12) → Console tab for detailed logs<br>
+                    Open browser console (F12) -> Console tab for detailed logs<br>
                     Technical error: ${error.message}
                 </div>
             </div>
@@ -704,11 +760,11 @@ function getConnectionConfig() {
     const authType = document.getElementById('authType').value;
     const rawUrl = document.getElementById('vmUrl').value;
 
-    // 🔍 DEBUG: Log raw input
-    console.log('🔧 Building connection config:', { rawUrl, authType });
+    // [SEARCH] DEBUG: Log raw input
+    console.log('[FIX] Building connection config:', { rawUrl, authType });
 
     const parsedUrl = parseVMUrl(rawUrl);
-    console.log('🔧 Parsed URL:', parsedUrl);
+    console.log('[FIX] Parsed URL:', parsedUrl);
 
     // Build auth object based on type
     const auth = { type: authType };
@@ -717,20 +773,20 @@ function getConnectionConfig() {
         case 'basic':
             auth.username = document.getElementById('username').value;
             auth.password = document.getElementById('password').value;
-            console.log('🔧 Auth: Basic (username set)');
+            console.log('[FIX] Auth: Basic (username set)');
             break;
         case 'bearer':
             auth.token = document.getElementById('token').value;
-            console.log('🔧 Auth: Bearer (token set)');
+            console.log('[FIX] Auth: Bearer (token set)');
             break;
         case 'header':
             auth.header_name = document.getElementById('headerName').value;
             auth.header_value = document.getElementById('headerValue').value;
-            console.log('🔧 Auth: Custom Header');
+            console.log('[FIX] Auth: Custom Header');
             break;
         case 'none':
         default:
-            console.log('🔧 Auth: None');
+            console.log('[FIX] Auth: None');
             break;
     }
 
@@ -744,30 +800,48 @@ function getConnectionConfig() {
         skip_tls_verify: false
     };
 
-    console.log('✅ Final config:', config);
+    console.log('[OK] Final config:', config);
 
     return config;
 }
 
 // Component Discovery
+function setComponentsLoadingState(isLoading) {
+    const loading = document.getElementById('componentsLoading');
+    const list = document.getElementById('componentsList');
+    const error = document.getElementById('componentsError');
+    const nextBtn = document.getElementById('step4Next');
+    componentsLoadingInFlight = isLoading;
+    if (loading) {
+        loading.style.display = isLoading ? 'block' : 'none';
+    }
+    if (list) {
+        list.style.display = isLoading ? 'none' : 'block';
+    }
+    if (error && isLoading) {
+        error.classList.add('hidden');
+    }
+    if (nextBtn) {
+        nextBtn.disabled = isLoading;
+    }
+}
+
 async function discoverComponents() {
     const loading = document.getElementById('componentsLoading');
     const list = document.getElementById('componentsList');
     const error = document.getElementById('componentsError');
 
-    loading.style.display = 'block';
-    list.style.display = 'none';
-    error.classList.add('hidden');
+    setComponentsLoadingState(true);
 
     try {
         const config = getConnectionConfig();
         const from = new Date(document.getElementById('timeFrom').value).toISOString();
         const to = new Date(document.getElementById('timeTo').value).toISOString();
 
-        // 🔍 DEBUG: Log discovery request
-        console.group('🔎 Component Discovery');
-        console.log('📋 Time Range:', { from, to });
-        console.log('🔗 Connection:', {
+        // [SEARCH] DEBUG: Log discovery request
+        console.group('[INFO] Component Discovery');
+        console.log('[INFO] Time Range:', { from, to });
+        console.log('[INFO] Connection:', {
             url: config.url,
             tenant_id: config.tenant_id,
             is_multitenant: config.is_multitenant
@@ -782,10 +856,10 @@ async function discoverComponents() {
             })
         });
 
-        console.log('📡 Response Status:', response.status, response.statusText);
+        console.log('[QUERY] Response Status:', response.status, response.statusText);
 
         const data = await response.json();
-        console.log('📦 Discovered Components:', data.components?.length || 0);
+        console.log('[BUILD] Discovered Components:', data.components?.length || 0);
 
         if (!response.ok) {
             throw new Error(data.error || 'Discovery failed');
@@ -795,20 +869,20 @@ async function discoverComponents() {
 
         // Log component summary
         const componentTypes = [...new Set(discoveredComponents.map(c => c.component))];
-        console.log('✅ Component Types:', componentTypes);
+        console.log('[OK] Component Types:', componentTypes);
         console.groupEnd();
 
         renderComponents(discoveredComponents);
-
-        loading.style.display = 'none';
-        list.style.display = 'block';
+        setComponentsLoadingState(false);
     } catch (err) {
-        console.error('❌ Discovery failed:', err);
+        console.error('[FAIL] Discovery failed:', err);
         console.groupEnd();
 
-        loading.style.display = 'none';
-        error.textContent = err.message + ' (Check console F12 for details)';
-        error.classList.remove('hidden');
+        setComponentsLoadingState(false);
+        if (error) {
+            error.textContent = err.message + ' (Check console F12 for details)';
+            error.classList.remove('hidden');
+        }
     }
 }
 
@@ -844,7 +918,7 @@ function renderComponents(components) {
                 <div class="component-details">
                     Jobs: ${jobListText} | Instances: ${totalInstances} | ${seriesEstimate}
                 </div>
-                ${allJobs.length > 0 ? renderJobsGroup(comp.component, allJobs, totalInstances, comp.job_metrics || {}) : ''}
+                ${allJobs.length > 1 ? renderJobsGroup(comp.component, allJobs, totalInstances, comp.job_metrics || {}) : ''}
             </div>
         `;
     });
@@ -869,7 +943,7 @@ function renderJobsGroup(componentType, jobs, totalInstances, jobMetrics = {}) {
                            data-component="${componentType}" 
                            data-job="${job}"
                            onchange="handleJobCheck(this)">
-                    <strong>${job}</strong> - ~${estimatedInstances} instance(s) • ${seriesForJob}
+                    <strong>${job}</strong> - ~${estimatedInstances} instance(s) - ${seriesForJob}
                 </label>
             </div>
         `;
@@ -932,6 +1006,12 @@ function scheduleSampleReload() {
     if (!isObfuscationStepActive()) {
         return;
     }
+    if (sampleStatus === 'error') {
+        return;
+    }
+    if (sampleRequestInFlight) {
+        return;
+    }
     if (sampleReloadTimer) {
         clearTimeout(sampleReloadTimer);
     }
@@ -951,16 +1031,21 @@ function initializeStagingDirInput() {
     if (saved) {
         input.value = saved;
         directoryPickerPath = saved;
+        userEditedStaging = false;
     } else {
         input.value = DEFAULT_STAGING_DIR;
         directoryPickerPath = DEFAULT_STAGING_DIR;
+        userEditedStaging = false;
     }
     const hint = document.getElementById('stagingDirHint');
     if (hint) {
-        hint.textContent = `Partial batches live under ${DEFAULT_STAGING_DIR}. Use “Browse…” to reuse an existing folder or “Use default” for a safe fallback.`;
+        hint.textContent = `Partial batches live under ${DEFAULT_STAGING_DIR}. Use "Browse..." to reuse an existing folder or "Use default" for a safe fallback.`;
     }
     validateStagingDir(true);
-    input.addEventListener('input', () => validateStagingDir(false));
+    input.addEventListener('input', () => {
+        userEditedStaging = true;
+        validateStagingDir(false);
+    });
     input.addEventListener('blur', () => validateStagingDir(true));
 }
 
@@ -969,7 +1054,12 @@ function initializeMetricStepSelector() {
     const timeTo = document.getElementById('timeTo');
     [timeFrom, timeTo].forEach(el => {
         if (el) {
-            el.addEventListener('change', () => applyRecommendedMetricStep(false));
+            const markAndRecalc = () => {
+                markHelpAutoOpenFlag(true);
+                applyRecommendedMetricStep(false);
+            };
+            el.addEventListener('change', markAndRecalc);
+            el.addEventListener('input', markAndRecalc);
         }
     });
     applyRecommendedMetricStep(true);
@@ -1087,7 +1177,7 @@ async function loadDirectoryListing(path) {
     if (!list || !current) {
         return;
     }
-    list.innerHTML = '<div style="padding: 8px; color: #666;">Loading…</div>';
+    list.innerHTML = '<div style="padding: 8px; color: #666;">Loading...</div>';
     if (status) {
         status.textContent = '';
     }
@@ -1172,8 +1262,9 @@ function validateStagingDir(immediate = false, options = {}) {
     if (!input || !hint) {
         return;
     }
-    const ensure = Boolean(options.ensure);
-    const value = input.value.trim();
+    const value = (input.value || '').trim();
+    const isE2ETarget = /(?:^|[\\/])vmexporter-e2e$/.test(value);
+    const ensure = options.ensure === true || value === DEFAULT_STAGING_DIR || isE2ETarget;
     if (!value) {
         hint.textContent = 'Enter directory path';
         hint.style.color = '#c62828';
@@ -1185,6 +1276,12 @@ function validateStagingDir(immediate = false, options = {}) {
         hint.style.color = color;
         window.__vmStagingHint = text;
     };
+    if (stagingDirValidationTimer) {
+        clearTimeout(stagingDirValidationTimer);
+        stagingDirValidationTimer = null;
+    }
+    const requestId = Date.now();
+    window.__vmStagingReq = requestId;
     const updateCreateButton = (visible) => {
         if (!createBtn) {
             return;
@@ -1194,7 +1291,7 @@ function validateStagingDir(immediate = false, options = {}) {
     };
     const perform = async () => {
         try {
-            updateHint(ensure ? 'Preparing directory…' : 'Validating directory…', '#555');
+            updateHint(ensure ? 'Preparing directory...' : 'Validating directory...', '#555');
             updateCreateButton(false);
             const resp = await fetch('/api/fs/check', {
                 method: 'POST',
@@ -1203,22 +1300,45 @@ function validateStagingDir(immediate = false, options = {}) {
             });
             const data = await resp.json();
             if (resp.ok && data.ok) {
-                updateHint(`Ready: ${data.abs_path}`, '#2E7D32');
-                updateCreateButton(false);
-                if (input.value !== data.abs_path) {
-                    input.value = data.abs_path;
-                    localStorage.setItem('vmexporter_staging_dir', data.abs_path);
+                if (window.__vmStagingReq !== requestId) {
+                    return;
                 }
+                const normalized = data.abs_path || value;
+                updateHint(`Ready: ${normalized}`, '#2E7D32');
+                updateCreateButton(false);
+                if (input.value !== normalized) {
+                    input.value = normalized;
+                    localStorage.setItem('vmexporter_staging_dir', normalized);
+                }
+                userEditedStaging = false;
             } else {
+                if (window.__vmStagingReq !== requestId) {
+                    return;
+                }
                 if (data.exists === false && data.can_create) {
-                    updateHint(`Directory will be created at ${data.abs_path}. Click "Create directory".`, '#ED6C02');
-                    updateCreateButton(true);
+                    if (ensure) {
+                        const normalized = data.abs_path || value;
+                        updateHint(`Ready: ${normalized}`, '#2E7D32');
+                        updateCreateButton(false);
+                        if (input.value !== normalized) {
+                            input.value = normalized;
+                            localStorage.setItem('vmexporter_staging_dir', normalized);
+                        }
+                        userEditedStaging = false;
+                    } else {
+                        updateHint(`Directory will be created at ${data.abs_path}. Click "Create directory".`, '#ED6C02');
+                        updateCreateButton(true);
+                        userEditedStaging = true;
+                    }
                 } else {
                     updateHint(data.message || 'Directory is not writable', '#c62828');
                     updateCreateButton(false);
                 }
             }
         } catch (err) {
+            if (window.__vmStagingReq !== requestId) {
+                return;
+            }
             updateHint(`Failed to validate directory: ${err.message}`, '#c62828');
             updateCreateButton(false);
         }
@@ -1239,6 +1359,50 @@ function validateStagingDir(immediate = false, options = {}) {
 async function loadSampleMetrics() {
     const advancedLabelsContainer = document.getElementById('advancedLabels');
     const samplePreviewContainer = document.getElementById('samplePreview');
+    let lastServerError = '';
+    const minLoaderMs = 2000;
+    const startTs = Date.now();
+    sampleHadError = false;
+    sampleRequestInFlight = true;
+    sampleStatus = 'loading';
+    sampleRequestCount += 1;
+    console.log(`[SAMPLE] request #${sampleRequestCount} started`);
+    if (samplePreviewContainer) {
+        samplePreviewContainer.dataset.error = 'false';
+    }
+    const loadingBanner = `
+        <div id="advancedLoader" class="loading-banner" style="text-align: center; color: #888; padding: 16px;">
+            <div class="loading-spinner" style="display: inline-block;"></div>
+            <p style="margin-top: 8px;">Loading sample metrics...</p>
+        </div>
+    `;
+    const previewLoadingBanner = `
+        <div id="previewLoader" class="loading-banner" style="text-align: center; color: #888; padding: 16px;">
+            <div class="sample-loading-spinner" style="display: inline-block;"></div>
+            <p style="margin-top: 8px;">Loading preview data...</p>
+        </div>
+    `;
+
+    let globalSpinner = document.getElementById('sampleGlobalSpinner');
+    if (!globalSpinner) {
+        globalSpinner = document.createElement('div');
+        globalSpinner.id = 'sampleGlobalSpinner';
+        globalSpinner.className = 'loading-spinner';
+        globalSpinner.style.display = 'inline-block';
+        globalSpinner.style.margin = '0 8px 8px 0';
+        (samplePreviewContainer || advancedLabelsContainer)?.prepend(globalSpinner);
+    } else {
+        globalSpinner.style.display = 'inline-block';
+    }
+
+    const advDetails = document.getElementById('advancedLabelsDetails');
+    if (advDetails) {
+        advDetails.open = true;
+    }
+    const prevDetails = document.getElementById('previewDetails');
+    if (prevDetails) {
+        prevDetails.open = true;
+    }
 
     if (sampleAbortController) {
         try {
@@ -1249,12 +1413,8 @@ async function loadSampleMetrics() {
     }
 
     // Show loading state
-    advancedLabelsContainer.innerHTML = `
-        <div style="text-align: center; color: #888; padding: 20px;">
-            <div class="loading-spinner" style="display: inline-block;"></div>
-            <p style="margin-top: 10px;">Loading sample metrics...</p>
-        </div>
-    `;
+    advancedLabelsContainer.innerHTML = loadingBanner;
+    samplePreviewContainer.innerHTML = previewLoadingBanner;
 
     try {
         const config = getConnectionConfig();
@@ -1269,11 +1429,11 @@ async function loadSampleMetrics() {
         const uniqueComponents = Array.from(new Set(selected.map(s => s.component)));
         const selectedJobs = selected.map(s => s.job).filter(Boolean);
 
-        // 🔍 DEBUG: Log sample request
-        console.group('📊 Sample Metrics Loading');
-        console.log('📋 Selected Components:', uniqueComponents.length);
-        console.log('🎯 Components:', uniqueComponents);
-        console.log('💼 Jobs:', selectedJobs);
+        // [SEARCH] DEBUG: Log sample request
+        console.group('[STATS] Sample Metrics Loading');
+        console.log('[INFO] Selected Components:', uniqueComponents.length);
+        console.log('[TARGET] Components:', uniqueComponents);
+        console.log('[JOB] Jobs:', selectedJobs);
 
         // Add timeout (30 seconds)
         const controller = new AbortController();
@@ -1301,7 +1461,8 @@ async function loadSampleMetrics() {
 
         clearTimeout(timeoutId);
 
-        console.log('📡 Response Status:', response.status, response.statusText);
+        console.log('[QUERY] Response Status:', response.status, response.statusText);
+        console.log(`[SAMPLE] request #${sampleRequestCount} status: ${response.status}`);
 
         // Check Content-Type before parsing JSON
         const contentType = response.headers.get('content-type');
@@ -1310,70 +1471,115 @@ async function loadSampleMetrics() {
         }
 
         const data = await response.json();
-        console.log('📦 Samples Received:', data.samples?.length || 0);
+        console.log('[BUILD] Samples Received:', data.samples?.length || 0);
 
         if (!response.ok) {
-            throw new Error(data.error || `Server error: ${response.status} ${response.statusText}`);
+            lastServerError = (data && data.error ? data.error : '') || lastServerError;
+            const errMsg = lastServerError || `Server error: ${response.status} ${response.statusText}`;
+            throw new Error(errMsg);
         }
 
         sampleMetrics = data.samples || [];
+        sampleStatus = 'success';
 
         // Log unique labels found
         const allLabels = new Set();
         sampleMetrics.forEach(s => Object.keys(s.labels || {}).forEach(l => allLabels.add(l)));
-        console.log('🏷️  Unique Labels Found:', Array.from(allLabels).sort());
-        console.log('✅ Sample loading complete');
+        console.log('Unique Labels Found:', Array.from(allLabels).sort());
+        console.log('[OK] Sample loading complete');
         console.groupEnd();
+
+        const elapsed = Date.now() - startTs;
+        if (elapsed < minLoaderMs) {
+            await new Promise(res => setTimeout(res, minLoaderMs - elapsed));
+        }
 
         renderSamplePreview(sampleMetrics);
         renderAdvancedLabels(sampleMetrics);
         updateSelectionSummary();
         window.__vm_samples_version = (window.__vm_samples_version || 0) + 1;
+        document.querySelectorAll('#advancedLoader,#previewLoader').forEach(el => el.remove());
+        const globalSpinnerDone = document.getElementById('sampleGlobalSpinner');
+        if (globalSpinnerDone) {
+            globalSpinnerDone.style.display = 'none';
+        }
     } catch (err) {
+        sampleHadError = true;
+        sampleStatus = 'error';
+        console.log(`[SAMPLE] request #${sampleRequestCount} failed: ${err?.message || err}`);
         if (err && err.name === 'AbortError') {
+            sampleStatus = 'idle';
             console.info('Sample request aborted due to newer request');
             console.groupEnd();
             const waitingHtml = `
                 <div style="text-align: center; color: #888; padding: 16px;">
                     <div class="loading-spinner" style="display: inline-block;"></div>
-                    <p style="margin-top: 8px;">Refreshing sample metrics…</p>
+                    <p style="margin-top: 8px;">Refreshing sample metrics...</p>
                 </div>
             `;
             advancedLabelsContainer.innerHTML = waitingHtml;
-            samplePreviewContainer.innerHTML = waitingHtml;
+            samplePreviewContainer.innerHTML = `
+                <div style="text-align: center; color: #888; padding: 16px;">
+                    <div class="sample-loading-spinner" style="display: inline-block;"></div>
+                    <p style="margin-top: 8px;">Refreshing sample metrics...</p>
+                </div>
+            `;
             return;
         }
-        console.error('❌ Sample loading failed:', err);
+        console.error('[FAIL] Sample loading failed:', err);
         console.groupEnd();
 
         // Show error in UI
-        advancedLabelsContainer.innerHTML = `
-            <div class="error-message" style="margin: 20px; padding: 15px; background: #ffebee; border-left: 4px solid #f44336; border-radius: 4px;">
-                <strong style="color: #c62828;">❌ Failed to load sample metrics</strong>
-                <p style="margin-top: 10px; color: #555;">${err.message}</p>
+        const detailMessage = err.message || lastServerError || 'Unknown error';
+        const advDetails = document.getElementById('advancedLabelsDetails');
+        if (advDetails) {
+            advDetails.open = true;
+        }
+        const prevDetails = document.getElementById('previewDetails');
+        if (prevDetails) {
+            prevDetails.open = true;
+        }
+        const globalSpinnerErr = document.getElementById('sampleGlobalSpinner');
+        if (globalSpinnerErr) {
+            globalSpinnerErr.style.display = 'none';
+        }
+        const errorHtml = `
+            <div class="error-message" role="alert" aria-live="assertive" style="margin: 20px; padding: 15px; background: #ffebee; border-left: 4px solid #f44336; border-radius: 4px;">
+                <strong style="color: #c62828;">[FAIL] Failed to load sample metrics</strong>
+                <p style="margin-top: 10px; color: #555;">${detailMessage}</p>
                 <details style="margin-top: 10px; font-size: 12px; color: #666;">
                     <summary style="cursor: pointer; font-weight: 500;">Technical details</summary>
                     <pre style="margin-top: 10px; white-space: pre-wrap; word-break: break-all; background: #f5f5f5; padding: 10px; border-radius: 4px;">${err.stack || err.toString()}</pre>
                 </details>
                 <button onclick="loadSampleMetrics()" style="margin-top: 15px; padding: 8px 16px; background: #2962FF; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
-                    🔄 Retry
+                    Retry
                 </button>
             </div>
         `;
-
+        if (advancedLabelsContainer) {
+            advancedLabelsContainer.style.display = 'block';
+        }
+        if (samplePreviewContainer) {
+            samplePreviewContainer.style.display = 'block';
+        }
+        advancedLabelsContainer.innerHTML = errorHtml;
         samplePreviewContainer.innerHTML = `
-            <div class="error-message" style="padding: 15px; background: #ffebee; border-left: 4px solid #f44336; border-radius: 4px;">
-                <strong style="color: #c62828;">❌ Preview unavailable</strong>
-                <p style="margin-top: 8px; color: #555;">Failed to load sample metrics. Please check connection and try again.</p>
+            <div class="error-message" role="alert" aria-live="assertive" style="padding: 15px; background: #ffebee; border-left: 4px solid #f44336; border-radius: 4px;">
+                <strong style="color: #c62828;">[FAIL] Preview unavailable</strong>
+                <p style="margin-top: 8px; color: #555;">${detailMessage}</p>
             </div>
         `;
     } finally {
+        sampleRequestInFlight = false;
         sampleAbortController = null;
     }
 }
 
 function renderSamplePreview(samples) {
     const preview = document.getElementById('samplePreview');
+    if (preview) {
+        preview.dataset.error = 'false';
+    }
 
     if (!samples || samples.length === 0) {
         preview.innerHTML = '<p style="text-align:center;color:#888;">No samples available</p>';
@@ -1425,7 +1631,7 @@ function renderAdvancedLabels(samples) {
     const filteredLabels = labels.filter(l => l !== 'instance' && l !== 'job' && !l.startsWith('__'));
 
     if (filteredLabels.length === 0) {
-        container.innerHTML = '<p style="text-align:center;color:#888;padding:20px;">No additional labels found</p>';
+        container.innerHTML = '<div class="label-item" style="text-align:center;color:#888;padding:20px;">No additional labels found</div>';
         return;
     }
 
@@ -1447,6 +1653,11 @@ function renderAdvancedLabels(samples) {
 
     container.innerHTML = html;
 
+    const obfuscationEnabled = document.getElementById('enableObfuscation')?.checked;
+    container.querySelectorAll('.obf-label-checkbox').forEach(cb => {
+        cb.disabled = !obfuscationEnabled;
+    });
+
     // Prune selections that are no longer available
     Array.from(selectedCustomLabels).forEach(label => {
         if (!availableLabels.has(label)) {
@@ -1455,25 +1666,134 @@ function renderAdvancedLabels(samples) {
     });
 }
 
+function moveAdvancedSections(enabled) {
+    const slot = document.getElementById('obfuscationAdvancedSlot');
+    const mount = document.getElementById('obfuscationAdvancedMount');
+    const advancedDetails = document.getElementById('advancedLabelsDetails');
+    const previewDetails = document.getElementById('previewDetails');
+    const target = enabled ? slot : mount;
+    if (!target) {
+        return;
+    }
+    [advancedDetails, previewDetails].forEach(node => {
+        if (node && node.parentElement !== target) {
+            target.appendChild(node);
+        }
+    });
+}
+
 function toggleObfuscation() {
     const enabled = document.getElementById('enableObfuscation').checked;
     const options = document.getElementById('obfuscationOptions');
-
+    const instanceCheckbox = document.querySelector('.obf-label-checkbox[data-label="instance"]');
+    const jobCheckbox = document.querySelector('.obf-label-checkbox[data-label="job"]');
+    if (options) {
+        options.classList.toggle('disabled', !enabled);
+        options.classList.toggle('hidden', !enabled);
+        options.style.display = enabled ? 'block' : 'none';
+        options.setAttribute('aria-hidden', enabled ? 'false' : 'true');
+        options.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            cb.disabled = !enabled && cb.id !== 'enableObfuscation';
+        });
+    }
+    moveAdvancedSections(enabled);
+    document.querySelectorAll('#advancedLabels .obf-label-checkbox').forEach(cb => {
+        cb.disabled = !enabled;
+    });
     if (enabled) {
-        options.style.display = 'block';
-        const instanceCheckbox = document.querySelector('.obf-label-checkbox[data-label="instance"]');
-        const jobCheckbox = document.querySelector('.obf-label-checkbox[data-label="job"]');
         if (instanceCheckbox && !instanceCheckbox.checked) {
             instanceCheckbox.checked = true;
         }
         if (jobCheckbox && !jobCheckbox.checked) {
             jobCheckbox.checked = true;
         }
-    } else {
-        options.style.display = 'none';
+        const advDetails = document.getElementById('advancedLabelsDetails');
+        if (advDetails) {
+            advDetails.open = true;
+        }
+    }
+
+    if (enabled && isObfuscationStepActive()) {
+        if (sampleRequestInFlight && sampleAbortController) {
+            try {
+                sampleAbortController.abort();
+            } catch (e) {
+                console.warn('Failed to abort sample reload', e);
+            }
+        }
+        loadSampleMetrics();
+        return;
     }
 
     scheduleSampleReload();
+}
+
+function initializeObfuscationOptions() {
+    const enabled = document.getElementById('enableObfuscation');
+    if (!enabled) {
+        return;
+    }
+    toggleObfuscation();
+}
+
+function wireAdvancedSummaries() {
+    const advSummary = document.getElementById('advancedLabelsSummary');
+    const previewSummary = document.getElementById('previewSummary');
+    if (advSummary) {
+        advSummary.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const details = document.getElementById('advancedLabelsDetails');
+            if (details) {
+                details.open = true;
+            }
+            if (sampleStatus === 'error') {
+                return;
+            }
+            if (sampleRequestInFlight) {
+                return;
+            }
+            sampleHadError = false;
+            loadSampleMetrics();
+        });
+    }
+    if (previewSummary) {
+        previewSummary.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const details = document.getElementById('previewDetails');
+            if (details) {
+                details.open = true;
+            }
+            if (sampleStatus === 'error') {
+                return;
+            }
+            if (sampleRequestInFlight) {
+                return;
+            }
+            sampleHadError = false;
+            loadSampleMetrics();
+        });
+    }
+}
+
+function initializeHelpSection() {
+    const helpDetails = document.querySelector('.help-section');
+    if (!helpDetails) {
+        return;
+    }
+    const helpSummary = helpDetails.querySelector('summary');
+    if (helpSummary) {
+        helpSummary.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            helpDetails.open = true;
+            const content = helpDetails.querySelector('.help-content');
+            if (content) {
+                content.style.display = 'block';
+            }
+        });
+    }
 }
 
 function getSelectedComponents() {
@@ -1513,7 +1833,7 @@ function updateSelectionSummary() {
     const selected = getSelectedComponents();
     if (!selected || selected.length === 0) {
         summary.innerHTML = `
-            <h4>📦 Estimated Export Volume</h4>
+            <h4>[BUILD] Estimated Export Volume</h4>
             <p class="summary-placeholder">Select components above to see per-component and per-job series counts.</p>
         `;
         return;
@@ -1522,7 +1842,7 @@ function updateSelectionSummary() {
     const stats = computeSelectionStats(selected);
     if (stats.length === 0) {
         summary.innerHTML = `
-            <h4>📦 Estimated Export Volume</h4>
+            <h4>[BUILD] Estimated Export Volume</h4>
             <p class="summary-placeholder">Metrics data is not available for the selected components.</p>
         `;
         return;
@@ -1533,7 +1853,7 @@ function updateSelectionSummary() {
     }, 0);
     const hasUnknown = stats.some(stat => stat.series == null);
 
-    let html = '<h4>📦 Estimated Export Volume</h4><div class="summary-grid">';
+    let html = '<h4>[BUILD] Estimated Export Volume</h4><div class="summary-grid">';
     stats.forEach(stat => {
         const seriesLabel = stat.series != null
             ? `${stat.series.toLocaleString()} series`
@@ -1672,17 +1992,42 @@ function getObfuscationConfig() {
 }
 
 // Export
+function lockStartButton(text) {
+    const btn = document.getElementById('startExportBtn');
+    if (btn) {
+        btn.disabled = true;
+        if (text) {
+            btn.textContent = text;
+        }
+    }
+}
+
+function unlockStartButton() {
+    const btn = document.getElementById('startExportBtn');
+    if (btn) {
+        btn.disabled = false;
+        btn.textContent = btn.dataset.originalText || 'Prepare Support Bundle';
+    }
+}
+
 async function exportMetrics(buttonElement) {
     const btn = buttonElement || event?.target;
     if (!btn) {
         console.error('No button element provided to exportMetrics');
         return;
     }
+    if (btn.dataset.mode === 'resume') {
+        hideResumeExportOption();
+        lockStartButton('Resuming…');
+        resumeExportJob();
+        return;
+    }
     const originalText = btn.textContent || 'Prepare Support Bundle';
     currentExportButton = btn;
     btn.dataset.originalText = originalText;
+    btn.dataset.mode = '';
     btn.disabled = true;
-    btn.innerHTML = '<span class="loading-spinner"></span> Collecting metrics...';
+    btn.innerHTML = '<span class="btn-spinner"></span> Collecting metrics...';
 
     try {
         const config = getConnectionConfig();
@@ -1696,9 +2041,9 @@ async function exportMetrics(buttonElement) {
         const selectedJobs = selected.map(s => s.job).filter(Boolean);
         const obfuscation = getObfuscationConfig();
 
-        // 🔍 DEBUG: Log export request
-        console.group('📤 Metrics Export');
-        console.log('📋 Export Config:', {
+        // [SEARCH] DEBUG: Log export request
+        console.group('[SEND] Metrics Export');
+        console.log('[INFO] Export Config:', {
             time_range: { from, to },
             components: selected.length,
             obfuscation: {
@@ -1707,8 +2052,8 @@ async function exportMetrics(buttonElement) {
                 obfuscate_job: obfuscation.obfuscate_job
             }
         });
-        console.log('🎯 Selected components:', uniqueComponents);
-        console.log('💼 Selected jobs:', selectedJobs);
+        console.log('[TARGET] Selected components:', uniqueComponents);
+        console.log('[JOB] Selected jobs:', selectedJobs);
 
         const stagingDirValue = document.getElementById('stagingDir')?.value.trim() || '';
         if (!stagingDirValue) {
@@ -1737,7 +2082,7 @@ async function exportMetrics(buttonElement) {
             })
         });
 
-        console.log('📡 Response Status:', response.status, response.statusText);
+        console.log('[QUERY] Response Status:', response.status, response.statusText);
 
         const data = await response.json();
 
@@ -1745,13 +2090,13 @@ async function exportMetrics(buttonElement) {
             throw new Error(data.error || 'Export failed');
         }
 
-        console.log('🚀 Export job started:', data.job_id);
+        console.log('[START] Export job started:', data.job_id);
         currentExportJobId = data.job_id;
         showExportProgressPanel(data);
         await monitorExportJob(btn);
         console.groupEnd();
     } catch (err) {
-        console.error('❌ Export failed:', err);
+        console.error('[FAIL] Export failed:', err);
         console.groupEnd();
 
         alert('Export failed: ' + err.message + '\n\nCheck browser console (F12) for details');
@@ -1775,7 +2120,7 @@ async function monitorExportJob(btn) {
             }
             updateExportProgress(status);
             if (status.state === 'completed') {
-                cleanupExportPolling();
+                cleanupExportPolling(false);
                 exportResult = status.result;
                 if (exportResult) {
                     showExportResult(exportResult);
@@ -1787,7 +2132,7 @@ async function monitorExportJob(btn) {
                 disableCancelButton();
                 showCancelNotice('');
             } else if (status.state === 'failed') {
-                cleanupExportPolling();
+                cleanupExportPolling(false);
                 btn.disabled = false;
                 btn.textContent = btn.dataset.originalText || 'Prepare Support Bundle';
                 currentExportButton = null;
@@ -1795,12 +2140,12 @@ async function monitorExportJob(btn) {
                 disableCancelButton();
                 showCancelNotice('');
             } else if (status.state === 'canceled') {
-                cleanupExportPolling();
+                cleanupExportPolling(true);
                 btn.disabled = false;
-                btn.textContent = btn.dataset.originalText || 'Prepare Support Bundle';
+                btn.textContent = 'Resume export';
                 currentExportButton = null;
                 disableCancelButton();
-                showCancelNotice('Export canceled. Adjust parameters and start again.');
+                showResumeExportOption('Export canceled. You can resume without changing selections.');
             }
         } catch (err) {
             console.error('Failed to fetch export status', err);
@@ -1840,6 +2185,7 @@ function showExportProgressPanel(meta) {
     const windowInfo = document.getElementById('exportBatchWindow');
     const fill = document.getElementById('exportProgressFill');
 
+    hideResumeExportOption();
     if (panel) {
         panel.classList.remove('hidden');
         panel.style.display = 'block';
@@ -1854,10 +2200,10 @@ function showExportProgressPanel(meta) {
         metrics.textContent = 'Waiting for first batch...';
     }
     if (eta) {
-        eta.textContent = 'Estimating time to completion…';
+        eta.textContent = 'Estimating time to completion...';
     }
     if (windowInfo && meta.batch_window_seconds) {
-        windowInfo.textContent = `Batch window ≈ ${Math.round(meta.batch_window_seconds)}s`;
+        windowInfo.textContent = `≈ ${Math.round(meta.batch_window_seconds)}s`;
     }
     if (fill) {
         fill.style.width = '0%';
@@ -1911,7 +2257,7 @@ function updateExportProgress(status) {
         const avg = typeof status.average_batch_seconds === 'number'
             ? status.average_batch_seconds.toFixed(1)
             : '0.0';
-        summaryEl.textContent = `Last batch ${last}s • Avg ${avg}s`;
+        summaryEl.textContent = `Last batch ${last}s - Avg ${avg}s`;
     }
     if (typeof status.obfuscation_enabled === 'boolean') {
         currentJobObfuscationEnabled = status.obfuscation_enabled;
@@ -1922,22 +2268,24 @@ function updateExportProgress(status) {
     renderExportStagingPath(exportStagingPath);
 }
 
-function cleanupExportPolling() {
+function cleanupExportPolling(preserveJob = false) {
     if (exportStatusTimer) {
         clearInterval(exportStatusTimer);
         exportStatusTimer = null;
     }
-    exportStagingPath = '';
-    currentJobObfuscationEnabled = false;
-    currentExportJobId = null;
-    renderExportStagingPath('');
+    if (!preserveJob) {
+        exportStagingPath = '';
+        currentJobObfuscationEnabled = false;
+        currentExportJobId = null;
+        renderExportStagingPath('');
+    }
     disableCancelButton();
 }
 
 function renderExportStagingPath(path) {
     const el = document.getElementById('exportProgressPath');
     if (el) {
-        el.textContent = path || '—';
+        el.textContent = path || '-';
     }
 }
 
@@ -1945,7 +2293,7 @@ function renderExportSpoilers(samples) {
     const container = document.getElementById('exportSpoilers');
 
     const limited = samples.slice(0, 5);
-    let html = '<h3 style="margin-bottom: 15px;">📊 Exported Data Samples (Top 5)</h3>';
+    let html = '<h3 style="margin-bottom: 15px;">[STATS] Exported Data Samples (Top 5)</h3>';
 
     limited.forEach((sample, idx) => {
         // Handle both 'name' and 'metric_name' fields for backward compatibility
@@ -1959,7 +2307,7 @@ function renderExportSpoilers(samples) {
             <div class="spoiler">
                 <div class="spoiler-header" onclick="toggleSpoiler(this)">
                     <span>Sample ${idx + 1}: ${metricName}</span>
-                    <span>▼</span>
+                    <span>v</span>
                 </div>
                 <div class="spoiler-content">
                     <div class="spoiler-body">
@@ -1983,10 +2331,10 @@ function toggleSpoiler(header) {
 
     if (content.classList.contains('open')) {
         content.classList.remove('open');
-        arrow.textContent = '▼';
+        arrow.textContent = 'v';
     } else {
         content.classList.add('open');
-        arrow.textContent = '▲';
+        arrow.textContent = '^';
     }
 }
 
@@ -2006,6 +2354,59 @@ function disableCancelButton() {
     }
 }
 
+function showResumeExportOption(message) {
+    const startBtn = document.getElementById('startExportBtn');
+    const resumeBtn = document.getElementById('resumeExportBtn');
+    if (startBtn) {
+        startBtn.disabled = false;
+        startBtn.textContent = 'Resume export';
+        startBtn.dataset.mode = 'resume';
+    }
+    if (resumeBtn) {
+        resumeBtn.style.display = 'inline-flex';
+        resumeBtn.disabled = false;
+    }
+    showCancelNotice(message || 'Export canceled. You can resume with the same settings.');
+}
+
+function hideResumeExportOption() {
+    const startBtn = document.getElementById('startExportBtn');
+    const resumeBtn = document.getElementById('resumeExportBtn');
+    if (startBtn) {
+        startBtn.textContent = startBtn.dataset.originalText || 'Prepare Support Bundle';
+        startBtn.dataset.mode = '';
+    }
+    if (resumeBtn) {
+        resumeBtn.style.display = 'none';
+        resumeBtn.disabled = true;
+    }
+}
+
+function resumeExportJob() {
+    if (!currentExportJobId) return;
+    const startBtn = document.getElementById('startExportBtn');
+    hideResumeExportOption();
+    lockStartButton('Resuming…');
+    fetch('/api/export/resume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_id: currentExportJobId })
+    })
+        .then(async resp => {
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                throw new Error(data.error || 'Failed to resume export');
+            }
+            showExportProgressPanel(data);
+            return monitorExportJob(startBtn || { disabled: false, textContent: '' });
+        })
+        .catch(err => {
+            console.error('Failed to resume export', err);
+            alert('Failed to resume export: ' + err.message);
+            unlockStartButton();
+        });
+}
+
 async function cancelExportJob() {
     if (!currentExportJobId || cancelRequestInFlight) {
         return;
@@ -2014,9 +2415,9 @@ async function cancelExportJob() {
     const cancelBtn = document.getElementById('cancelExportBtn');
     if (cancelBtn) {
         cancelBtn.disabled = true;
-        cancelBtn.textContent = 'Canceling…';
+        cancelBtn.textContent = 'Canceling...';
     }
-    showCancelNotice('Sending cancellation request…');
+    showCancelNotice('Sending cancellation request...');
     try {
         const resp = await fetch('/api/export/cancel', {
             method: 'POST',
@@ -2027,7 +2428,7 @@ async function cancelExportJob() {
         if (!resp.ok) {
             throw new Error(data.error || 'Failed to cancel export');
         }
-        showCancelNotice('Cancellation requested. Waiting for exporter to stop…');
+        showCancelNotice('Cancellation requested. Waiting for exporter to stop...');
     } catch (err) {
         console.error('Cancel export failed', err);
         alert('Failed to cancel export: ' + err.message);
@@ -2044,24 +2445,24 @@ async function cancelExportJob() {
 // Download
 function downloadArchive() {
     if (!exportResult || !exportResult.archive_path) {
-        console.error('❌ No archive available for download');
+        console.error('[FAIL] No archive available for download');
         alert('No archive available for download');
         return;
     }
 
-    // 🔍 DEBUG: Log download
-    console.group('⬇️  Archive Download');
-    console.log('📦 Archive Path:', exportResult.archive_path);
-    console.log('📊 Archive Size:', (exportResult.archive_size / 1024).toFixed(2), 'KB');
-    console.log('🔐 SHA256:', exportResult.sha256);
+    // [SEARCH] DEBUG: Log download
+    console.group('[DOWNLOAD]  Archive Download');
+    console.log('[BUILD] Archive Path:', exportResult.archive_path);
+    console.log('[STATS] Archive Size:', (exportResult.archive_size / 1024).toFixed(2), 'KB');
+    console.log('[SECURE] SHA256:', exportResult.sha256);
 
     // Create download link
     const link = document.createElement('a');
     link.href = '/api/download?path=' + encodeURIComponent(exportResult.archive_path);
     link.download = exportResult.archive_path.split('/').pop();
 
-    console.log('🔗 Download URL:', link.href);
-    console.log('✅ Initiating browser download');
+    console.log('[LINK] Download URL:', link.href);
+    console.log('[OK] Initiating browser download');
     console.groupEnd();
 
     // Trigger download

@@ -51,14 +51,14 @@ func TestRealScenario_RwPrometheusPath(t *testing.T) {
 		if err != nil {
 			// It's OK if no data, but should not be auth error or missing route
 			if strings.Contains(err.Error(), "Unauthorized") {
-				t.Fatalf("❌ Query failed with auth error: %v", err)
+				t.Fatalf("[FAIL] Query failed with auth error: %v", err)
 			}
 			if strings.Contains(err.Error(), "missing route") {
-				t.Fatalf("❌ Query failed with missing route: %v", err)
+				t.Fatalf("[FAIL] Query failed with missing route: %v", err)
 			}
-			t.Logf("✅ Query completed (no data): %v", err)
+			t.Logf("[OK] Query completed (no data): %v", err)
 		} else {
-			t.Logf("✅ Query successful: %d samples", len(samples))
+			t.Logf("[OK] Query successful: %d samples", len(samples))
 		}
 	})
 
@@ -91,12 +91,12 @@ func TestRealScenario_RwPrometheusPath(t *testing.T) {
 		if err != nil {
 			// Check that it's NOT a "missing route" error
 			if strings.Contains(err.Error(), "missing route") {
-				t.Fatalf("❌ Export failed with missing route (normalization didn't work): %v", err)
+				t.Fatalf("[FAIL] Export failed with missing route (normalization didn't work): %v", err)
 			}
 			// It's OK if there's no data, but path should be normalized
-			t.Logf("✅ Export completed with normalization (no data): %v", err)
+			t.Logf("[OK] Export completed with normalization (no data): %v", err)
 		} else {
-			t.Logf("✅ Export successful with path normalization!")
+			t.Logf("[OK] Export successful with path normalization!")
 		}
 	})
 
@@ -130,14 +130,14 @@ func TestRealScenario_RwPrometheusPath(t *testing.T) {
 		samples, err := vmService.GetSample(ctx, config, 5)
 		if err != nil {
 			if strings.Contains(err.Error(), "Unauthorized") {
-				t.Fatalf("❌ Query failed with auth error: %v", err)
+				t.Fatalf("[FAIL] Query failed with auth error: %v", err)
 			}
 			if strings.Contains(err.Error(), "missing route") {
-				t.Fatalf("❌ Query failed with missing route: %v", err)
+				t.Fatalf("[FAIL] Query failed with missing route: %v", err)
 			}
-			t.Logf("✅ Query completed (no data): %v", err)
+			t.Logf("[OK] Query completed (no data): %v", err)
 		} else {
-			t.Logf("✅ Query successful: %d samples", len(samples))
+			t.Logf("[OK] Query successful: %d samples", len(samples))
 		}
 	})
 
@@ -168,14 +168,14 @@ func TestRealScenario_RwPrometheusPath(t *testing.T) {
 		_, err := exportService.ExecuteExport(ctx, config)
 		if err != nil {
 			if strings.Contains(err.Error(), "missing route") {
-				t.Fatalf("❌ Export failed with missing route: %v", err)
+				t.Fatalf("[FAIL] Export failed with missing route: %v", err)
 			}
 			if strings.Contains(err.Error(), "Unauthorized") || strings.Contains(err.Error(), "401") {
-				t.Fatalf("❌ Export failed with auth error: %v", err)
+				t.Fatalf("[FAIL] Export failed with auth error: %v", err)
 			}
-			t.Logf("✅ Export completed (no data): %v", err)
+			t.Logf("[OK] Export completed (no data): %v", err)
 		} else {
-			t.Logf("✅ Export successful")
+			t.Logf("[OK] Export successful")
 		}
 	})
 
@@ -217,9 +217,9 @@ func TestRealScenario_RwPrometheusPath(t *testing.T) {
 			errMsg := err.Error()
 			// Check that error doesn't mention /rw/prometheus in the export URL
 			if strings.Contains(errMsg, "/rw/prometheus/api/v1/export") {
-				t.Logf("⚠️  Warning: Error still contains /rw/prometheus path (normalization might not have worked)")
+				t.Logf("[WARN]  Warning: Error still contains /rw/prometheus path (normalization might not have worked)")
 			}
-			t.Logf("✅ Export failed (expected in test env): %v", err)
+			t.Logf("[OK] Export failed (expected in test env): %v", err)
 		}
 	})
 }

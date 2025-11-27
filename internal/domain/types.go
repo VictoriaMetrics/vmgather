@@ -89,6 +89,7 @@ type ExportConfig struct {
 	Batching          BatchSettings     `json:"batching"`
 	StagingDir        string            `json:"staging_dir,omitempty"`
 	StagingFile       string            `json:"staging_file,omitempty"`
+	ResumeFromBatch   int               `json:"resume_from_batch,omitempty"`
 	MetricStepSeconds int               `json:"metric_step_seconds,omitempty"`
 	OutputSettings    OutputSettings    `json:"output_settings"`
 }

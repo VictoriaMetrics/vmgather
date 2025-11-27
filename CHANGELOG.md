@@ -2,6 +2,24 @@
 
 All notable changes to VMExporter are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and versions adhere to semantic versioning.
 
+## [v1.2.0] - 2025-11-27
+
+### Added
+- Importer UI now auto-runs preflight on file drop with visible loader; shows file time range, retention cutoff (UTC), points/skips/drops, and suggested time shift.
+- Retention window card on Step 2 with cutoff fetched from target; “Shift to now” and align-first-sample controls display the shifted range before upload.
+- New tests: importer skips invalid timestamps during analysis; extra retention/span warning coverage.
+
+### Changed
+- Start Import remains disabled until connection is valid, a file is selected, and preflight completes; time-alignment controls stay disabled until analysis finishes.
+- Retention trimming is always enabled for imports; drop-old checkbox removed to avoid user errors.
+- Step 2 reordered: file selection first (auto analysis), then retention/time-alignment, then batching; preflight button removed.
+- README and user-guide updated with importer flow, retention awareness, and time-alignment behaviour.
+
+### Fixed
+- Preflight status now shows a spinner (“Validating bundle…”) instead of static text.
+- Shift summary and picker stay in sync with suggested shift and manual selection.
+- VMImporter tests adjusted to use project-local tmp dir and reuse fixtures to avoid tmp bloat.
+
 ## [v0.9.7-beta] - 2025-11-18
 
 ### Added

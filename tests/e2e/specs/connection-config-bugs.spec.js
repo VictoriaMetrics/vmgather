@@ -35,7 +35,7 @@ test.describe('Connection Config Bugs', () => {
     });
     
     const body = await response.json();
-    console.log('📡 Sample response:', body);
+    console.log('[QUERY] Sample response:', body);
     
     // Should NOT have "unsupported protocol scheme" error
     if (body.error && body.error.includes('unsupported protocol scheme ""')) {
@@ -45,7 +45,7 @@ test.describe('Connection Config Bugs', () => {
     
     // Should get samples or a valid error (not empty URL)
     if (body.samples) {
-      console.log('✅ Got samples:', body.samples.length);
+      console.log('[OK] Got samples:', body.samples.length);
       expect(body.samples).toBeDefined();
     } else if (body.error) {
       console.log('Error:', body.error);
@@ -84,7 +84,7 @@ test.describe('Connection Config Bugs', () => {
     expect(contentType).toContain('application/json');
     
     const body = await response.json();
-    console.log('📡 Export response:', body);
+    console.log('[QUERY] Export response:', body);
     
     // Check if error mentions "/rw/prometheus"
     if (body.error && body.error.includes('missing route for "/1011/rw/prometheus')) {
@@ -123,7 +123,7 @@ test.describe('Connection Config Bugs', () => {
     });
     
     const body = await response.json();
-    console.log('📡 Export with /ui/prometheus:', body);
+    console.log('[QUERY] Export with /ui/prometheus:', body);
     
     if (body.error && body.error.includes('missing route')) {
       console.log('🔴 /ui/prometheus also fails for export');
@@ -158,7 +158,7 @@ test.describe('Connection Config Bugs', () => {
     });
     
     const body = await response.json();
-    console.log('📡 Export with /prometheus:', body);
+    console.log('[QUERY] Export with /prometheus:', body);
     
     // This might still fail due to auth, but error should be different
     if (body.error) {
@@ -166,7 +166,7 @@ test.describe('Connection Config Bugs', () => {
       
       // Check if it's NOT a "missing route" error
       if (!body.error.includes('missing route')) {
-        console.log('✅ /prometheus path is recognized (even if auth fails)');
+        console.log('[OK] /prometheus path is recognized (even if auth fails)');
       }
     }
   });

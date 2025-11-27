@@ -189,8 +189,8 @@ func (c *Client) Export(ctx context.Context, selector string, start, end time.Ti
 
 // buildRequest builds an HTTP request with authentication
 func (c *Client) buildRequest(ctx context.Context, method, path string, params url.Values) (*http.Request, error) {
-	// 🔍 DEBUG: Log input parameters
-	log.Printf("🔧 buildRequest called:")
+	// DEBUG: Log input parameters
+	log.Printf("buildRequest called:")
 	log.Printf("  Method: %s", method)
 	log.Printf("  Path: %s", path)
 	log.Printf("  Connection URL: %s", c.conn.URL)
@@ -204,7 +204,7 @@ func (c *Client) buildRequest(ctx context.Context, method, path string, params u
 	
 	// CRITICAL: Detect if this is an /export request
 	isExportRequest := strings.Contains(path, "/export")
-	log.Printf("  🔍 Is Export Request: %v (path: %s)", isExportRequest, path)
+	log.Printf("  Is Export Request: %v (path: %s)", isExportRequest, path)
 	
 	if c.conn.FullApiUrl != "" {
 		baseURL = c.conn.FullApiUrl
@@ -215,7 +215,7 @@ func (c *Client) buildRequest(ctx context.Context, method, path string, params u
 		if isExportRequest && strings.Contains(baseURL, "/rw/prometheus") {
 			originalURL := baseURL
 			baseURL = strings.Replace(baseURL, "/rw/prometheus", "/prometheus", 1)
-			log.Printf("  ⚠️  FullApiUrl normalized for /export: %s → %s", originalURL, baseURL)
+			log.Printf("  [WARN] FullApiUrl normalized for /export: %s -> %s", originalURL, baseURL)
 		} else {
 			log.Printf("  Using FullApiUrl as base: %s", baseURL)
 		}
@@ -233,7 +233,7 @@ func (c *Client) buildRequest(ctx context.Context, method, path string, params u
 		if isExportRequest && strings.Contains(normalizedPath, "/rw/prometheus") {
 			originalPath := normalizedPath
 			normalizedPath = strings.Replace(normalizedPath, "/rw/prometheus", "/prometheus", 1)
-			log.Printf("  ⚠️  ApiBasePath normalized for /export: %s → %s", originalPath, normalizedPath)
+			log.Printf("  [WARN] ApiBasePath normalized for /export: %s -> %s", originalPath, normalizedPath)
 		} else {
 			log.Printf("  Using ApiBasePath as-is: %s", normalizedPath)
 		}
@@ -255,7 +255,7 @@ func (c *Client) buildRequest(ctx context.Context, method, path string, params u
 		}
 	}
 
-	log.Printf("  ✅ Final request URL: %s", reqURL)
+	log.Printf("  [OK] Final request URL: %s", reqURL)
 
 	// Create request
 	var body io.Reader
@@ -265,7 +265,7 @@ func (c *Client) buildRequest(ctx context.Context, method, path string, params u
 
 	req, err := http.NewRequestWithContext(ctx, method, reqURL, body)
 	if err != nil {
-		log.Printf("  ❌ Failed to create request: %v", err)
+		log.Printf("  [ERROR] Failed to create request: %v", err)
 		return nil, err
 	}
 

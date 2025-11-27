@@ -202,7 +202,7 @@ test.describe('Complete E2E Flow Tests', () => {
   });
 
   test('should validate time range on Step 2', async ({ page }) => {
-    await page.locator('.step.active button.btn-primary:has-text("Next")').click();
+  await page.locator('.step.active button:has-text("Next")').first().click();
     await page.waitForTimeout(300);
 
     // Clear inputs
@@ -216,7 +216,7 @@ test.describe('Complete E2E Flow Tests', () => {
       await dialog.accept();
     });
 
-    await page.locator('.step.active button.btn-primary:has-text("Next")').click();
+  await page.locator('.step.active button:has-text("Next")').first().click();
     await page.waitForTimeout(200);
 
     await expect(page.locator('.step-info')).toContainText('Step 2 of 6');

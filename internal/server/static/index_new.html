@@ -505,7 +505,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>🚀 VMExporter</h1>
+            <h1>[START] VMExporter</h1>
             <p>VictoriaMetrics Metrics Exporter</p>
         </header>
 
@@ -519,10 +519,10 @@
 
             <!-- Step 1: Welcome -->
             <div class="step active" data-step="1">
-                <h2 class="step-title">Welcome to VMExporter! 👋</h2>
+                <h2 class="step-title">Welcome to VMExporter! [HELLO]</h2>
                 <div class="step-content">
                     <div class="info-box">
-                        <strong>🎯 Purpose:</strong> Export VictoriaMetrics internal metrics for support team analysis
+                        <strong>[TARGET] Purpose:</strong> Export VictoriaMetrics internal metrics for VictoriaMetrics team analysis
                     </div>
                     
                     <p style="margin-bottom: 20px; color: #666; line-height: 1.6;">
@@ -531,21 +531,21 @@
                     </p>
 
                     <ul style="margin-left: 30px; margin-bottom: 20px; color: #666; line-height: 1.8;">
-                        <li>✅ Select time range for export</li>
-                        <li>✅ Connect to your VM instance (vmselect/vmsingle)</li>
-                        <li>✅ Choose which components to export</li>
-                        <li>✅ Obfuscate sensitive information (IPs, job names)</li>
-                        <li>✅ Download ready-to-send archive</li>
+                        <li>[OK] Select time range for export</li>
+                        <li>[OK] Connect to your VM instance (vmselect/vmsingle)</li>
+                        <li>[OK] Choose which components to export</li>
+                        <li>[OK] Obfuscate sensitive information (IPs, job names)</li>
+                        <li>[OK] Download ready-to-send archive</li>
                     </ul>
 
                     <div class="warning-box">
-                        <strong>🔒 Privacy:</strong> Your credentials are never stored. Obfuscation uses obviously fake IPs (777.777.x.x) for clarity.
+                        <strong>[LOCK] Privacy:</strong> Your credentials are never stored. Obfuscation uses obviously fake IPs (777.777.x.x) for clarity.
                     </div>
                 </div>
 
                 <div class="button-group">
-                    <button class="btn-secondary" disabled>← Back</button>
-                    <button class="btn-primary" onclick="nextStep()">Next →</button>
+                    <button class="btn-secondary" disabled><- Back</button>
+                    <button class="btn-primary" onclick="nextStep()">Next -></button>
                 </div>
             </div>
 
@@ -569,7 +569,7 @@
                         <label for="timeFrom">From (Date & Time):</label>
                         <input type="datetime-local" id="timeFrom" required>
                         <small style="color: #888; margin-top: 5px; display: block;">
-                            📅 Pick date and time using the calendar picker
+                            [DATE] Pick date and time using the calendar picker
                         </small>
                     </div>
 
@@ -577,18 +577,18 @@
                         <label for="timeTo">To (Date & Time):</label>
                         <input type="datetime-local" id="timeTo" required>
                         <small style="color: #888; margin-top: 5px; display: block;">
-                            📅 Pick date and time using the calendar picker
+                            [DATE] Pick date and time using the calendar picker
                         </small>
                     </div>
 
                     <div class="info-box">
-                        <strong>💡 Tip:</strong> Shorter time ranges export faster. Recommended: 1-24 hours for most cases.
+                        <strong>[TIP] Tip:</strong> Shorter time ranges export faster. Recommended: 1-24 hours for most cases.
                     </div>
                 </div>
 
                 <div class="button-group">
-                    <button class="btn-secondary" onclick="prevStep()">← Back</button>
-                    <button class="btn-primary" onclick="nextStep()">Next →</button>
+                    <button class="btn-secondary" onclick="prevStep()"><- Back</button>
+                    <button class="btn-primary" onclick="nextStep()">Next -></button>
                 </div>
             </div>
 
@@ -597,7 +597,7 @@
                 <h2 class="step-title">VictoriaMetrics Connection</h2>
                 <div class="step-content">
                     <details class="help-section" open>
-                        <summary>📚 How to find your VM URL? (Click to expand)</summary>
+                        <summary>[DOC] How to find your VM URL? (Click to expand)</summary>
                         <div class="help-content">
                             <p><strong>For vmselect (cluster):</strong></p>
                             <div class="url-example-grid">
@@ -613,16 +613,16 @@
                                 <div class="url-example">https://victoria-metrics.example.com</div>
                             </div>
 
-                            <p style="margin-top: 15px;"><strong>🔍 Finding URL from Grafana datasource:</strong></p>
+                            <p style="margin-top: 15px;"><strong>[SEARCH] Finding URL from Grafana datasource:</strong></p>
                             <ol style="margin-left: 20px; margin-top: 10px;">
-                                <li>Open Grafana → Configuration → Data Sources</li>
+                                <li>Open Grafana -> Configuration -> Data Sources</li>
                                 <li>Find your VictoriaMetrics datasource</li>
                                 <li>Copy the <strong>URL</strong> field (e.g., <code>http://vmselect:8481/select/0/prometheus</code>)</li>
                                 <li>Use <strong>base URL only</strong>: <code>http://vmselect:8481</code> (without <code>/select/0/prometheus</code>)</li>
                             </ol>
 
                             <div class="warning-box" style="margin-top: 15px;">
-                                <strong>⚠️ Important:</strong> Use base URL without paths. VMExporter adds required API paths automatically.
+                                <strong>[WARN] Important:</strong> Use base URL without paths. VMExporter adds required API paths automatically.
                             </div>
                         </div>
                     </details>
@@ -652,8 +652,8 @@
                 </div>
 
                 <div class="button-group">
-                    <button class="btn-secondary" onclick="prevStep()">← Back</button>
-                    <button class="btn-primary" id="step3Next" onclick="nextStep()" disabled>Next →</button>
+                    <button class="btn-secondary" onclick="prevStep()"><- Back</button>
+                    <button class="btn-primary" id="step3Next" onclick="nextStep()" disabled>Next -></button>
                 </div>
             </div>
 
@@ -671,8 +671,8 @@
                 </div>
 
                 <div class="button-group">
-                    <button class="btn-secondary" onclick="prevStep()">← Back</button>
-                    <button class="btn-primary" onclick="nextStep()">Next →</button>
+                    <button class="btn-secondary" onclick="prevStep()"><- Back</button>
+                    <button class="btn-primary" onclick="nextStep()">Next -></button>
                 </div>
             </div>
 
@@ -681,7 +681,7 @@
                 <h2 class="step-title">Obfuscation Options</h2>
                 <div class="step-content">
                     <div class="info-box">
-                        Obfuscate sensitive information before sending to support team.
+                        Obfuscate sensitive information before sending to VictoriaMetrics team.
                     </div>
 
                     <div class="form-group">
@@ -691,7 +691,7 @@
                         </label>
                     </div>
 
-                    <div id="obfuscationOptions" class="obfuscation-options">
+                    <div id="obfuscationOptions" class="obfuscation-options hidden" aria-hidden="true">
                         <div class="form-group">
                             <label>
                                 <input type="checkbox" class="obf-label-checkbox" data-label="instance" checked>
@@ -708,7 +708,7 @@
 
                         <details style="margin-top: 20px;">
                             <summary style="cursor: pointer; font-weight: 600; color: #2962FF; padding: 10px; background: #f5f5f5; border-radius: 4px;">
-                                🔧 Advanced: Obfuscate other labels
+                                [FIX] Advanced: Obfuscate other labels
                             </summary>
                             <div id="advancedLabels" class="label-selector">
                                 <div style="text-align: center; color: #888; padding: 20px;">
@@ -720,7 +720,7 @@
 
                         <details style="margin-top: 20px;">
                             <summary style="cursor: pointer; font-weight: 600; color: #2962FF; padding: 10px; background: #f5f5f5; border-radius: 4px;">
-                                👀 Preview sample data
+                                [LOOK] Preview sample data
                             </summary>
                             <div id="samplePreview" class="sample-preview">
                                 <p style="text-align: center; color: #888;">Loading samples...</p>
@@ -729,12 +729,12 @@
                     </div>
 
                     <div class="warning-box">
-                        <strong>ℹ️ Note:</strong> Obfuscation mappings will be included in metadata.json for reference.
+                        <strong>Note:</strong> Obfuscation mappings will be included in metadata.json for reference.
                     </div>
                 </div>
 
                 <div class="button-group">
-                    <button class="btn-secondary" onclick="prevStep()">← Back</button>
+                    <button class="btn-secondary" onclick="prevStep()"><- Back</button>
                     <button class="btn-primary" onclick="exportMetrics()">Start Export</button>
                 </div>
             </div>
@@ -744,7 +744,7 @@
                 <h2 class="step-title">Export Complete!</h2>
                 <div class="step-content">
                     <div class="success-box">
-                        <div class="success-icon">✅</div>
+                        <div class="success-icon">[OK]</div>
                         <h3 style="color: #4CAF50; margin-bottom: 20px;">Export Successful</h3>
 
                         <div style="text-align: left; margin: 20px 0;">
@@ -755,7 +755,7 @@
                         </div>
 
                         <button class="btn-success" onclick="downloadArchive()" id="downloadBtn" style="width: 100%; margin: 20px 0; padding: 15px; font-size: 18px;">
-                            📦 Download Archive
+                            [BUILD] Download Archive
                         </button>
 
                         <button class="btn-secondary" onclick="location.reload()" style="width: 100%;">
@@ -769,7 +769,7 @@
                 </div>
 
                 <div class="button-group">
-                    <button class="btn-secondary" onclick="prevStep()">← Back</button>
+                    <button class="btn-secondary" onclick="prevStep()"><- Back</button>
                     <button class="btn-success" onclick="location.reload()">Finish</button>
                 </div>
             </div>
@@ -779,4 +779,3 @@
     <script src="/static/app.js"></script>
 </body>
 </html>
-

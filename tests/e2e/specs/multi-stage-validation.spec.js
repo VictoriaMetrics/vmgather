@@ -2,6 +2,81 @@ const { test, expect } = require('@playwright/test');
 
 test.describe('Multi-Stage Connection Validation - Real Environment', () => {
   test.beforeEach(async ({ page }) => {
+    // Mock VM endpoints to keep tests hermetic
+    await page.route('**/api/validate', async route => {
+      const body = route.request().postDataJSON?.() || {};
+      const conn = body.connection || body;
+      const vmUrl = conn.url || conn.vm_url || '';
+      const auth = conn.auth || {};
+
+      if (vmUrl.includes('nonexistent-host')) {
+        return route.fulfill({
+          status: 502,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: false,
+            error: 'Host unreachable: DNS lookup failed',
+          }),
+        });
+      }
+
+      if (auth.type === 'basic' && auth.username === 'wrong-user') {
+        return route.fulfill({
+          status: 401,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: false,
+            error: 'Unauthorized',
+          }),
+        });
+      }
+
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          valid: true,
+          is_victoria_metrics: true,
+          vm_components: ['vmsingle'],
+          components: 1,
+          version: 'v1.95.0',
+        }),
+      });
+    });
+    await page.route('**/api/discover', route => {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          components: [
+            {
+              component: 'vmsingle',
+              jobs: ['vmjob'],
+              instance_count: 1,
+              metrics_count_estimate: 100,
+              job_metrics: { vmjob: 100 },
+            },
+          ],
+        }),
+      });
+    });
+    await page.route('**/api/sample', route => {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          samples: [
+            {
+              name: 'up',
+              labels: { __name__: 'up', job: 'vmjob', instance: '127.0.0.1:8428' },
+            },
+          ],
+          count: 1,
+        }),
+      });
+    });
+
     await page.goto('http://localhost:8080');
     await page.waitForLoadState('networkidle');
     

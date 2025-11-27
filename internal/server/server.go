@@ -70,6 +70,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("/api/sample", s.handleGetSample)
 	mux.HandleFunc("/api/export", s.handleExport)
 	mux.HandleFunc("/api/export/start", s.handleExportStart)
+	mux.HandleFunc("/api/export/resume", s.handleExportResume)
 	mux.HandleFunc("/api/export/status", s.handleExportStatus)
 	mux.HandleFunc("/api/fs/list", s.handleListDirectory)
 	mux.HandleFunc("/api/fs/check", s.handleCheckDirectory)
@@ -130,8 +131,8 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// 🔍 DEBUG: Log connection details
-	log.Printf("🔌 Validating connection:")
+	// DEBUG: Log connection details
+	log.Printf("Validating connection:")
 	log.Printf("  URL: %s", req.Connection.URL)
 	log.Printf("  ApiBasePath: %s", req.Connection.ApiBasePath)
 	log.Printf("  TenantId: %s", req.Connection.TenantId)
@@ -151,14 +152,14 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 	defer cancel()
 
 	query := "vm_app_version"
-	log.Printf("📡 Executing query: %s", query)
+	log.Printf("Executing query: %s", query)
 
 	result, err := client.Query(ctx, query, time.Now())
 
 	w.Header().Set("Content-Type", "application/json")
 
 	if err != nil {
-		log.Printf("❌ Connection validation failed: %v", err)
+		log.Printf("[ERROR] Connection validation failed: %v", err)
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
 			"valid":   false,
@@ -170,25 +171,25 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 
 	// If vm_app_version returns no results, try alternative queries
 	if result != nil && result.Status == "success" && len(result.Data.Result) == 0 {
-		log.Printf("⚠️  vm_app_version returned no results, trying alternative queries...")
+		log.Printf("[WARN] vm_app_version returned no results, trying alternative queries...")
 
 		// Try to query any vm_* metric
 		result, err = client.Query(ctx, `{__name__=~"vm_.*"}`, time.Now())
 		if err == nil && len(result.Data.Result) > 0 {
-			log.Printf("✅ Found %d vm_* metrics", len(result.Data.Result))
+			log.Printf("[OK] Found %d vm_* metrics", len(result.Data.Result))
 		}
 
 		// If still no results, try a simple constant query to verify API works
 		if err == nil && len(result.Data.Result) == 0 {
-			log.Printf("⚠️  No vm_* metrics found, trying constant query...")
+			log.Printf("[WARN] No vm_* metrics found, trying constant query...")
 			result, err = client.Query(ctx, `1`, time.Now())
 			if err == nil {
-				log.Printf("✅ API responds correctly (Prometheus-compatible)")
+				log.Printf("[OK] API responds correctly (Prometheus-compatible)")
 			}
 		}
 
 		if err != nil {
-			log.Printf("❌ All queries failed: %v", err)
+			log.Printf("[ERROR] All queries failed: %v", err)
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"success": false,
 				"valid":   false,
@@ -206,7 +207,7 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 	vmComponents := []string{}
 
 	if result != nil && result.Status == "success" && len(result.Data.Result) > 0 {
-		log.Printf("✅ Connection successful! Components found: %d", len(result.Data.Result))
+		log.Printf("[OK] Connection successful! Components found: %d", len(result.Data.Result))
 		components = len(result.Data.Result)
 
 		// Extract version and component info from metrics
@@ -236,7 +237,7 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 	// If API responds correctly but no VM-specific metrics found, still consider it valid
 	// (metrics might not be scraped yet)
 	if !isVictoriaMetrics {
-		log.Printf("⚠️  Warning: No VictoriaMetrics-specific metrics found, but API is Prometheus-compatible")
+		log.Printf("[WARN] Warning: No VictoriaMetrics-specific metrics found, but API is Prometheus-compatible")
 		// Still mark as Victoria Metrics if API responds correctly
 		isVictoriaMetrics = true
 		if len(vmComponents) == 0 {
@@ -244,7 +245,7 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	log.Printf("✅ VictoriaMetrics detected! Version: %s, Components: %v", version, vmComponents)
+	log.Printf("[OK] VictoriaMetrics detected! Version: %s, Components: %v", version, vmComponents)
 
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":             true,
@@ -275,7 +276,7 @@ func (s *Server) handleDiscoverComponents(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// 🔍 DEBUG: Log discovery request
+	// DEBUG: Log discovery request
 	log.Printf("🔎 Component Discovery:")
 	log.Printf("  Time Range: %s to %s", req.TimeRange.Start.Format(time.RFC3339), req.TimeRange.End.Format(time.RFC3339))
 	log.Printf("  URL: %s", req.Connection.URL)
@@ -288,7 +289,7 @@ func (s *Server) handleDiscoverComponents(w http.ResponseWriter, r *http.Request
 
 	components, err := s.vmService.DiscoverComponents(ctx, req.Connection, req.TimeRange)
 	if err != nil {
-		log.Printf("❌ Discovery failed: %v", err)
+		log.Printf("[ERROR] Discovery failed: %v", err)
 		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Discovery failed: %v", err))
 		return
 	}
@@ -298,7 +299,7 @@ func (s *Server) handleDiscoverComponents(w http.ResponseWriter, r *http.Request
 	for _, comp := range components {
 		componentTypes[comp.Component]++
 	}
-	log.Printf("✅ Discovery complete: %d components found", len(components))
+	log.Printf("[OK] Discovery complete: %d components found", len(components))
 	log.Printf("  Component types: %v", componentTypes)
 
 	// Return discovered components
@@ -331,8 +332,8 @@ func (s *Server) handleGetSample(w http.ResponseWriter, r *http.Request) {
 		req.Limit = 10
 	}
 
-	// 🔍 DEBUG: Log sample request
-	log.Printf("📊 Sample Metrics Request:")
+	// DEBUG: Log sample request
+	log.Printf("Sample Metrics Request:")
 	log.Printf("  Components: %v", req.Config.Components)
 	log.Printf("  Jobs: %v", req.Config.Jobs)
 	log.Printf("  Limit: %d", req.Limit)
@@ -345,10 +346,10 @@ func (s *Server) handleGetSample(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Check if error is due to timeout
 		if ctx.Err() == context.DeadlineExceeded {
-			log.Printf("❌ Sample timeout: request took > 30s")
+			log.Printf("[ERROR] Sample timeout: request took > 30s")
 			respondWithError(w, http.StatusRequestTimeout, "Request timeout: sample loading took too long. Try reducing time range or number of components.")
 		} else {
-			log.Printf("❌ Sample retrieval failed: %v", err)
+			log.Printf("[ERROR] Sample retrieval failed: %v", err)
 			respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Sample retrieval failed: %v", err))
 		}
 		return
@@ -374,7 +375,7 @@ func (s *Server) handleGetSample(w http.ResponseWriter, r *http.Request) {
 	for label := range uniqueLabels {
 		labelList = append(labelList, label)
 	}
-	log.Printf("✅ Sample retrieval complete: %d samples", len(samples))
+	log.Printf("[OK] Sample retrieval complete: %d samples", len(samples))
 	log.Printf("  Unique labels: %v", labelList)
 
 	// Convert samples to response format with 'name' field for frontend compatibility
@@ -428,8 +429,8 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 
 	ensureBatchDefaults(&config)
 
-	// 🔍 DEBUG: Log export request
-	log.Printf("📤 Metrics Export:")
+	// DEBUG: Log export request
+	log.Printf("[SEND] Metrics Export:")
 	log.Printf("  Time Range: %s to %s", config.TimeRange.Start.Format(time.RFC3339), config.TimeRange.End.Format(time.RFC3339))
 	log.Printf("  Components: %v", config.Components)
 	log.Printf("  Jobs: %v", config.Jobs)
@@ -445,12 +446,12 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 
 	result, err := s.exportService.ExecuteExport(ctx, config)
 	if err != nil {
-		log.Printf("❌ Export failed: %v", err)
+		log.Printf("[ERROR] Export failed: %v", err)
 		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Export failed: %v", err))
 		return
 	}
 
-	log.Printf("✅ Export complete:")
+	log.Printf("[OK] Export complete:")
 	log.Printf("  Export ID: %s", result.ExportID)
 	log.Printf("  Metrics Exported: %d", result.MetricsExported)
 	log.Printf("  Archive Size: %.2f KB", float64(result.ArchiveSizeBytes)/1024)
@@ -492,7 +493,6 @@ func (s *Server) handleExportStart(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err))
 		return
 	}
-
 	ensureBatchDefaults(&config)
 	jobID := fmt.Sprintf("job-%d", time.Now().UnixNano())
 	stagingDir := config.StagingDir
@@ -527,13 +527,48 @@ func (s *Server) handleExportStart(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to start export: %v", err))
 		return
 	}
-
 	response := map[string]interface{}{
 		"job_id":               status.ID,
 		"state":                status.State,
 		"total_batches":        status.TotalBatches,
 		"batch_window_seconds": status.BatchWindowSeconds,
 		"staging_path":         config.StagingFile,
+		"obfuscation_enabled":  status.ObfuscationEnabled,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+func (s *Server) handleExportResume(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	var req struct {
+		JobID string `json:"job_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err))
+		return
+	}
+	if req.JobID == "" {
+		respondWithError(w, http.StatusBadRequest, "Missing job_id")
+		return
+	}
+
+	status, err := s.jobManager.ResumeJob(r.Context(), req.JobID)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Failed to resume export: %v", err))
+		return
+	}
+	response := map[string]interface{}{
+		"job_id":               status.ID,
+		"state":                status.State,
+		"total_batches":        status.TotalBatches,
+		"completed_batches":    status.CompletedBatches,
+		"batch_window_seconds": status.BatchWindowSeconds,
+		"staging_path":         status.StagingPath,
 		"obfuscation_enabled":  status.ObfuscationEnabled,
 	}
 
@@ -558,6 +593,8 @@ func (s *Server) handleExportStatus(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusNotFound, fmt.Sprintf("Job %s not found", jobID))
 		return
 	}
+	log.Printf("[EXPORT][HTTP] status job_id=%s state=%s completed=%d total=%d staging=%s",
+		status.ID, status.State, status.CompletedBatches, status.TotalBatches, status.StagingPath)
 
 	response := map[string]interface{}{
 		"job_id":                      status.ID,
@@ -933,8 +970,8 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 🔍 DEBUG: Log download request
-	log.Printf("⬇️  Archive Download:")
+	// DEBUG: Log download request
+	log.Printf("Archive Download:")
 	log.Printf("  File Path: %s", filePath)
 	log.Printf("  Client IP: %s", r.RemoteAddr)
 
@@ -945,7 +982,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	// Check if file exists
 	fileInfo, err := http.Dir(".").Open(filePath)
 	if err != nil {
-		log.Printf("❌ File not found: %s", filePath)
+		log.Printf("[ERROR] File not found: %s", filePath)
 		respondWithError(w, http.StatusNotFound, fmt.Sprintf("File not found: %s", filePath))
 		return
 	}
@@ -955,7 +992,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+filePath+"\"")
 
-	log.Printf("✅ Serving file for download")
+	log.Printf("[OK] Serving file for download")
 
 	// Serve file
 	http.ServeFile(w, r, filePath)

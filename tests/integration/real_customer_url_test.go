@@ -42,11 +42,11 @@ func TestRealCustomerURL(t *testing.T) {
 	samples, err := vmService.GetSample(ctx, config, 5)
 	
 	if err != nil {
-		t.Logf("❌ Sample failed: %v", err)
+		t.Logf("[FAIL] Sample failed: %v", err)
 		t.Fatalf("Sample failed (expected with fake password): %v", err)
 	}
 
-	t.Logf("✅ Got %d samples", len(samples))
+	t.Logf("[OK] Got %d samples", len(samples))
 }
 
 // TestURLPathNormalization verifies that /rw/prometheus is normalized to /prometheus

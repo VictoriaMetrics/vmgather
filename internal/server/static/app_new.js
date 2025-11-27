@@ -218,7 +218,7 @@ async function testConnection() {
         if (response.ok && data.success) {
             result.innerHTML = `
                 <div class="success-box">
-                    ✅ Connection successful!
+                    [OK] Connection successful!
                     <div style="margin-top: 10px; font-size: 13px;">
                         Version: ${data.version || 'Unknown'}<br>
                         Components: ${data.components || 0} detected
@@ -233,7 +233,7 @@ async function testConnection() {
     } catch (error) {
         result.innerHTML = `
             <div class="error-message">
-                ❌ ${error.message}
+                [FAIL] ${error.message}
             </div>
         `;
         connectionValid = false;
@@ -631,7 +631,7 @@ function renderExportSpoilers(samples) {
     const container = document.getElementById('exportSpoilers');
     
     const limited = samples.slice(0, 5);
-    let html = '<h3 style="margin-bottom: 15px;">📊 Exported Data Samples (Top 5)</h3>';
+    let html = '<h3 style="margin-bottom: 15px;">[STATS] Exported Data Samples (Top 5)</h3>';
     
     limited.forEach((sample, idx) => {
         const labels = Object.entries(sample.labels || {})
@@ -642,7 +642,7 @@ function renderExportSpoilers(samples) {
             <div class="spoiler">
                 <div class="spoiler-header" onclick="toggleSpoiler(this)">
                     <span>Sample ${idx + 1}: ${sample.name}</span>
-                    <span>▼</span>
+                    <span>v</span>
                 </div>
                 <div class="spoiler-content">
                     <div class="spoiler-body">
@@ -666,10 +666,10 @@ function toggleSpoiler(header) {
     
     if (content.classList.contains('open')) {
         content.classList.remove('open');
-        arrow.textContent = '▼';
+        arrow.textContent = 'v';
     } else {
         content.classList.add('open');
-        arrow.textContent = '▲';
+        arrow.textContent = '^';
     }
 }
 
