@@ -10,6 +10,54 @@ const { test, expect } = require('@playwright/test');
 
 test.describe('Bug Fix Verification', () => {
   test.beforeEach(async ({ page }) => {
+    // Mock VM endpoints to make tests hermetic
+    await page.route('**/api/validate', route => {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          is_victoria_metrics: true,
+          vm_components: ['vmsingle'],
+          components: 1,
+          version: 'v1.95.0',
+        }),
+      });
+    });
+    await page.route('**/api/discover', route => {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          components: [
+            {
+              component: 'vmsingle',
+              jobs: ['vmjob'],
+              instance_count: 1,
+              metrics_count_estimate: 100,
+              job_metrics: { vmjob: 100 },
+            },
+          ],
+        }),
+      });
+    });
+    await page.route('**/api/sample', route => {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          samples: [
+            {
+              name: 'test_metric',
+              labels: { __name__: 'test_metric', job: 'vmjob', instance: '127.0.0.1:8428' },
+            },
+          ],
+          count: 1,
+        }),
+      });
+    });
+  });
+  test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:8080');
     await page.waitForLoadState('networkidle');
     // Wait for page to be fully loaded
@@ -322,4 +370,3 @@ test.describe('Bug Fix Verification', () => {
     });
   });
 });
-

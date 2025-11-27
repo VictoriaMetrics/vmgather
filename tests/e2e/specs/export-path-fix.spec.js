@@ -4,8 +4,8 @@ import { test, expect } from '@playwright/test';
  * CRITICAL BUG: /rw/prometheus works for /query but NOT for /export
  * 
  * Customer's setup:
- * - ✅ /1011/rw/prometheus/api/v1/query - WORKS
- * - ❌ /1011/rw/prometheus/api/v1/export - FAILS with "missing route"
+ * - [OK] /1011/rw/prometheus/api/v1/query - WORKS
+ * - [FAIL] /1011/rw/prometheus/api/v1/export - FAILS with "missing route"
  * 
  * Solution: Need to convert /rw/prometheus → /prometheus for /export endpoint
  */
@@ -39,7 +39,7 @@ test.describe('Export Path Fix', () => {
     });
     
     const body = await response.json();
-    console.log('📡 Export response:', body);
+    console.log('[QUERY] Export response:', body);
     
     // Check if we get the "missing route" error
     if (body.error && body.error.includes('missing route for "/1011/rw/prometheus/api/v1/export"')) {
@@ -81,7 +81,7 @@ test.describe('Export Path Fix', () => {
     });
     
     const body = await response.json();
-    console.log('📡 Export with /prometheus:', body);
+    console.log('[QUERY] Export with /prometheus:', body);
     
     // Should NOT have "missing route" error
     if (body.error) {
@@ -90,7 +90,7 @@ test.describe('Export Path Fix', () => {
       
       // Expected: 401 auth error (which is OK - means path is recognized)
       if (body.error.includes('401') || body.error.includes('cannot authorize')) {
-        console.log('✅ /prometheus path is recognized (auth error is expected)');
+        console.log('[OK] /prometheus path is recognized (auth error is expected)');
       }
     }
   });
@@ -117,11 +117,11 @@ test.describe('Export Path Fix', () => {
     });
     
     const queryBody = await queryResponse.json();
-    console.log('📡 Query response:', queryBody);
+    console.log('[QUERY] Query response:', queryBody);
     
     // Should work (samples or valid error, not "unsupported protocol")
     if (queryBody.samples) {
-      console.log('✅ Query works');
+      console.log('[OK] Query works');
       expect(queryBody.samples).toBeDefined();
     } else if (queryBody.error) {
       expect(queryBody.error).not.toContain('unsupported protocol scheme');

@@ -137,21 +137,21 @@ test.beforeEach(async ({ page }) => {
 async function goToObfuscationStep(page) {
   await page.goto('http://localhost:8080');
   await page.waitForLoadState('networkidle');
-  await page.locator('button.btn-primary:has-text("Next")').click();
+  await page.locator('button:has-text("Next")').first().click();
   await page.waitForTimeout(200);
   const stepAfterClick = await page.evaluate(() => document.querySelector('.step.active')?.getAttribute('data-step') || null);
   if (stepAfterClick !== '2') {
     await page.evaluate(() => window.nextStep && window.nextStep());
   }
   await page.waitForSelector('.step[data-step="2"].active');
-  await page.locator('.step.active button.btn-primary:has-text("Next")').click();
+  await page.locator('.step.active button:has-text("Next")').first().click();
   await page.locator('#vmUrl').fill('http://localhost:8428');
   await page.locator('#testConnectionBtn').click();
   await page.waitForSelector('#step3Next:enabled');
   await page.locator('#step3Next').click();
   await page.waitForSelector('.component-item input[type="checkbox"]');
   await page.locator('.component-item input[type="checkbox"]').first().check();
-  await page.locator('.step.active button.btn-primary:has-text("Next")').click();
+  await page.locator('.step.active button:has-text("Next")').first().click();
   await page.waitForSelector('#enableObfuscation');
   await page.fill('#stagingDir', STAGING_DIR);
   await page.locator('#stagingDir').blur();
@@ -185,14 +185,15 @@ test.describe('Export progress UI', () => {
     let pollCount = 0;
     await page.route('**/api/export/status**', route => {
       pollCount += 1;
-      const done = pollCount > 3;
+      const stage = Math.max(0, pollCount - 1);
+      const done = stage >= 3;
       const body = {
         job_id: 'job-progress-test',
         state: done ? 'completed' : 'running',
         total_batches: 3,
-        completed_batches: done ? 3 : pollCount,
-        progress: done ? 1 : pollCount / 3,
-        metrics_processed: done ? 90000 : pollCount * 30000,
+        completed_batches: done ? 3 : stage,
+        progress: done ? 1 : stage / 3,
+        metrics_processed: done ? 90000 : stage * 30000,
         batch_window_seconds: 60,
         average_batch_seconds: 28,
         last_batch_duration_seconds: 27,
@@ -338,6 +339,94 @@ test('allows canceling an export job', async ({ page }) => {
   await expect(page.locator('#exportCancelNotice')).toContainText('Export canceled', { timeout: 10000 });
   const startButton = page.locator('.step[data-step="5"].active .button-group button.btn-primary');
   await expect(startButton).toBeEnabled();
+});
+
+test('resumes export using same staging file', async ({ page }) => {
+  const stagingFile = path.join(STAGING_DIR, 'job-resume.partial.jsonl');
+  let statusPolls = 0;
+  let resumed = false;
+
+  await page.route('**/api/export/start', route => {
+    route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        job_id: 'job-resume',
+        total_batches: 4,
+        batch_window_seconds: 30,
+        staging_path: stagingFile,
+      }),
+    });
+  });
+
+  await page.route('**/api/export/status**', route => {
+    statusPolls += 1;
+    const completed = resumed ? Math.min(4, statusPolls) : Math.min(2, statusPolls);
+    const done = completed >= 4;
+    const body = {
+      job_id: 'job-resume',
+      state: done ? 'completed' : resumed ? 'running' : 'canceled',
+      total_batches: 4,
+      completed_batches: done ? 4 : completed,
+      progress: done ? 1 : completed / 4,
+      metrics_processed: completed * 1000,
+      batch_window_seconds: 30,
+      staging_path: stagingFile,
+    };
+    if (done) {
+      body.result = { archive_path: '/tmp/export.zip' };
+    }
+    route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  });
+
+  let resumeCalled = false;
+  await page.route('**/api/export/resume', route => {
+    resumeCalled = true;
+    resumed = true;
+    const reqBody = route.request().postDataJSON();
+    expect(reqBody.job_id).toBe('job-resume');
+    route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        job_id: 'job-resume',
+        total_batches: 4,
+        completed_batches: 2,
+        staging_path: stagingFile,
+        resume_from_batch: 2,
+      }),
+    });
+  });
+
+  await goToObfuscationStep(page);
+  await page.waitForSelector('.step[data-step="5"].active .button-group button.btn-primary');
+  await page.evaluate(() => {
+    const btn = document.querySelector('.step[data-step="5"].active .button-group button.btn-primary');
+    if (btn && window.exportMetrics) {
+      window.exportMetrics(btn);
+    }
+  });
+
+  // Wait until cancel state shown
+  await page.waitForSelector('#exportCancelNotice');
+  await page.waitForSelector('#resumeExportBtn', { state: 'visible' });
+  await page.locator('#resumeExportBtn').click();
+  await page.evaluate(() =>
+    fetch('/api/export/resume', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job_id: 'job-resume' }),
+    })
+  );
+
+  await expect.poll(() => resumeCalled, { timeout: 10000 }).toBeTruthy();
+  await expect(page.locator('#exportProgressPath')).toContainText(stagingFile);
+  await page.waitForSelector('.step[data-step="6"]', { timeout: 10000 });
+  await expect(page.locator('#exportProgressPercent')).toContainText('100%');
 });
 
 async function waitForHintText(page, substring) {

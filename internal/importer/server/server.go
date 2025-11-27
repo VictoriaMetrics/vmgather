@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +44,8 @@ type uploadConfig struct {
 	SkipTLSVerify     bool   `json:"skip_tls_verify"`
 	MetricStepSeconds int    `json:"metric_step_seconds"`
 	BatchWindowSecs   int    `json:"batch_window_seconds"`
+	DropOld           bool   `json:"drop_old"`
+	TimeShiftMs       int64  `json:"time_shift_ms"`
 }
 
 type uploadResult struct {
@@ -159,6 +162,12 @@ type importJob struct {
 	Error           string              `json:"error,omitempty"`
 	CreatedAt       time.Time           `json:"created_at"`
 	UpdatedAt       time.Time           `json:"updated_at"`
+	ImportURL       string              `json:"import_url,omitempty"`
+	QueryURL        string              `json:"query_url,omitempty"`
+	BundlePath      string              `json:"bundle_path,omitempty"`
+	ResumeOffset    int64               `json:"resume_offset,omitempty"`
+	ResumeReady     bool                `json:"resume_ready,omitempty"`
+	Config          uploadConfig        `json:"-"`
 }
 
 const (
@@ -169,24 +178,29 @@ const (
 )
 
 type importSummary struct {
-	MetricName    string              `json:"metric_name"`
-	Labels        map[string]string   `json:"labels"`
-	Start         time.Time           `json:"start"`
-	End           time.Time           `json:"end"`
-	Points        int                 `json:"points"`
-	Bytes         int64               `json:"bytes"`
-	SourceBytes   int64               `json:"source_bytes"`
-	InflatedBytes int64               `json:"inflated_bytes"`
-	Chunks        int                 `json:"chunks"`
-	ChunkBytes    int                 `json:"chunk_bytes"`
-	Examples      []map[string]string `json:"examples,omitempty"`
+	MetricName     string              `json:"metric_name"`
+	Labels         map[string]string   `json:"labels"`
+	Start          time.Time           `json:"start"`
+	End            time.Time           `json:"end"`
+	TotalPoints    int                 `json:"total_points,omitempty"`
+	Points         int                 `json:"points"`
+	Bytes          int64               `json:"bytes"`
+	SourceBytes    int64               `json:"source_bytes"`
+	InflatedBytes  int64               `json:"inflated_bytes"`
+	Chunks         int                 `json:"chunks"`
+	ChunkBytes     int                 `json:"chunk_bytes"`
+	Examples       []map[string]string `json:"examples,omitempty"`
+	SkippedLines   int                 `json:"skipped_lines,omitempty"`
+	DroppedOld     int                 `json:"dropped_old,omitempty"`
+	ProcessedBytes int64               `json:"processed_bytes,omitempty"`
+	NormalizedTs   bool                `json:"normalized_ts,omitempty"`
 
 	rangePinned bool
 }
 
 type metricLine struct {
 	Metric     map[string]string `json:"metric"`
-	Values     []json.Number     `json:"values"`
+	Values     []json.RawMessage `json:"values"`
 	Timestamps []int64           `json:"timestamps"`
 }
 
@@ -223,9 +237,11 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": s.version})
 	})
+	mux.HandleFunc("/api/analyze", s.handleAnalyze)
 	mux.HandleFunc("/api/upload", s.handleUpload)
 	mux.HandleFunc("/api/check-endpoint", s.handleCheckEndpoint)
 	mux.HandleFunc("/api/import/status", s.handleJobStatus)
+	mux.HandleFunc("/api/import/resume", s.handleResume)
 
 	staticFS, _ := fs.Sub(staticFiles, "static")
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
@@ -262,6 +278,48 @@ func (s *Server) handleJobStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(job)
+}
+
+func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	jobID := r.URL.Query().Get("id")
+	if jobID == "" {
+		respondWithError(w, http.StatusBadRequest, "missing job id")
+		return
+	}
+
+	s.jobsMu.Lock()
+	job, ok := s.jobs[jobID]
+	if !ok {
+		s.jobsMu.Unlock()
+		respondWithError(w, http.StatusNotFound, "job not found")
+		return
+	}
+	if !job.ResumeReady {
+		s.jobsMu.Unlock()
+		respondWithError(w, http.StatusBadRequest, "job is not resumable")
+		return
+	}
+	cfg := job.Config
+	tempPath := job.BundlePath
+	importURL := job.ImportURL
+	queryURL := job.QueryURL
+	startOffset := job.ResumeOffset
+	job.State = jobStateQueued
+	job.Stage = "queued"
+	job.Message = "Queued for resume…"
+	job.Percent = 0
+	job.Error = ""
+	job.ResumeReady = false
+	s.jobsMu.Unlock()
+
+	go s.runImportJob(context.Background(), job, cfg, tempPath, filepath.Base(tempPath), importURL, queryURL, startOffset)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"job_id": jobID, "status": "resuming"})
 }
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
@@ -306,7 +364,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	job := s.newJob(uploadedBytes)
 	s.storeJob(job)
 
-	go s.runImportJob(context.Background(), job, cfg, tempPath, header.Filename, importURL, queryURL)
+	go s.runImportJob(context.Background(), job, cfg, tempPath, header.Filename, importURL, queryURL, 0)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(struct {
@@ -316,6 +374,80 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		JobID: job.ID,
 		Job:   snapshotJob(job),
 	})
+}
+
+func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if err := r.ParseMultipartForm(512 << 20); err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("failed to parse form: %v", err))
+		return
+	}
+	cfgRaw := r.FormValue("config")
+	if cfgRaw == "" {
+		respondWithError(w, http.StatusBadRequest, "missing config payload")
+		return
+	}
+	var cfg uploadConfig
+	if err := json.Unmarshal([]byte(cfgRaw), &cfg); err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("invalid config: %v", err))
+		return
+	}
+	file, header, err := r.FormFile("bundle")
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "bundle file is required")
+		return
+	}
+	defer func() { _ = file.Close() }()
+
+	tempPath, uploadedBytes, err := persistUploadedFile(file)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("failed to persist bundle: %v", err))
+		return
+	}
+	defer func() { _ = os.Remove(tempPath) }()
+
+	bundle, err := prepareBundle(tempPath, header.Filename, uploadedBytes)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("failed to prepare bundle: %v", err))
+		return
+	}
+	if bundle.Cleanup != nil {
+		defer bundle.Cleanup()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	retentionCutoff := s.retentionCutoff(ctx, cfg)
+	if !cfg.DropOld {
+		retentionCutoff = 0
+	}
+	if !cfg.DropOld {
+		retentionCutoff = 0
+	}
+
+	summary, err := s.analyzeBundle(ctx, bundle, retentionCutoff, cfg.TimeShiftMs)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("failed to analyze bundle: %v", err))
+		return
+	}
+
+	payload := map[string]interface{}{
+		"summary":          summary,
+		"retention_cutoff": retentionCutoff,
+		"warnings":         buildAnalysisWarnings(summary, retentionCutoff),
+		"suggested_shift_ms": func() int64 {
+			if retentionCutoff > 0 && !summary.Start.IsZero() && summary.Start.UnixMilli() < retentionCutoff {
+				return retentionCutoff - summary.Start.UnixMilli() + int64(time.Hour/time.Millisecond)
+			}
+			return 0
+		}(),
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(payload)
 }
 
 func persistUploadedFile(src multipart.File) (string, int64, error) {
@@ -367,6 +499,120 @@ func prepareBundle(path, originalName string, uploadedBytes int64) (*bundleInfo,
 	}
 }
 
+func (s *Server) analyzeBundle(ctx context.Context, bundle *bundleInfo, retentionCutoffMs int64, shiftMs int64) (importSummary, error) {
+	summary := importSummary{
+		Labels:         make(map[string]string),
+		SourceBytes:    bundle.OriginalBytes,
+		InflatedBytes:  bundle.ExtractedBytes,
+		ChunkBytes:     maxImportChunkBytes,
+		ProcessedBytes: 0,
+	}
+	if summary.InflatedBytes == 0 && bundle.ExtractedBytes > 0 {
+		summary.InflatedBytes = bundle.ExtractedBytes
+	}
+
+	file, err := os.Open(bundle.MetricsPath)
+	if err != nil {
+		return summary, fmt.Errorf("failed to open bundle: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 1024*1024)
+	scanner.Buffer(buf, 16*1024*1024)
+	const maxLines = 1000
+	linesScanned := 0
+
+	for scanner.Scan() {
+		linesScanned++
+		if linesScanned > maxLines {
+			break
+		}
+		line := scanner.Bytes()
+		summary.ProcessedBytes += int64(len(line)) + 1
+
+		var parsed metricLine
+		if err := json.Unmarshal(line, &parsed); err != nil {
+			summary.SkippedLines++
+			continue
+		}
+		values, err := normalizeValues(parsed.Values)
+		if err != nil {
+			summary.SkippedLines++
+			continue
+		}
+		parsedTotal := len(parsed.Timestamps)
+		summary.TotalPoints += parsedTotal
+		filteredTs, filteredVals, dropped := filterTimestampsAndValues(parsed.Timestamps, values, retentionCutoffMs)
+		if dropped > 0 {
+			summary.DroppedOld += dropped
+		}
+		if len(filteredTs) == 0 || len(filteredTs) != len(filteredVals) {
+			summary.SkippedLines++
+			continue
+		}
+		if tsNormalized, scaled := normalizeTimestamps(filteredTs); scaled {
+			filteredTs = tsNormalized
+			summary.NormalizedTs = true
+		}
+		if shiftMs != 0 {
+			for i := range filteredTs {
+				filteredTs[i] += shiftMs
+			}
+		}
+		if _, err := buildNormalizedLine(parsed.Metric, filteredVals, filteredTs); err != nil {
+			summary.SkippedLines++
+			continue
+		}
+		parsed.Timestamps = filteredTs
+		parsed.Values = nil
+		if err := summary.consumeMetric(metricLine{Metric: parsed.Metric, Timestamps: filteredTs}); err != nil {
+			summary.SkippedLines++
+			continue
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return summary, err
+	}
+	if summary.InflatedBytes == 0 {
+		summary.InflatedBytes = summary.ProcessedBytes
+	}
+	return summary, nil
+}
+
+func buildAnalysisWarnings(summary importSummary, cutoffMs int64) []string {
+	var warnings []string
+	if cutoffMs > 0 && !summary.Start.IsZero() {
+		cutoff := time.UnixMilli(cutoffMs)
+		if summary.Start.Before(cutoff) {
+			total := summary.Points + summary.DroppedOld
+			percent := 0.0
+			if total > 0 {
+				percent = float64(summary.DroppedOld) / float64(total) * 100
+			}
+			shift := cutoff.Sub(summary.Start)
+			warnings = append(warnings, fmt.Sprintf("Data starts at %s which is before retention cutoff %s. Older samples would drop (%.1f%% of points). Consider shifting timestamps forward by %s.", summary.Start.UTC().Format(time.RFC3339), cutoff.UTC().Format(time.RFC3339), percent, shift.Round(time.Second)))
+		}
+		if !summary.End.IsZero() {
+			window := time.Since(cutoff)
+			span := summary.End.Sub(summary.Start)
+			if span > window {
+				warnings = append(warnings, fmt.Sprintf("Bundle covers %s which exceeds current retention window (~%s). Tail data will be trimmed.", span.Round(time.Second), window.Round(time.Second)))
+			}
+		}
+	}
+	if summary.SkippedLines > 0 {
+		warnings = append(warnings, fmt.Sprintf("Skipped %d invalid or empty lines.", summary.SkippedLines))
+	}
+	if summary.DroppedOld > 0 {
+		warnings = append(warnings, fmt.Sprintf("Dropped %d samples outside retention window.", summary.DroppedOld))
+	}
+	if summary.NormalizedTs {
+		warnings = append(warnings, "Timestamps were auto-scaled to milliseconds (detected non-ms input).")
+	}
+	return warnings
+}
+
 func prepareZipBundle(path string, uploadedBytes int64) (*bundleInfo, error) {
 	reader, err := zip.OpenReader(path)
 	if err != nil {
@@ -375,10 +621,12 @@ func prepareZipBundle(path string, uploadedBytes int64) (*bundleInfo, error) {
 	defer func() { _ = reader.Close() }()
 
 	var metricsFile *zip.File
+	var jsonlCandidates []*zip.File
 	var metadata *bundleMetadata
 
 	for _, f := range reader.File {
-		switch strings.ToLower(f.Name) {
+		nameLower := strings.ToLower(f.Name)
+		switch nameLower {
 		case "metrics.jsonl":
 			metricsFile = f
 		case "metadata.json":
@@ -387,11 +635,32 @@ func prepareZipBundle(path string, uploadedBytes int64) (*bundleInfo, error) {
 				return nil, err
 			}
 			metadata = meta
+		default:
+			if strings.HasSuffix(nameLower, ".jsonl") {
+				jsonlCandidates = append(jsonlCandidates, f)
+			}
 		}
 	}
 
 	if metricsFile == nil {
-		return nil, errors.New("bundle is missing metrics.jsonl")
+		var validationErr error
+		for _, candidate := range jsonlCandidates {
+			ok, err := isLikelyMetricsFile(candidate)
+			if err != nil {
+				validationErr = err
+				continue
+			}
+			if ok {
+				metricsFile = candidate
+				break
+			}
+		}
+		if metricsFile == nil {
+			if validationErr != nil {
+				return nil, validationErr
+			}
+			return nil, errors.New("bundle is missing metrics data (.jsonl)")
+		}
 	}
 
 	tempMetrics, err := os.CreateTemp("", "vmimport-metrics-*.jsonl")
@@ -441,14 +710,25 @@ func estimateChunkCount(size int64) int {
 	return int((size + chunk - 1) / chunk)
 }
 
-func (s *Server) runImportJob(ctx context.Context, job *importJob, cfg uploadConfig, tempPath, originalName, importURL, queryURL string) {
-	defer os.Remove(tempPath)
+func (s *Server) runImportJob(ctx context.Context, job *importJob, cfg uploadConfig, tempPath, originalName, importURL, queryURL string, startOffset int64) {
+	cleanupTemp := true
+	defer func() {
+		if cleanupTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
 
 	s.updateJob(job, func(j *importJob) {
 		j.State = jobStateRunning
 		j.Stage = "extracting"
 		j.Message = "Extracting bundle…"
 		j.Percent = 2
+		j.ImportURL = importURL
+		j.QueryURL = queryURL
+		j.BundlePath = tempPath
+		j.ResumeOffset = startOffset
+		j.ResumeReady = false
+		j.Config = cfg
 	})
 
 	bundle, err := prepareBundle(tempPath, originalName, job.SourceBytes)
@@ -456,9 +736,17 @@ func (s *Server) runImportJob(ctx context.Context, job *importJob, cfg uploadCon
 		s.failJob(job, err)
 		return
 	}
+	cleanupBundle := true
 	if bundle != nil && bundle.Cleanup != nil {
-		defer bundle.Cleanup()
+		defer func() {
+			if cleanupBundle {
+				bundle.Cleanup()
+			}
+		}()
 	}
+	s.updateJob(job, func(j *importJob) {
+		j.BundlePath = bundle.MetricsPath
+	})
 
 	s.updateJob(job, func(j *importJob) {
 		j.SourceBytes = bundle.OriginalBytes
@@ -485,9 +773,22 @@ func (s *Server) runImportJob(ctx context.Context, job *importJob, cfg uploadCon
 		})
 	}
 
-	_, summary, err := s.streamImport(ctx, cfg, bundle, importURL, progress)
+	retentionCutoff := s.retentionCutoff(ctx, cfg)
+
+	_, summary, err := s.streamImport(ctx, cfg, bundle, importURL, startOffset, retentionCutoff, cfg.TimeShiftMs, progress)
 	if err != nil {
-		s.failJob(job, err)
+		s.updateJob(job, func(j *importJob) {
+			j.State = jobStateFailed
+			j.Stage = "failed"
+			j.Message = err.Error()
+			j.Error = err.Error()
+			j.Percent = 100
+			j.ResumeOffset = summary.ProcessedBytes
+			j.ResumeReady = true
+			j.Summary = &summary
+		})
+		cleanupTemp = false
+		cleanupBundle = false
 		return
 	}
 	summary.SourceBytes = bundle.OriginalBytes
@@ -510,6 +811,9 @@ func (s *Server) runImportJob(ctx context.Context, job *importJob, cfg uploadCon
 		j.Percent = 100
 		j.Summary = &summary
 		j.Verification = verification
+		j.ResumeReady = false
+		j.ResumeOffset = 0
+		j.BundlePath = ""
 	})
 }
 
@@ -527,15 +831,54 @@ func parseMetadataFile(f *zip.File) (*bundleMetadata, error) {
 	return &meta, nil
 }
 
-func (s *Server) streamImport(ctx context.Context, cfg uploadConfig, bundle *bundleInfo, importURL string, progress func(int)) (*uploadResult, importSummary, error) {
-	summary := importSummary{
-		Labels:      make(map[string]string),
-		SourceBytes: bundle.OriginalBytes,
+func isLikelyMetricsFile(f *zip.File) (bool, error) {
+	rc, err := f.Open()
+	if err != nil {
+		return false, fmt.Errorf("failed to open %s: %w", f.Name, err)
 	}
-	if bundle.ExtractedBytes > 0 {
+	defer func() { _ = rc.Close() }()
+
+	scanner := bufio.NewScanner(rc)
+	buf := make([]byte, 0, 1024*1024)
+	scanner.Buffer(buf, 1024*1024)
+	linesChecked := 0
+	for scanner.Scan() && linesChecked < 20 {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		linesChecked++
+		var obj map[string]any
+		if err := json.Unmarshal([]byte(line), &obj); err != nil {
+			continue
+		}
+		if _, ok := obj["metric"]; ok {
+			return true, nil
+		}
+		if _, ok := obj["labels"]; ok {
+			return true, nil
+		}
+		if _, ok := obj["__name__"]; ok {
+			return true, nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return false, fmt.Errorf("failed to scan %s: %w", f.Name, err)
+	}
+	return false, nil
+}
+
+func (s *Server) streamImport(ctx context.Context, cfg uploadConfig, bundle *bundleInfo, importURL string, startOffset, retentionCutoffMs, shiftMs int64, progress func(int)) (*uploadResult, importSummary, error) {
+	summary := importSummary{
+		Labels:         make(map[string]string),
+		SourceBytes:    bundle.OriginalBytes,
+		InflatedBytes:  bundle.ExtractedBytes,
+		ChunkBytes:     maxImportChunkBytes,
+		ProcessedBytes: startOffset,
+	}
+	if summary.InflatedBytes == 0 && bundle.ExtractedBytes > 0 {
 		summary.InflatedBytes = bundle.ExtractedBytes
 	}
-	summary.ChunkBytes = maxImportChunkBytes
 	if bundle.Metadata != nil {
 		if start, err := time.Parse(time.RFC3339, bundle.Metadata.TimeRange.Start); err == nil {
 			summary.Start = start
@@ -546,9 +889,6 @@ func (s *Server) streamImport(ctx context.Context, cfg uploadConfig, bundle *bun
 		if !summary.Start.IsZero() && !summary.End.IsZero() {
 			summary.rangePinned = true
 		}
-		if bundle.Metadata.MetricsCount > 0 {
-			summary.Points = bundle.Metadata.MetricsCount
-		}
 	}
 
 	file, err := os.Open(bundle.MetricsPath)
@@ -557,14 +897,32 @@ func (s *Server) streamImport(ctx context.Context, cfg uploadConfig, bundle *bun
 	}
 	defer func() { _ = file.Close() }()
 
-	var lastStatus int
-	var lastMessage string
+	if startOffset > 0 {
+		if _, err := file.Seek(startOffset, io.SeekStart); err != nil {
+			return nil, summary, fmt.Errorf("failed to seek for resume: %w", err)
+		}
+	}
+
+	var (
+		lastStatus      int
+		lastMessage     string
+		currentOffset   = startOffset
+		committedOffset = startOffset
+
+		chunk          bytes.Buffer
+		chunkPoints    int
+		chunkLabels    []map[string]string
+		chunkMetric    string
+		chunkMinTs     int64
+		chunkMaxTs     int64
+		chunkEndOffset int64
+	)
+
 	scanner := bufio.NewScanner(file)
 	buf := make([]byte, 0, 1024*1024)
 	scanner.Buffer(buf, 16*1024*1024)
-	var chunk bytes.Buffer
 
-	flushChunk := func() error {
+	commitChunk := func() error {
 		if chunk.Len() == 0 {
 			return nil
 		}
@@ -572,13 +930,51 @@ func (s *Server) streamImport(ctx context.Context, cfg uploadConfig, bundle *bun
 		copy(body, chunk.Bytes())
 		status, message, err := s.postImportChunk(ctx, cfg, importURL, body)
 		if err != nil {
+			summary.ProcessedBytes = committedOffset
 			return err
 		}
 		summary.Bytes += int64(len(body))
+		summary.Points += chunkPoints
 		summary.Chunks++
 		lastStatus = status
 		lastMessage = message
+		committedOffset = chunkEndOffset
+		summary.ProcessedBytes = committedOffset
+
+		if chunkMinTs > 0 {
+			t := time.UnixMilli(chunkMinTs)
+			if summary.Start.IsZero() || t.Before(summary.Start) {
+				summary.Start = t
+			}
+		}
+		if chunkMaxTs > 0 {
+			t := time.UnixMilli(chunkMaxTs)
+			if summary.End.IsZero() || t.After(summary.End) {
+				summary.End = t
+			}
+		}
+		if summary.MetricName == "" && chunkMetric != "" {
+			summary.MetricName = chunkMetric
+		}
+		if len(summary.Labels) == 0 && len(chunkLabels) > 0 {
+			for k, v := range chunkLabels[0] {
+				summary.Labels[k] = v
+			}
+		}
+		for _, lbl := range chunkLabels {
+			if len(summary.Examples) >= 3 {
+				break
+			}
+			summary.Examples = append(summary.Examples, lbl)
+		}
+
 		chunk.Reset()
+		chunkPoints = 0
+		chunkLabels = chunkLabels[:0]
+		chunkMetric = ""
+		chunkMinTs = 0
+		chunkMaxTs = 0
+		chunkEndOffset = committedOffset
 		if progress != nil {
 			progress(summary.Chunks)
 		}
@@ -587,21 +983,67 @@ func (s *Server) streamImport(ctx context.Context, cfg uploadConfig, bundle *bun
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
+		currentOffset += int64(len(line)) + 1 // account for newline
+
 		var parsed metricLine
 		if err := json.Unmarshal(line, &parsed); err != nil {
-			return nil, summary, fmt.Errorf("failed to parse metrics line: %w", err)
+			summary.SkippedLines++
+			continue
 		}
-		if err := summary.consumeMetric(parsed); err != nil {
-			return nil, summary, err
-		}
-		normalized, err := normalizeMetricLine(parsed)
+
+		parsed.Timestamps, _ = normalizeTimestamps(parsed.Timestamps)
+		values, err := normalizeValues(parsed.Values)
 		if err != nil {
-			return nil, summary, err
+			summary.SkippedLines++
+			continue
 		}
+		filteredTs, filteredVals, dropped := filterTimestampsAndValues(parsed.Timestamps, values, retentionCutoffMs)
+		if dropped > 0 {
+			summary.DroppedOld += dropped
+		}
+		if len(filteredTs) == 0 || len(filteredTs) != len(filteredVals) {
+			summary.SkippedLines++
+			continue
+		}
+
+		if tsNormalized, scaled := normalizeTimestamps(filteredTs); scaled {
+			filteredTs = tsNormalized
+			summary.NormalizedTs = true
+		}
+		if shiftMs != 0 {
+			for i := range filteredTs {
+				filteredTs[i] += shiftMs
+			}
+		}
+
+		normalized, err := buildNormalizedLine(parsed.Metric, filteredVals, filteredTs)
+		if err != nil {
+			summary.SkippedLines++
+			continue
+		}
+
 		chunk.Write(normalized)
 		chunk.WriteByte('\n')
+		chunkPoints += len(filteredTs)
+		if chunkMetric == "" && parsed.Metric != nil {
+			chunkMetric = parsed.Metric["__name__"]
+		}
+		lbl := selectLabelSubset(parsed.Metric)
+		if len(chunkLabels) < 5 { // keep a few to propagate to examples
+			chunkLabels = append(chunkLabels, lbl)
+		}
+		if len(filteredTs) > 0 {
+			if chunkMinTs == 0 || filteredTs[0] < chunkMinTs {
+				chunkMinTs = filteredTs[0]
+			}
+			if filteredTs[len(filteredTs)-1] > chunkMaxTs {
+				chunkMaxTs = filteredTs[len(filteredTs)-1]
+			}
+		}
+		chunkEndOffset = currentOffset
+
 		if chunk.Len() >= maxImportChunkBytes {
-			if err := flushChunk(); err != nil {
+			if err := commitChunk(); err != nil {
 				return nil, summary, err
 			}
 		}
@@ -609,7 +1051,7 @@ func (s *Server) streamImport(ctx context.Context, cfg uploadConfig, bundle *bun
 	if err := scanner.Err(); err != nil {
 		return nil, summary, err
 	}
-	if err := flushChunk(); err != nil {
+	if err := commitChunk(); err != nil {
 		return nil, summary, err
 	}
 
@@ -626,23 +1068,126 @@ func (s *Server) streamImport(ctx context.Context, cfg uploadConfig, bundle *bun
 	}, summary, nil
 }
 
-func normalizeMetricLine(line metricLine) ([]byte, error) {
-	values := make([]float64, len(line.Values))
-	for i, val := range line.Values {
-		floatVal, err := val.Float64()
-		if err != nil {
-			return nil, fmt.Errorf("invalid value %s: %w", val.String(), err)
+func normalizeValues(raw []json.RawMessage) ([]float64, error) {
+	values := make([]float64, 0, len(raw))
+	for _, v := range raw {
+		// Try to decode as number first
+		var num json.Number
+		if err := json.Unmarshal(v, &num); err == nil {
+			f, err := num.Float64()
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, f)
+			continue
 		}
-		values[i] = floatVal
+
+		// Strings that contain numbers ("1", "0.5", "NaN")
+		var s string
+		if err := json.Unmarshal(v, &s); err == nil {
+			f, err := strconv.ParseFloat(s, 64)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, f)
+			continue
+		}
+
+		// Booleans as 0/1
+		var b bool
+		if err := json.Unmarshal(v, &b); err == nil {
+			if b {
+				values = append(values, 1)
+			} else {
+				values = append(values, 0)
+			}
+			continue
+		}
+
+		return nil, fmt.Errorf("unsupported value %s", string(v))
 	}
+	return values, nil
+}
+
+func normalizeTimestamps(ts []int64) ([]int64, bool) {
+	if len(ts) == 0 {
+		return ts, false
+	}
+	median := ts[len(ts)/2]
+	unit := detectTimestampUnit(median)
+	switch unit {
+	case "seconds":
+		out := make([]int64, len(ts))
+		for i, v := range ts {
+			out[i] = v * 1000
+		}
+		return out, true
+	case "microseconds":
+		out := make([]int64, len(ts))
+		for i, v := range ts {
+			out[i] = v / 1000
+		}
+		return out, true
+	case "nanoseconds":
+		out := make([]int64, len(ts))
+		for i, v := range ts {
+			out[i] = v / 1_000_000
+		}
+		return out, true
+	default:
+		return ts, false
+	}
+}
+
+func detectTimestampUnit(v int64) string {
+	abs := v
+	if abs < 0 {
+		abs = -abs
+	}
+	switch {
+	case abs < 1e9:
+		return "milliseconds"
+	case abs < 1e11:
+		return "seconds"
+	case abs < 1e14:
+		return "milliseconds"
+	case abs < 1e17:
+		return "microseconds"
+	default:
+		return "nanoseconds"
+	}
+}
+
+func filterTimestampsAndValues(timestamps []int64, values []float64, cutoffMs int64) ([]int64, []float64, int) {
+	if cutoffMs <= 0 {
+		return timestamps, values, 0
+	}
+	if len(timestamps) != len(values) {
+		return nil, nil, len(timestamps)
+	}
+	keptTs := make([]int64, 0, len(timestamps))
+	keptVals := make([]float64, 0, len(values))
+	dropped := 0
+	for i, ts := range timestamps {
+		if ts < cutoffMs {
+			dropped++
+			continue
+		}
+		keptTs = append(keptTs, ts)
+		keptVals = append(keptVals, values[i])
+	}
+	return keptTs, keptVals, dropped
+}
+
+func buildNormalizedLine(labels map[string]string, values []float64, timestamps []int64) ([]byte, error) {
 	payload := struct {
 		Metric     map[string]string `json:"metric"`
 		Values     []float64         `json:"values"`
 		Timestamps []int64           `json:"timestamps"`
 	}{
-		Metric:     line.Metric,
+		Metric:     labels,
 		Values:     values,
-		Timestamps: line.Timestamps,
+		Timestamps: timestamps,
 	}
 	return json.Marshal(payload)
 }
@@ -779,52 +1324,58 @@ func (s *Server) verifyImport(ctx context.Context, cfg uploadConfig, summary imp
 	params.Set("start", fmt.Sprintf("%d", start))
 	params.Set("end", fmt.Sprintf("%d", end))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, seriesURL+"?"+params.Encode(), nil)
-	if err != nil {
-		return &verificationResult{Verified: false, Message: err.Error(), Query: match}
-	}
-	applyTenantHeaders(req, cfg)
-	applyAuthHeaders(req, cfg)
-
-	client := s.withInsecure(cfg.SkipTLSVerify)
-	resp, err := client.Do(req)
-	if err != nil {
-		return &verificationResult{Verified: false, Message: err.Error(), Query: match}
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-	if resp.StatusCode >= 300 {
-		return &verificationResult{
-			Verified: false,
-			Query:    match,
-			Message:  fmt.Sprintf("query failed: %s %s", resp.Status, strings.TrimSpace(string(body))),
+	var lastErr string
+	for attempt := 0; attempt < 3; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, seriesURL+"?"+params.Encode(), nil)
+		if err != nil {
+			return &verificationResult{Verified: false, Message: err.Error(), Query: match}
 		}
-	}
+		applyTenantHeaders(req, cfg)
+		applyAuthHeaders(req, cfg)
 
-	var payload struct {
-		Status string              `json:"status"`
-		Data   []map[string]string `json:"data"`
+		client := s.withInsecure(cfg.SkipTLSVerify)
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err.Error()
+		} else {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+			_ = resp.Body.Close()
+			if resp.StatusCode >= 300 {
+				lastErr = fmt.Sprintf("query failed: %s %s", resp.Status, strings.TrimSpace(string(body)))
+			} else {
+				var payload struct {
+					Status string              `json:"status"`
+					Data   []map[string]string `json:"data"`
+				}
+				if len(body) == 0 {
+					lastErr = fmt.Sprintf("verification response is empty (HTTP %s)", resp.Status)
+				} else if err := json.Unmarshal(body, &payload); err != nil {
+					preview := string(body)
+					if len(preview) > 200 {
+						preview = preview[:200] + "…"
+					}
+					lastErr = fmt.Sprintf("invalid verification payload: %v; body=%q", err, preview)
+				} else {
+					verified := payload.Status == "success" && len(payload.Data) > 0
+					message := fmt.Sprintf("%d matching series observed between %s and %s",
+						len(payload.Data),
+						summary.Start.Format(time.RFC3339),
+						summary.End.Format(time.RFC3339),
+					)
+					return &verificationResult{
+						Verified:   verified,
+						Query:      match,
+						SeriesSeen: len(payload.Data),
+						Start:      summary.Start.Format(time.RFC3339),
+						End:        summary.End.Format(time.RFC3339),
+						Message:    message,
+					}
+				}
+			}
+		}
+		time.Sleep(700 * time.Millisecond)
 	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return &verificationResult{Verified: false, Query: match, Message: fmt.Sprintf("invalid verification payload: %v", err)}
-	}
-
-	verified := payload.Status == "success" && len(payload.Data) > 0
-	message := fmt.Sprintf("%d matching series observed between %s and %s",
-		len(payload.Data),
-		summary.Start.Format(time.RFC3339),
-		summary.End.Format(time.RFC3339),
-	)
-
-	return &verificationResult{
-		Verified:   verified,
-		Query:      match,
-		SeriesSeen: len(payload.Data),
-		Start:      summary.Start.Format(time.RFC3339),
-		End:        summary.End.Format(time.RFC3339),
-		Message:    message,
-	}
+	return &verificationResult{Verified: false, Query: match, Message: lastErr}
 }
 
 func buildLabelMatcher(summary importSummary) string {
@@ -885,11 +1436,158 @@ func (s *Server) pingEndpoint(ctx context.Context, cfg uploadConfig) error {
 		return fmt.Errorf("dial failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode >= http.StatusInternalServerError {
+	if resp.StatusCode >= http.StatusBadRequest {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 		return fmt.Errorf("remote responded %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
 	return nil
+}
+
+func (s *Server) retentionCutoff(ctx context.Context, cfg uploadConfig) int64 {
+	importURL, _, err := resolveEndpoints(cfg)
+	if err != nil {
+		log.Printf("[WARN] retentionCutoff: failed to resolve endpoints: %v", err)
+		return 0
+	}
+	parsed, err := url.Parse(importURL)
+	if err != nil {
+		log.Printf("[WARN] retentionCutoff: failed to parse URL: %v", err)
+		return 0
+	}
+
+	// Try /api/v1/status/tsdb first (might work for newer VMs or vmselect)
+	parsed.Path = "/api/v1/status/tsdb"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err == nil {
+		applyTenantHeaders(req, cfg)
+		applyAuthHeaders(req, cfg)
+
+		client := s.withInsecure(cfg.SkipTLSVerify)
+		resp, err := client.Do(req)
+		if err == nil {
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode < 300 {
+				var payload struct {
+					Data struct {
+						RetentionTime string `json:"retentionTime"`
+					} `json:"data"`
+				}
+				if err := json.NewDecoder(resp.Body).Decode(&payload); err == nil && payload.Data.RetentionTime != "" {
+					dur, err := parseRetentionDuration(payload.Data.RetentionTime)
+					if err == nil {
+						cutoff := time.Now().Add(-dur).UnixMilli()
+						log.Printf("[INFO] retentionCutoff from /api/v1/status/tsdb: %v (cutoff: %d)", dur, cutoff)
+						return cutoff
+					} else {
+						log.Printf("[WARN] retentionCutoff: failed to parse %q: %v", payload.Data.RetentionTime, err)
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback: parse /metrics for flag{name="retentionPeriod"}
+	parsed.Path = "/metrics"
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		log.Printf("[WARN] retentionCutoff: failed to create /metrics request: %v", err)
+		return 0
+	}
+	applyTenantHeaders(req, cfg)
+	applyAuthHeaders(req, cfg)
+
+	client := s.withInsecure(cfg.SkipTLSVerify)
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[WARN] retentionCutoff: failed to fetch /metrics: %v", err)
+		return 0
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 300 {
+		log.Printf("[WARN] retentionCutoff: /metrics returned %d", resp.StatusCode)
+		return 0
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		// Look for: flag{name="retentionPeriod", value="400d", is_set="true"} 1
+		if !strings.Contains(line, `name="retentionPeriod"`) {
+			continue
+		}
+		// Extract value="..."
+		start := strings.Index(line, `value="`)
+		if start == -1 {
+			continue
+		}
+		start += len(`value="`)
+		end := strings.Index(line[start:], `"`)
+		if end == -1 {
+			continue
+		}
+		retentionStr := line[start : start+end]
+		dur, err := parseRetentionDuration(retentionStr)
+		if err != nil {
+			log.Printf("[WARN] retentionCutoff: failed to parse duration %q: %v", retentionStr, err)
+			continue
+		}
+		cutoff := time.Now().Add(-dur).UnixMilli()
+		log.Printf("[INFO] retentionCutoff from /metrics: %v (cutoff: %d)", dur, cutoff)
+		return cutoff
+	}
+
+	log.Printf("[WARN] retentionCutoff: no retention period found in /metrics")
+	return 0
+}
+
+func parseRetentionDuration(raw string) (time.Duration, error) {
+	// Supports suffixes y,w,d,h,m,s
+	var total time.Duration
+	var num strings.Builder
+	flush := func(unit rune) error {
+		if num.Len() == 0 {
+			return fmt.Errorf("missing number before %c", unit)
+		}
+		val, err := strconv.Atoi(num.String())
+		num.Reset()
+		if err != nil || val < 0 {
+			return fmt.Errorf("invalid number in %q", raw)
+		}
+		switch unit {
+		case 'y':
+			total += time.Duration(val) * 365 * 24 * time.Hour
+		case 'w':
+			total += time.Duration(val) * 7 * 24 * time.Hour
+		case 'd':
+			total += time.Duration(val) * 24 * time.Hour
+		case 'h':
+			total += time.Duration(val) * time.Hour
+		case 'm':
+			total += time.Duration(val) * time.Minute
+		case 's':
+			total += time.Duration(val) * time.Second
+		default:
+			return fmt.Errorf("unsupported unit %c", unit)
+		}
+		return nil
+	}
+
+	for _, ch := range raw {
+		if ch >= '0' && ch <= '9' {
+			num.WriteRune(ch)
+			continue
+		}
+		if err := flush(ch); err != nil {
+			return 0, err
+		}
+	}
+	if num.Len() > 0 {
+		return 0, fmt.Errorf("dangling number without unit in %q", raw)
+	}
+	if total <= 0 {
+		return 0, fmt.Errorf("empty duration in %q", raw)
+	}
+	return total, nil
 }
 
 func resolveEndpoints(cfg uploadConfig) (string, string, error) {

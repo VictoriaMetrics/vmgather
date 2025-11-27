@@ -21,14 +21,14 @@ test.describe('UI regressions', () => {
   test('Bug #4: invalid URL disables Test Connection button', async ({ page }) => {
     const step3 = await navigateToStep3(page);
     await step3.locator('#vmUrl').fill('https://this-aint-no\\\\invalid-url');
-    await expect(step3.locator('#vmUrlHint')).toHaveText(/❌/);
+    await expect(step3.locator('#vmUrlHint')).toHaveText(/[FAIL]/);
     await expect(step3.locator('#testConnectionBtn')).toBeDisabled();
   });
 
   test('Bug #4: Kubernetes service URL is accepted', async ({ page }) => {
     const step3 = await navigateToStep3(page);
     await step3.locator('#vmUrl').fill('vmselect.monitoring.svc.cluster.local:8481');
-    await expect(step3.locator('#vmUrlHint')).toHaveText(/✅/);
+    await expect(step3.locator('#vmUrlHint')).toHaveText(/[OK]/);
     await expect(step3.locator('#testConnectionBtn')).toBeEnabled();
   });
 

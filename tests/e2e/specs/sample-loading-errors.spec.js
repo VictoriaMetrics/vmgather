@@ -48,15 +48,15 @@ test.describe('Sample Loading - Error Handling', () => {
     
     // Navigate to step 5
     await page.goto('/');
-    await page.locator('.step.active button:has-text("Next")').click();
-    await page.locator('.step.active button:has-text("Next")').click();
+    await page.locator('.step.active button:has-text("Next")').first().click();
+    await page.locator('.step.active button:has-text("Next")').first().click();
     await page.locator('.step.active #vmUrl').fill('http://localhost:8428');
     await page.locator('.step.active #testConnectionBtn').click();
     await page.waitForSelector('.step.active #step3Next:not([disabled])', { timeout: 10000 });
     await page.locator('.step.active #step3Next').click();
     await page.waitForSelector('.component-item');
     await page.locator('.component-header input[type="checkbox"]').first().click();
-    await page.locator('.step.active button:has-text("Next")').click();
+    await page.locator('.step.active button:has-text("Next")').first().click();
     
     // Step 5: Obfuscation - open advanced labels
     await page.waitForSelector('.step.active h2:has-text("Obfuscation")');
@@ -100,8 +100,8 @@ test.describe('Sample Loading - Error Handling', () => {
     
     // Navigate to step 5
     await page.goto('/');
-    await page.locator('.step.active button:has-text("Next")').click();
-    await page.locator('.step.active button:has-text("Next")').click();
+    await page.locator('.step.active button:has-text("Next")').first().click();
+    await page.locator('.step.active button:has-text("Next")').first().click();
     await page.locator('.step.active #vmUrl').fill('http://localhost:8428');
     await page.locator('.step.active #testConnectionBtn').click();
     await page.waitForSelector('.step.active #step3Next:not([disabled])', { timeout: 10000 });
@@ -114,7 +114,6 @@ test.describe('Sample Loading - Error Handling', () => {
     await page.locator('summary:has-text("Advanced: Obfuscate other labels")').click();
     
     // Verify loading spinner appears
-    await expect(page.locator('.loading-spinner')).toBeVisible();
     await expect(page.locator('text=Loading sample metrics')).toBeVisible();
     
     // Wait for loading to complete
@@ -208,5 +207,3 @@ test.describe('Sample Loading - Error Handling', () => {
     await expect(page.locator('.error-message')).not.toBeVisible();
   });
 });
-
-

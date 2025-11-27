@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -162,4 +163,75 @@ func TestExportJobManagerCancelJob(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
+}
+
+type resumeExportService struct {
+	mu      sync.Mutex
+	configs []domain.ExportConfig
+}
+
+func (r *resumeExportService) ExecuteExport(ctx context.Context, config domain.ExportConfig) (*domain.ExportResult, error) {
+	r.mu.Lock()
+	r.configs = append(r.configs, config)
+	r.mu.Unlock()
+	return &domain.ExportResult{ExportID: "resume"}, nil
+}
+
+func TestResumeJobUsesSameStagingAndOffset(t *testing.T) {
+	service := &resumeExportService{}
+	manager := NewExportJobManager(service)
+
+	cfg := domain.ExportConfig{
+		TimeRange: domain.TimeRange{
+			Start: time.Now().Add(-1 * time.Hour),
+			End:   time.Now(),
+		},
+		StagingFile: "stage.partial.jsonl",
+		Batching:    domain.BatchSettings{Enabled: true},
+	}
+
+	if _, err := manager.StartJob(context.Background(), "job-resume", cfg); err != nil {
+		t.Fatalf("start job failed: %v", err)
+	}
+	// Simulate partial progress and cancellation
+	manager.mu.Lock()
+	job := manager.jobs["job-resume"]
+	job.status.State = JobCanceled
+	job.status.CompletedBatches = 2
+	job.status.MetricsProcessed = 42
+	job.resumeFrom = 2
+	job.config.ResumeFromBatch = 2
+	manager.mu.Unlock()
+
+	resumed, err := manager.ResumeJob(context.Background(), "job-resume")
+	if err != nil {
+		t.Fatalf("resume failed: %v", err)
+	}
+	if resumed.StagingPath != cfg.StagingFile {
+		t.Fatalf("staging path lost: %s", resumed.StagingPath)
+	}
+
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for {
+		service.mu.Lock()
+		if len(service.configs) >= 2 {
+			service.mu.Unlock()
+			break
+		}
+		service.mu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatalf("resume did not call ExecuteExport")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	service.mu.Lock()
+	lastCfg := service.configs[len(service.configs)-1]
+	if lastCfg.ResumeFromBatch != 2 {
+		t.Fatalf("expected resume_from_batch=2, got %d", lastCfg.ResumeFromBatch)
+	}
+	if lastCfg.StagingFile != cfg.StagingFile {
+		t.Fatalf("expected staging file %s, got %s", cfg.StagingFile, lastCfg.StagingFile)
+	}
+	service.mu.Unlock()
 }

@@ -62,8 +62,8 @@ var platforms = []Platform{
 }
 
 func main() {
-	fmt.Printf("🚀 Support Bundle Build System v%s\n", version)
-	fmt.Printf("📦 Building %d binaries across %d platforms...\n\n", len(binaries), len(platforms))
+	fmt.Printf("Support Bundle Build System v%s\n", version)
+	fmt.Printf("Building %d binaries across %d platforms...\n\n", len(binaries), len(platforms))
 
 	// Create dist directory
 	if err := os.RemoveAll(distDir); err != nil && !os.IsNotExist(err) {
@@ -84,7 +84,7 @@ func main() {
 
 			if result.Error == nil {
 				successCount++
-				fmt.Printf("✅ %s %s/%s: %s (%.2f MB, %s)\n",
+				fmt.Printf("[OK] %s %s/%s: %s (%.2f MB, %s)\n",
 					result.Binary,
 					platform.GOOS,
 					platform.GOARCH,
@@ -93,7 +93,7 @@ func main() {
 					result.BuildTime.Round(time.Millisecond),
 				)
 			} else {
-				fmt.Printf("❌ %s %s/%s: %v\n", result.Binary, platform.GOOS, platform.GOARCH, result.Error)
+				fmt.Printf("[FAIL] %s %s/%s: %v\n", result.Binary, platform.GOOS, platform.GOARCH, result.Error)
 			}
 		}
 	}
@@ -104,7 +104,7 @@ func main() {
 	}
 
 	// Print summary
-	fmt.Printf("\n📊 Build Summary:\n")
+	fmt.Printf("\nBuild Summary:\n")
 	fmt.Printf("   Success: %d/%d\n", successCount, len(platforms)*len(binaries))
 	fmt.Printf("   Output:  %s/\n", distDir)
 	fmt.Printf("   Files:   %s\n", strings.Join(listDistFiles(), ", "))
@@ -187,7 +187,7 @@ func buildPlatform(binary BinaryTarget, platform Platform) BuildResult {
 
 		// Copy file
 		if err := copyFile(outputPath, aliasPath); err == nil {
-			fmt.Printf("   📋 Created alias: %s\n", aliasFilename)
+			fmt.Printf("   Created alias: %s\n", aliasFilename)
 		}
 	}
 
@@ -236,7 +236,7 @@ func generateChecksums(results []BuildResult) error {
 		}
 	}
 
-	fmt.Printf("✅ Generated checksums.txt\n")
+	fmt.Printf("[OK] Generated checksums.txt\n")
 	return nil
 }
 
@@ -258,7 +258,7 @@ func listDistFiles() []string {
 
 // fatal prints error and exits
 func fatal(format string, args ...interface{}) {
-	_, _ = fmt.Fprintf(os.Stderr, "❌ ERROR: "+format+"\n", args...)
+	_, _ = fmt.Fprintf(os.Stderr, "[ERROR] "+format+"\n", args...)
 	os.Exit(1)
 }
 

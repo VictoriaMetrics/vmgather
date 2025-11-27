@@ -59,6 +59,9 @@ type exportJob struct {
 	status        *ExportJobStatus
 	durationTotal time.Duration
 	cancel        context.CancelFunc
+	config        domain.ExportConfig
+	resumeFrom    int
+	baseMetrics   int
 }
 
 type ExportJobManager struct {
@@ -104,7 +107,7 @@ func (m *ExportJobManager) StartJob(ctx context.Context, jobID string, config do
 	}
 
 	jobCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-	job := &exportJob{status: status, cancel: cancel}
+	job := &exportJob{status: status, cancel: cancel, config: config}
 
 	m.mu.Lock()
 	m.cleanupLocked(time.Now())
@@ -131,8 +134,58 @@ func (m *ExportJobManager) GetStatus(jobID string) (*ExportJobStatus, bool) {
 	return job.status.clone(), true
 }
 
+func (m *ExportJobManager) ResumeJob(ctx context.Context, jobID string) (*ExportJobStatus, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	job, exists := m.jobs[jobID]
+	if !exists {
+		return nil, fmt.Errorf("job %s not found", jobID)
+	}
+	if job.status.State != JobCanceled && job.status.State != JobFailed {
+		return nil, fmt.Errorf("job %s is not resumable", jobID)
+	}
+
+	resumeFrom := job.status.CompletedBatches
+	baseMetrics := job.status.MetricsProcessed
+	cfg := job.config
+	cfg.ResumeFromBatch = resumeFrom
+	if job.status.StagingPath != "" {
+		cfg.StagingFile = job.status.StagingPath
+	}
+	if m.activeJobs >= m.maxConcurrentJobs {
+		return nil, fmt.Errorf("maximum concurrent exports reached (%d)", m.maxConcurrentJobs)
+	}
+	jobCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	job.cancel = cancel
+	job.config = cfg
+	job.resumeFrom = resumeFrom
+	job.baseMetrics = baseMetrics
+	job.durationTotal = 0
+	job.status.StagingPath = cfg.StagingFile
+
+	job.status.State = JobPending
+	job.status.Error = ""
+	job.status.Result = nil
+	job.status.CompletedAt = nil
+	job.status.ETA = nil
+
+	m.activeJobs++
+
+	go m.runJob(jobCtx, jobID, cfg)
+	return job.status.clone(), nil
+}
+
 func (m *ExportJobManager) runJob(ctx context.Context, jobID string, config domain.ExportConfig) {
-	reporter := &jobProgressReporter{manager: m, jobID: jobID}
+	baseBatches := 0
+	baseMetrics := 0
+	if job, ok := m.jobs[jobID]; ok {
+		baseBatches = job.resumeFrom
+		baseMetrics = job.baseMetrics
+	}
+	if baseBatches > 0 {
+		config.ResumeFromBatch = baseBatches
+	}
+	reporter := &jobProgressReporter{manager: m, jobID: jobID, baseBatches: baseBatches, baseMetrics: baseMetrics}
 	ctx = services.WithProgressReporter(ctx, reporter)
 
 	m.markRunning(jobID)
@@ -196,7 +249,7 @@ func (m *ExportJobManager) markCompleted(jobID string, result *domain.ExportResu
 	}
 }
 
-func (m *ExportJobManager) updateBatch(jobID string, progress services.BatchProgress) {
+func (m *ExportJobManager) updateBatch(jobID string, progress services.BatchProgress, baseBatches int, baseMetrics int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	job, exists := m.jobs[jobID]
@@ -208,11 +261,14 @@ func (m *ExportJobManager) updateBatch(jobID string, progress services.BatchProg
 		job.status.TotalBatches = progress.TotalBatches
 	}
 
-	job.status.CompletedBatches = progress.BatchIndex
+	job.status.CompletedBatches = baseBatches + progress.BatchIndex
 	if job.status.TotalBatches > 0 {
 		job.status.Progress = float64(job.status.CompletedBatches) / float64(job.status.TotalBatches)
 	}
 
+	if baseMetrics > 0 && job.status.MetricsProcessed < baseMetrics {
+		job.status.MetricsProcessed = baseMetrics
+	}
 	job.status.MetricsProcessed += progress.Metrics
 	job.status.LastBatchDurationSeconds = progress.Duration.Seconds()
 	job.durationTotal += progress.Duration
@@ -292,10 +348,12 @@ func (m *ExportJobManager) cleanupLocked(now time.Time) {
 }
 
 type jobProgressReporter struct {
-	manager *ExportJobManager
-	jobID   string
+	manager     *ExportJobManager
+	jobID       string
+	baseBatches int
+	baseMetrics int
 }
 
 func (r *jobProgressReporter) OnBatchComplete(progress services.BatchProgress) {
-	r.manager.updateBatch(r.jobID, progress)
+	r.manager.updateBatch(r.jobID, progress, r.baseBatches, r.baseMetrics)
 }

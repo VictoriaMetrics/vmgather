@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -62,7 +63,13 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 	if config.StagingFile == "" {
 		config.StagingFile = filepath.Join(stagingDir, fmt.Sprintf("%s.partial.jsonl", exportID))
 	}
-	stagingHandle, err := os.OpenFile(config.StagingFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
+	flags := os.O_CREATE | os.O_WRONLY
+	if config.ResumeFromBatch > 0 {
+		flags |= os.O_APPEND
+	} else {
+		flags |= os.O_TRUNC
+	}
+	stagingHandle, err := os.OpenFile(config.StagingFile, flags, 0o640)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create staging file: %w", err)
 	}
@@ -83,14 +90,20 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 		obfuscator = obfuscation.NewObfuscator()
 	}
 
-	for batchIndex, window := range batchWindows {
+	startIdx := config.ResumeFromBatch
+	if startIdx < 0 || startIdx >= len(batchWindows) {
+		startIdx = 0
+	}
+
+	for batchIndex := startIdx; batchIndex < len(batchWindows); batchIndex++ {
+		window := batchWindows[batchIndex]
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
 		}
 
-		fmt.Printf("📦 Processing batch %d/%d (%s - %s)\n",
+		fmt.Printf("Processing batch %d/%d (%s - %s)\n",
 			batchIndex+1, len(batchWindows), window.Start.Format(time.RFC3339), window.End.Format(time.RFC3339))
 		batchStart := time.Now()
 
@@ -105,7 +118,7 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 		_ = exportReader.Close()
 		cancelBatch()
 		if err != nil {
-			fmt.Printf("❌ Metrics processing failed for batch %d: %v\n", batchIndex+1, err)
+			fmt.Printf("[ERROR] Metrics processing failed for batch %d: %v\n", batchIndex+1, err)
 			return nil, fmt.Errorf("metrics processing failed: %w", err)
 		}
 		if err := stagingWriter.Flush(); err != nil {
@@ -114,7 +127,7 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 
 		metricsCount += batchCount
 		batchDuration := time.Since(batchStart)
-		fmt.Printf("✅ Batch %d processed in %v (%d metrics)\n", batchIndex+1, batchDuration, batchCount)
+		fmt.Printf("[OK] Batch %d processed in %v (%d metrics)\n", batchIndex+1, batchDuration, batchCount)
 
 		ReportBatchProgress(ctx, BatchProgress{
 			BatchIndex:   batchIndex + 1,
@@ -133,7 +146,7 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 	}
 
 	// Step 3: Create archive
-	fmt.Printf("📦 Creating archive...\n")
+	fmt.Printf("Creating archive...\n")
 	metadata := s.buildArchiveMetadata(exportID, config, metricsCount, obfuscationMaps)
 	processedReader, err := os.Open(config.StagingFile)
 	if err != nil {
@@ -146,22 +159,24 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 	archiveStartTime := time.Now()
 	archivePath, sha256sum, err := s.archiveWriter.CreateArchive(exportID, processedReader, metadata)
 	if err != nil {
-		fmt.Printf("❌ Archive creation failed: %v\n", err)
+		fmt.Printf("[ERROR] Archive creation failed: %v\n", err)
 		return nil, fmt.Errorf("archive creation failed: %w", err)
 	}
-	fmt.Printf("✅ Archive created in %v\n", time.Since(archiveStartTime))
+	fmt.Printf("[OK] Archive created in %v\n", time.Since(archiveStartTime))
 
 	// Step 4: Get archive size
 	archiveSize, err := s.archiveWriter.GetArchiveSize(archivePath)
 	if err != nil {
-		fmt.Printf("❌ Failed to get archive size: %v\n", err)
+		fmt.Printf("[ERROR] Failed to get archive size: %v\n", err)
 		return nil, fmt.Errorf("failed to get archive size: %w", err)
 	}
-	fmt.Printf("📊 Archive size: %.2f MB\n", float64(archiveSize)/(1024*1024))
-	fmt.Printf("🔐 SHA256: %s\n", sha256sum)
+	fmt.Printf("Archive size: %.2f MB\n", float64(archiveSize)/(1024*1024))
+	fmt.Printf("SHA256: %s\n", sha256sum)
 
-	if err := os.Remove(config.StagingFile); err != nil {
-		log.Printf("⚠️  Failed to remove staging file %s: %v", config.StagingFile, err)
+	if config.ResumeFromBatch == 0 {
+		if err := os.Remove(config.StagingFile); err != nil {
+			log.Printf("[WARN] Failed to remove staging file %s: %v", config.StagingFile, err)
+		}
 	}
 
 	// Build result
@@ -445,7 +460,7 @@ func (s *exportServiceImpl) exportViaQueryRange(ctx context.Context, client *vm.
 	step := determineQueryRangeStep(timeRange, overrideSeconds)
 	duration := timeRange.End.Sub(timeRange.Start)
 
-	fmt.Printf("🔄 Starting query_range fallback:\n")
+	fmt.Printf("Starting query_range fallback:\n")
 	fmt.Printf("   Time range: %s to %s (duration: %v)\n", timeRange.Start.Format(time.RFC3339), timeRange.End.Format(time.RFC3339), duration)
 	fmt.Printf("   Step: %v\n", step)
 	fmt.Printf("   Selector: %s\n", selector)
@@ -455,11 +470,11 @@ func (s *exportServiceImpl) exportViaQueryRange(ctx context.Context, client *vm.
 	startTime := time.Now()
 	result, err := client.QueryRange(ctx, selector, timeRange.Start, timeRange.End, step)
 	if err != nil {
-		fmt.Printf("❌ Query_range failed after %v: %v\n", time.Since(startTime), err)
+		fmt.Printf("[FAIL] Query_range failed after %v: %v\n", time.Since(startTime), err)
 		return nil, fmt.Errorf("query_range failed: %w", err)
 	}
 
-	fmt.Printf("✅ Query_range completed in %v\n", time.Since(startTime))
+	fmt.Printf("[OK] Query_range completed in %v\n", time.Since(startTime))
 	fmt.Printf("   Series returned: %d\n", len(result.Data.Result))
 
 	// Calculate total data points
@@ -468,7 +483,7 @@ func (s *exportServiceImpl) exportViaQueryRange(ctx context.Context, client *vm.
 		totalDataPoints += len(series.Values)
 	}
 	fmt.Printf("   Total data points: %d\n", totalDataPoints)
-	fmt.Printf("🔄 Converting to export format (JSONL)...\n")
+	fmt.Printf("Converting to export format (JSONL)...\n")
 
 	// Convert query_range result to export format (JSONL)
 	var buf bytes.Buffer
@@ -494,11 +509,15 @@ func (s *exportServiceImpl) exportViaQueryRange(ctx context.Context, client *vm.
 			if !ok {
 				continue
 			}
+			valueNum, err := strconv.ParseFloat(valueStr, 64)
+			if err != nil {
+				continue
+			}
 
 			// Build export line in VictoriaMetrics export format
 			exportLine := map[string]interface{}{
 				"metric":     series.Metric,
-				"values":     []interface{}{valueStr},
+				"values":     []interface{}{valueNum},
 				"timestamps": []interface{}{int64(timestamp * 1000)}, // Convert to milliseconds
 			}
 
@@ -518,7 +537,7 @@ func (s *exportServiceImpl) exportViaQueryRange(ctx context.Context, client *vm.
 		}
 	}
 
-	fmt.Printf("✅ Conversion completed in %v\n", time.Since(convertStartTime))
+	fmt.Printf("[OK] Conversion completed in %v\n", time.Since(convertStartTime))
 	fmt.Printf("   Total points processed: %d\n", processedPoints)
 	fmt.Printf("   Export data size: %.2f MB\n", float64(buf.Len())/(1024*1024))
 
@@ -527,10 +546,10 @@ func (s *exportServiceImpl) exportViaQueryRange(ctx context.Context, client *vm.
 }
 
 func (s *exportServiceImpl) fetchBatch(ctx context.Context, client *vm.Client, selector string, tr domain.TimeRange, metricStepSeconds int) (io.ReadCloser, error) {
-	fmt.Printf("📤 Attempting export for batch: %s -> %s\n", tr.Start.Format(time.RFC3339), tr.End.Format(time.RFC3339))
+	fmt.Printf("Attempting export for batch: %s -> %s\n", tr.Start.Format(time.RFC3339), tr.End.Format(time.RFC3339))
 	reader, err := client.Export(ctx, selector, tr.Start, tr.End)
 	if err != nil && s.isMissingRouteError(err) {
-		fmt.Printf("⚠️  Export API not available for current batch, falling back to query_range\n")
+		fmt.Printf("[WARN] Export API not available for current batch, falling back to query_range\n")
 		return s.exportViaQueryRange(ctx, client, selector, tr, metricStepSeconds)
 	}
 	if err != nil {

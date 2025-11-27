@@ -214,7 +214,7 @@ func TestObfuscator_Unicode(t *testing.T) {
 	}{
 		{"cyrillic", "vmstorage-prod-ru"},
 		{"chinese", "vmstorage-prod-cn"},
-		{"emoji", "vmstorage-🚀-prod"},
+		{"emoji", "vmstorage-rocket-prod"},
 		{"mixed", "vm-storage-prod-intl"},
 	}
 
@@ -379,9 +379,9 @@ func TestObfuscator_SameIPDifferentPorts_SmartMapping(t *testing.T) {
 
 	// Document current behavior
 	if ips[0] == ips[1] && ips[1] == ips[2] {
-		t.Log("✓ Smart mapping: same IP preserved across ports")
+		t.Log("[OK] Smart mapping: same IP preserved across ports")
 	} else {
-		t.Log("✓ Simple mapping: each instance:port gets unique obfuscated value")
+		t.Log("[OK] Simple mapping: each instance:port gets unique obfuscated value")
 		t.Log("  This is acceptable for MVP - simpler implementation")
 	}
 

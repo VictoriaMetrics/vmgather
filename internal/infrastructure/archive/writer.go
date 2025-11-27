@@ -185,7 +185,7 @@ Components Exported:
 	readme += fmt.Sprintf("\nTotal Metrics: %d\n", metadata.MetricsCount)
 
 	if metadata.Obfuscated {
-		readme += "\n⚠️  OBFUSCATION APPLIED\n"
+		readme += "\n[WARN] OBFUSCATION APPLIED\n"
 		readme += "Instance IPs and job names have been obfuscated for privacy.\n"
 	}
 

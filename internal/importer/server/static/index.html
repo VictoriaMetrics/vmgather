@@ -349,7 +349,13 @@
 
                 <div class="form-group">
                     <label for="tenantId">Tenant / Account ID</label>
-                    <input type="text" id="tenantId" placeholder="0">
+                    <label style="display: block; margin-bottom: 6px;">
+                        <input type="checkbox" id="enableTenant" onchange="toggleTenantInput()"
+                            style="width: auto; margin-right: 8px;">
+                        Specify tenant
+                    </label>
+                    <input type="text" id="tenantId" placeholder="Tenant (optional)" disabled>
+                    <span class="input-hint" id="tenantHint">Leave unchecked for single-tenant endpoints.</span>
                 </div>
 
                 <div class="form-group">
@@ -386,6 +392,37 @@
                         <input type="file" id="bundleFile" accept=".jsonl,.zip" style="display:none;">
                     </div>
                     <span class="input-hint" id="fileHint"></span>
+                </div>
+
+                <div class="form-group" style="display:flex; gap:12px; align-items:flex-start;">
+                    <div id="analysisResult" class="input-hint" style="flex:1; display:flex; align-items:center; gap:8px;">
+                        Drop a file to start automatic preflight: checks timestamps vs retention, validates JSONL, and estimates drops.
+                    </div>
+                    <div id="analysisLoader" class="status" style="display:none; background:transparent; padding:0; margin:0;">
+                        <span class="loading-spinner"></span>
+                    </div>
+                </div>
+                <div id="analysisDetails" class="status" style="display:none;"></div>
+
+                <div class="form-group">
+                    <label style="display:block; margin-bottom:4px;">Retention window</label>
+                    <span id="retentionInfo" class="input-hint">Fetched from target during preflight; shown in UTC.</span>
+                </div>
+
+                <div class="form-group" style="display:flex; gap:12px; align-items:flex-start;">
+                    <div style="flex:1;">
+                        <label for="targetStartPicker">Align first sample to (UTC)</label>
+                        <input type="datetime-local" id="targetStartPicker" onchange="handleTargetStartChange()" disabled>
+                        <input type="hidden" id="timeShiftMinutes" value="0">
+                        <span class="input-hint">Choose desired start time; we compute the offset so the bundle ends no later than now.</span>
+                    </div>
+                    <div style="min-width:220px;">
+                        <div id="fileRangeInfo" class="input-hint" style="display:none;"></div>
+                        <div id="shiftSummary" class="input-hint" style="color: var(--text-muted);"></div>
+                        <div id="shiftHint" class="input-hint" style="color: var(--text-muted);"></div>
+                    </div>
+                    <button class="btn-secondary" type="button" id="applySuggestedShift" style="display:none; align-self:flex-end;" onclick="applySuggestedShift()" disabled>Apply suggested shift</button>
+                    <button class="btn-secondary" type="button" id="shiftToNowBtn" style="display:none; align-self:flex-end;" onclick="shiftBundleToNow()" disabled>Shift to now</button>
                 </div>
 
                 <div class="form-group">
@@ -426,7 +463,7 @@
 
                 <div class="button-group">
                     <button class="btn-secondary" onclick="resetForm()">Reset</button>
-                    <button class="btn-primary" id="startImportBtn" onclick="startImport()">Start Import</button>
+                    <button class="btn-primary" id="startImportBtn" onclick="startImport()" disabled>Start Import</button>
                 </div>
             </div>
         </div>

@@ -21,7 +21,7 @@ Official walkthrough for the VictoriaMetrics metrics export wizard.
 ## Launch and connection
 
 1. Run the binary for your platform (`./vmexporter-vX.Y.Z-linux-amd64`, `vmexporter-vX.Y.Z-windows-amd64.exe`, etc.).
-2. The application opens a browser window at `http://localhost:<random-port>`.
+2. The application opens a browser window at `http://localhost:8080` (auto-switches to a free port if 8080 is taken).
 3. The landing page shows the 6-step wizard with the current step highlighted.
 
 ### Supported target URLs
@@ -91,3 +91,31 @@ Downloads start automatically in the browser; you can also retrieve the archive 
 - Issues: https://github.com/VictoriaMetrics/support/issues
 - Email: info@victoriametrics.com
 - Slack: https://slack.victoriametrics.com/
+
+# VMImporter user guide
+
+Importer UI mirrors the exporter wizard but is tailored for replaying VMExporter bundles back into VictoriaMetrics.
+
+## Steps
+
+1. **Connection**: enter the target import endpoint (`http://localhost:8428`, `https://vm.example.com/1234/prometheus`, `/select/0/prometheus`, etc.), optional Tenant / Account ID, and auth (None/Basic/Bearer/Header). Test Connection must be green.
+2. **Bundle**: drop a VMExporter bundle (`.jsonl` or `.zip`). Preflight starts automatically:
+   - validates JSONL structure and values,
+   - reads time range (UTC),
+   - fetches target retention and shows cutoff,
+   - estimates points/dropped/skipped, and suggests a time shift if needed.
+3. **Time alignment** (enabled after preflight): pick “Align first sample” (datetime-local in UTC) or click “Shift to now” to slide the bundle so its end lands at the current time without exceeding retention. Shift summary shows original and shifted ranges.
+4. **Batching**: metric sampling step defaults to the adaptive hint; override if necessary.
+5. **Import**: Start Import stays disabled until connection + preflight + file are ready. Import streams ~512KB chunks, shows progress/ETA, and runs a verification query on completion. Failed jobs expose a Resume option when possible.
+
+## Behaviour & defaults
+
+- Retention trimming is always on: samples older than the target cutoff are dropped server-side to avoid storage errors. Cutoff is displayed in UTC.
+- Timezone handling: all times are shown and compared in UTC; user-facing picker is UTC to avoid drift with server TZ.
+- Invalid timestamps/lines are skipped during preflight; counts are reported before import.
+
+## Tips
+
+- If you need to shift a historic bundle into the active window, use “Shift to now” or set the desired first-sample time—no manual offset math required.
+- If retention fetch fails, importer still analyzes the bundle; warnings will note that cutoff is unknown.
+- Multi-tenant headers are forwarded automatically when Tenant / Account ID is set.

@@ -65,20 +65,20 @@ test.describe('Bug Fix: /rw/prometheus path for export', () => {
             
             // Check if it's the "missing route" error (BUG)
             if (errorMsg.includes('missing route')) {
-                console.log('   ❌ BUG DETECTED: "missing route" error');
+                console.log('   [FAIL] BUG DETECTED: "missing route" error');
                 console.log(`   Error message: ${errorMsg}`);
                 throw new Error('BUG: /rw/prometheus not normalized for /export');
             }
             
             // Check if it's auth error (EXPECTED after fix)
             if (errorMsg.includes('401') || errorMsg.includes('Unauthorized')) {
-                console.log('   ✅ EXPECTED: Auth error (path is correct, just wrong credentials)');
+                console.log('   [OK] EXPECTED: Auth error (path is correct, just wrong credentials)');
             }
         }
     });
     
     test('VERIFY FIX: /rw/prometheus normalized to /prometheus for export', async ({ request }) => {
-        console.log('\n✅ VERIFYING FIX: Path normalization for export');
+        console.log('\n[OK] VERIFYING FIX: Path normalization for export');
         
         const config = {
             connection: {
@@ -124,12 +124,12 @@ test.describe('Bug Fix: /rw/prometheus path for export', () => {
             
             expect(hasNormalizedPath || errorMsg.includes('401') || errorMsg.includes('Unauthorized')).toBeTruthy();
             expect(hasNoRwPath).toBeTruthy();
-            console.log('   ✅ Path normalized correctly (no /rw/prometheus in error)');
+            console.log('   [OK] Path normalized correctly (no /rw/prometheus in error)');
         }
     });
     
     test('VERIFY: /rw/prometheus still works for /query', async ({ request }) => {
-        console.log('\n✅ VERIFYING: /rw/prometheus still works for query');
+        console.log('\n[OK] VERIFYING: /rw/prometheus still works for query');
         
         const config = {
             connection: {
@@ -168,11 +168,11 @@ test.describe('Bug Fix: /rw/prometheus path for export', () => {
         expect(errorMsg).not.toContain('missing route');
         
         // Should get auth error or valid response
-        console.log('   ✅ /rw/prometheus works for query operations');
+        console.log('   [OK] /rw/prometheus works for query operations');
     });
     
     test('VERIFY: Standard /prometheus path works for export', async ({ request }) => {
-        console.log('\n✅ VERIFYING: Standard /prometheus path for export');
+        console.log('\n[OK] VERIFYING: Standard /prometheus path for export');
         
         const config = {
             connection: {
@@ -209,7 +209,7 @@ test.describe('Bug Fix: /rw/prometheus path for export', () => {
         const errorMsg = body.error || '';
         expect(errorMsg).not.toContain('missing route');
         
-        console.log('   ✅ Standard /prometheus path works correctly');
+        console.log('   [OK] Standard /prometheus path works correctly');
     });
 });
 

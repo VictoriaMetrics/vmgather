@@ -19,15 +19,18 @@ VMExporter collects VictoriaMetrics internal metrics, obfuscates sensitive data,
 
 ## Highlights
 
-- **Single binary UI** – embedded web interface with a VictoriaMetrics-style 6-step wizard.
-- **Automatic discovery** – detects vmagent, vmstorage, vminsert, vmselect, vmalert, and vmsingle instances.
-- **Deterministic obfuscation** – configurable anonymisation for IPs, jobs, tenants, and custom labels.
-- **Disk-safe staging** – streams export batches to a user-selected directory so partial files survive crashes or manual interrupts.
-- **Adjustable metric cadence** – pick 30s/1m/5m deduplication steps per export to trim payload size on slow environments.
-- **Batched exports with ETA** – splits long ranges into 30s/1m/5m windows and shows progress + forecasted completion.
-- **Wide auth surface** – Basic, Bearer, custom headers, and multi-tenant VMAuth flows.
+- **Single binary UI** – embedded web interfaces for both exporter and importer with VictoriaMetrics-style wizards.
+- **Automatic discovery** – exporter detects vmagent, vmstorage, vminsert, vmselect, vmalert, and vmsingle instances.
+- **Deterministic obfuscation** – configurable anonymisation for IPs, jobs, tenants, and custom labels, applied to samples and exports.
+- **Disk-safe staging** – exporter streams batches to a chosen directory so partial files survive crashes or manual interrupts.
+- **Adjustable metric cadence** – choose 30s/1m/5m dedup steps per export or override explicitly.
+- **Batched exports with ETA** – splits long ranges into windows and shows progress + forecasted completion.
+- **Wide auth surface** – Basic, Bearer, custom headers, multi-tenant VMAuth flows; importer forwards tenant headers.
+- **Chunked importing** – importer streams VMExporter bundles in resumable chunks with post-upload verification.
+- **Retention-aware imports** – importer trims samples outside target retention by default and displays cutoff in UTC with auto preflight on file drop.
+- **Time alignment helper** – choose “Align first sample” or “Shift to now” to slide bundles into the active retention window before upload.
 - **Cross-platform builds** – Linux, macOS, Windows (amd64/arm64/386) with identical CLI flags.
-- **First-run ready** – opens browser on launch and guides through validation, sampling, and export.
+- **First-run ready** – opens browser on launch and guides through validation, sampling, import, and export.
 
 ## Downloads
 
@@ -75,7 +78,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\vmexporter-vX.Y.Z-windows-amd64.exe
 ```
 
-The binary starts an HTTP server and opens a browser window at `http://localhost:<random-port>`.
+The binary starts an HTTP server and opens a browser window at `http://localhost:8080` (falls back to a free port if busy).
 
 ### From source
 
@@ -109,14 +112,16 @@ Both Dockerfiles live in `build/docker/` and follow distroless best practices (s
 
 ### CLI flags
 
-Both `vmexporter` and `vmimporter` support `-addr` (bind address) and `-no-browser` to skip auto-launching a browser during scripting or Docker-based runs. VMImport defaults to `0.0.0.0:8081` to avoid clashing with VMExporter.
+Both `vmexporter` and `vmimporter` support `-addr` (bind address) and `-no-browser` to skip auto-launching a browser during scripting or Docker-based runs. VMExporter's default is `localhost:8080` with automatic fallback to a free port; VMImport defaults to `0.0.0.0:8081` to avoid clashing with VMExporter. VMExporter also accepts `-output` to choose the directory for generated archives (defaults to `./exports`).
 
 ## VMImport companion
 
 VMImport is a sibling utility that consumes VMExporter bundles (`.jsonl` or `.zip`) and replays them into VictoriaMetrics via the `/api/v1/import` endpoint. It ships with the same embedded UI/HTTP server approach for parity:
 
 - Reuses the connection card from VMExporter, but adds a dedicated **Tenant / Account ID** input so multi-tenant inserts are one click away.
-- Drag-and-drop bundle picker accepts VMExporter archives and displays friendly progress/error states.
+- Drag-and-drop bundle picker triggers an automatic preflight (JSONL sanity, retention cutoff, time range, suggested shift) and displays friendly progress/error states.
+- Retention trimming is enabled by default; the UI shows the target cutoff in UTC and the shifted bundle range before upload.
+- Time alignment controls stay disabled until analysis finishes; “Shift to now” and suggested-shift buttons ensure the bundle fits the active retention.
 - Supports Basic auth, TLS verification toggles, and streaming large files directly to VictoriaMetrics.
 - Shares the local-test environment (`local-test-env/`) so you can exercise uploads against the same scenarios used for VMExporter.
 
@@ -143,12 +148,20 @@ The UI exposes the same health endpoint (`/api/health`) as VMExporter for contai
 
 ## Usage workflow
 
+Exporter
 1. Start the binary – the UI auto-detects an open port.
 2. **Connect** to VictoriaMetrics single, cluster, or managed endpoints (`vmselect`, `vmagent`, VMAuth, MaaS paths).
 3. **Validate** credentials and detect components.
 4. **Preview** metrics via sampling API calls.
 5. **Configure obfuscation** for IPs, jobs, or extra labels and review the estimated number of series that will be exported per component/job.
 6. **Export** – pick a staging directory + metric step, watch the live progress/ETA (with the current partial file path), and let the backend stream batches to disk before archiving/obfuscating into a final bundle.
+
+Importer
+1. Start `./vmimporter` (or Docker) – UI runs at `:8081` by default.
+2. **Select bundle** – drop a VMExporter `.zip`/`.jsonl` or pick via file dialog.
+3. **Endpoint & auth** – enter VictoriaMetrics import URL, tenant/account ID, and auth (Basic or custom header); toggle TLS verify as needed.
+4. **Analyze (optional)** – run preflight to see time range, series hints, retention warnings, and sample labels.
+5. **Import** – start upload; importer streams in ~512KB chunks, shows progress, and verifies data via `/api/v1/series` after completion. Resume is available if a job fails mid-flight.
 
 See [docs/user-guide.md](docs/user-guide.md) for UI screenshots and parameter descriptions.
 
@@ -157,6 +170,7 @@ See [docs/user-guide.md](docs/user-guide.md) for UI screenshots and parameter de
 - Default mappings mask private networks with `777.777.x.x` while preserving ports for debugging.
 - Job names retain component prefixes (`vmstorage-job-1`) for observability without exposing tenant names.
 - Custom labels are mapped deterministically; mappings stay in memory and are not written to the archive.
+- Obfuscation settings apply to previews and exports; obfuscated mappings are included in archive metadata for support correlation.
 - No credentials or temporary archives persist to disk after the process ends.
 
 ## Testing matrix

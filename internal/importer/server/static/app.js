@@ -5,18 +5,22 @@ const statusPanel = document.getElementById('statusPanel');
 const fileHint = document.getElementById('fileHint');
 const startButton = document.getElementById('startImportBtn');
 let connectionValid = false;
+let analysisReady = false;
 let totalBatches = 0;
 let uploadStart = 0;
 let selectedBundleBytes = 0;
 let currentJobId = null;
 let jobPollTimer = null;
 let uploadingBundle = false;
+let lastAnalysisSummary = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     toggleAuthFields();
+    toggleTenantInput();
     initializeUrlValidation();
     initializeMetricStepSelector();
     initDropZone();
+    refreshStartButton();
 });
 
 function initDropZone() {
@@ -41,6 +45,7 @@ function initDropZone() {
             dropZone.querySelector('strong').textContent = files[0].name;
             updateFileHint(files[0]);
             applyRecommendedMetricStep(false);
+            analyzeBundle();
         }
     });
 
@@ -49,6 +54,7 @@ function initDropZone() {
         dropZone.querySelector('strong').textContent = file ? file.name : 'Drop file here';
         updateFileHint(file);
         applyRecommendedMetricStep(false);
+        analyzeBundle();
     });
 }
 
@@ -57,11 +63,14 @@ function updateFileHint(file) {
     if (!file) {
         fileHint.textContent = '';
         selectedBundleBytes = 0;
+        clearAnalysisResult();
         return;
     }
     selectedBundleBytes = file.size;
     const size = formatBytes(file.size);
     fileHint.textContent = `Selected ${file.name} (${size})`;
+    clearAnalysisResult();
+    setAnalysisReady(false);
 }
 
 function resetForm() {
@@ -69,6 +78,11 @@ function resetForm() {
     document.getElementById('tenantId').value = '';
     document.getElementById('authType').value = 'none';
     toggleAuthFields();
+    const tenantToggle = document.getElementById('enableTenant');
+    if (tenantToggle) {
+        tenantToggle.checked = false;
+    }
+    toggleTenantInput();
     connectionValid = false;
     bundleInput.value = '';
     dropZone.querySelector('strong').textContent = 'Drop file here';
@@ -79,6 +93,10 @@ function resetForm() {
     fileHint.textContent = '';
     document.getElementById('vmUrlHint').textContent = 'Enter a VictoriaMetrics endpoint.';
     document.getElementById('vmUrlHint').classList.remove('success', 'error');
+    totalBatches = 0;
+    setAnalysisReady(false);
+    refreshStartButton();
+    clearResumeCTA();
 }
 
 function toggleAuthFields() {
@@ -126,6 +144,17 @@ function toggleAuthFields() {
     authFields.innerHTML = html;
 }
 
+function toggleTenantInput() {
+    const checkbox = document.getElementById('enableTenant');
+    const tenantInput = document.getElementById('tenantId');
+    if (!checkbox || !tenantInput) return;
+    const enabled = checkbox.checked;
+    tenantInput.disabled = !enabled;
+    if (!enabled) {
+        tenantInput.value = '';
+    }
+}
+
 function initializeUrlValidation() {
     const input = document.getElementById('vmUrl');
     const hint = document.getElementById('vmUrlHint');
@@ -134,11 +163,11 @@ function initializeUrlValidation() {
     const applyState = () => {
         const assessment = analyzeVmUrl(input.value);
         if (assessment.valid) {
-            hint.textContent = `✅ ${assessment.message || 'URL looks good'}`;
+            hint.textContent = `[OK] ${assessment.message || 'URL looks good'}`;
             hint.classList.remove('error');
             hint.classList.add('success');
         } else {
-            hint.textContent = `❌ ${assessment.message || 'Invalid URL'}`;
+            hint.textContent = `[FAIL] ${assessment.message || 'Invalid URL'}`;
             hint.classList.remove('success');
             hint.classList.add('error');
             connectionValid = false;
@@ -177,9 +206,11 @@ function analyzeVmUrl(rawUrl) {
 function getConnectionConfig() {
     const urlValue = document.getElementById('vmUrl').value.trim();
     const authType = document.getElementById('authType').value;
+    const tenantEnabled = document.getElementById('enableTenant')?.checked;
+    const tenantValue = document.getElementById('tenantId').value.trim();
     return {
         url: urlValue,
-        tenantId: document.getElementById('tenantId').value.trim(),
+        tenantId: tenantEnabled ? tenantValue : '',
         authType,
         username: document.getElementById('username')?.value.trim() || '',
         password: document.getElementById('password')?.value || '',
@@ -239,11 +270,13 @@ async function testConnection() {
             ? 'Connection successful (TLS verification skipped for self-signed cert)'
             : 'Connection successful! Uploads can start.';
         connectionValid = true;
+        refreshStartButton();
     } catch (err) {
         result.classList.remove('success');
         result.classList.add('error');
         result.textContent = err.message || 'Failed to reach endpoint';
         connectionValid = false;
+        refreshStartButton();
     } finally {
         label.textContent = 'Test Connection';
     }
@@ -263,6 +296,8 @@ function serializeConfig() {
         skip_tls_verify: connection.skipTls,
         metric_step_seconds: metricStep,
         batch_window_seconds: getBatchWindowSeconds(metricStep),
+        drop_old: true,
+        time_shift_ms: (Number(document.getElementById('timeShiftMinutes')?.value || 0) || 0) * 60 * 1000,
     };
 }
 
@@ -334,6 +369,275 @@ function uploadBundle(file, config) {
     };
 
     xhr.send(form);
+}
+
+function clearAnalysisResult() {
+    const analysisResult = document.getElementById('analysisResult');
+    const analysisDetails = document.getElementById('analysisDetails');
+    const rangeInfo = document.getElementById('fileRangeInfo');
+    const shiftHint = document.getElementById('shiftHint');
+    const picker = document.getElementById('targetStartPicker');
+    const shiftSummary = document.getElementById('shiftSummary');
+    const shiftNow = document.getElementById('shiftToNowBtn');
+    const retentionInfo = document.getElementById('retentionInfo');
+    lastAnalysisSummary = null;
+    if (analysisResult) {
+        analysisResult.classList.remove('error');
+        analysisResult.textContent = 'Preflight is optional but recommended: checks timestamps vs retention, validates JSONL, and estimates drops.';
+    }
+    if (analysisDetails) {
+        analysisDetails.style.display = 'none';
+        analysisDetails.innerHTML = '';
+    }
+    if (rangeInfo) {
+        rangeInfo.style.display = 'none';
+        rangeInfo.textContent = '';
+    }
+    if (shiftHint) {
+        shiftHint.textContent = '';
+    }
+    if (picker) {
+        picker.value = '';
+    }
+    if (shiftSummary) {
+        shiftSummary.textContent = '';
+    }
+    if (retentionInfo) {
+        retentionInfo.textContent = 'Fetched from target during preflight; shown in UTC.';
+    }
+    setShiftMinutes(0);
+    if (shiftNow) {
+        shiftNow.style.display = 'none';
+    }
+    setAnalysisLoader(false);
+}
+
+function renderAnalysisResult(data) {
+    const analysisResult = document.getElementById('analysisResult');
+    const analysisDetails = document.getElementById('analysisDetails');
+    const shiftBtn = document.getElementById('applySuggestedShift');
+    const rangeInfo = document.getElementById('fileRangeInfo');
+    const picker = document.getElementById('targetStartPicker');
+    const shiftHint = document.getElementById('shiftHint');
+    const shiftNow = document.getElementById('shiftToNowBtn');
+    const retentionInfo = document.getElementById('retentionInfo');
+    if (!analysisResult || !analysisDetails) {
+        return;
+    }
+    const summary = data.summary || {};
+    lastAnalysisSummary = summary;
+    const warnings = data.warnings || [];
+    const rows = [];
+    if (summary.start) {
+        rows.push(`<div><strong>Time range:</strong> ${formatRFC(summary.start)} → ${formatRFC(summary.end || summary.start)}</div>`);
+    }
+    rows.push(`<div><strong>Points:</strong> ${summary.points || 0}, skipped: ${summary.skipped_lines || 0}, dropped old: ${summary.dropped_old || 0}</div>`);
+    if (summary.examples && summary.examples.length) {
+        rows.push(`<div><strong>Example:</strong> <code>${formatSeriesExample(summary.examples[0])}</code></div>`);
+    }
+    if (warnings.length) {
+        analysisResult.classList.add('error');
+        rows.push(`<div><strong>Warnings:</strong> ${warnings.join(' ')}</div>`);
+    } else {
+        analysisResult.classList.remove('error');
+    }
+    analysisResult.textContent = warnings.length ? 'Preflight: issues detected.' : 'Preflight complete.';
+    analysisDetails.innerHTML = rows.join('');
+    analysisDetails.style.display = 'block';
+    if (retentionInfo) {
+        if (typeof data.retention_cutoff === 'number' && data.retention_cutoff > 0) {
+            const cutoffDate = new Date(data.retention_cutoff);
+            const approxWindowHours = Math.max(1, Math.round((Date.now() - data.retention_cutoff) / 3600000));
+            const days = (approxWindowHours / 24).toFixed(1);
+            retentionInfo.textContent = `Retention (from target): ~${days} days; cutoff ≈ ${cutoffDate.toISOString()} (UTC).`;
+        } else {
+            retentionInfo.textContent = 'Retention unknown (target did not return tsdb status).';
+        }
+    }
+    if (shiftBtn) {
+        const suggested = data.suggested_shift_ms || 0;
+        if (suggested > 0) {
+            shiftBtn.style.display = 'inline-flex';
+            shiftBtn.dataset.shiftMs = String(suggested);
+            shiftBtn.textContent = `Shift +${Math.round(suggested / 60000)} min`;
+        } else {
+            shiftBtn.style.display = 'none';
+            shiftBtn.removeAttribute('data-shift-ms');
+        }
+    }
+    if (rangeInfo) {
+        if (summary.start) {
+            rangeInfo.style.display = 'block';
+            rangeInfo.textContent = `Detected: ${formatRFC(summary.start)} → ${formatRFC(summary.end || summary.start)}`;
+        } else {
+            rangeInfo.style.display = 'none';
+            rangeInfo.textContent = '';
+        }
+    }
+    if (picker && summary.start) {
+        const startDate = new Date(summary.start);
+        const endDate = summary.end ? new Date(summary.end) : startDate;
+        const span = Math.max(0, endDate.getTime() - startDate.getTime());
+        const maxStart = new Date(Date.now() - span);
+        picker.value = formatDateTimeLocal(startDate);
+        picker.max = formatDateTimeLocal(maxStart);
+        picker.min = '';
+        if (shiftNow) shiftNow.style.display = 'inline-flex';
+        if (shiftHint) {
+            shiftHint.style.color = 'var(--text-muted)';
+            shiftHint.textContent = 'Adjust start to align bundle; end will not exceed now.';
+        }
+        setShiftMinutes(0);
+    }
+    updateShiftSummary();
+    setAnalysisReady(true);
+}
+
+async function analyzeBundle() {
+    const file = bundleInput.files[0];
+    const analysisResult = document.getElementById('analysisResult');
+    if (!analysisResult) return;
+    if (!file) {
+        analysisResult.textContent = 'Select a bundle file first.';
+        analysisResult.classList.add('error');
+        return;
+    }
+    analysisResult.classList.remove('error');
+    analysisResult.innerHTML = '<span class="loading-spinner"></span> Validating bundle…';
+    setAnalysisLoader(true);
+    const details = document.getElementById('analysisDetails');
+    if (details) {
+        details.style.display = 'none';
+        details.innerHTML = '';
+    }
+    lastAnalysisSummary = null;
+    setAnalysisReady(false);
+
+    const form = new FormData();
+    form.append('bundle', file);
+    form.append('config', JSON.stringify(serializeConfig()));
+
+    try {
+        analysisResult.textContent = 'Unpacking and analyzing…';
+        const resp = await fetch('/api/analyze', { method: 'POST', body: form });
+        const data = await resp.json();
+        if (!resp.ok) {
+            throw new Error(data.error || 'Preflight failed');
+        }
+        renderAnalysisResult(data);
+    } catch (err) {
+        analysisResult.classList.add('error');
+        analysisResult.textContent = err.message || 'Analysis failed';
+        lastAnalysisSummary = null;
+    } finally {
+        setAnalysisLoader(false);
+    }
+}
+
+function setShiftMinutes(minutes) {
+    const input = document.getElementById('timeShiftMinutes');
+    if (input) {
+        input.value = minutes;
+    }
+    updateShiftSummary();
+}
+
+function updateShiftSummary() {
+    const summaryEl = document.getElementById('shiftSummary');
+    if (!summaryEl || !lastAnalysisSummary || !lastAnalysisSummary.start) {
+        if (summaryEl) summaryEl.textContent = '';
+        return;
+    }
+    const shiftMin = Number(document.getElementById('timeShiftMinutes')?.value || 0);
+    const start = new Date(lastAnalysisSummary.start);
+    const end = lastAnalysisSummary.end ? new Date(lastAnalysisSummary.end) : start;
+    const shiftMs = shiftMin * 60000;
+    const shiftedStart = new Date(start.getTime() + shiftMs);
+    const shiftedEnd = new Date(end.getTime() + shiftMs);
+    summaryEl.textContent = `Shift: ${shiftMin} min → ${formatRFC(shiftedStart)} to ${formatRFC(shiftedEnd)} (UTC)`;
+}
+
+function setAnalysisReady(ready) {
+    analysisReady = ready;
+    const picker = document.getElementById('targetStartPicker');
+    const shiftNow = document.getElementById('shiftToNowBtn');
+    const shiftBtn = document.getElementById('applySuggestedShift');
+    if (picker) picker.disabled = !ready;
+    if (shiftNow) shiftNow.disabled = !ready;
+    if (shiftBtn) shiftBtn.disabled = !ready;
+    refreshStartButton();
+}
+
+function refreshStartButton() {
+    if (!startButton) return;
+    const hasFile = bundleInput && bundleInput.files && bundleInput.files.length > 0;
+    startButton.disabled = !(connectionValid && analysisReady && hasFile);
+}
+
+function setAnalysisLoader(show) {
+    const loader = document.getElementById('analysisLoader');
+    if (!loader) return;
+    loader.style.display = show ? 'block' : 'none';
+}
+
+function applySuggestedShift() {
+    const btn = document.getElementById('applySuggestedShift');
+    if (!btn) return;
+    const shiftMs = Number(btn.dataset.shiftMs || 0);
+    const shiftMin = Math.round(shiftMs / 60000);
+    setShiftMinutes(shiftMin);
+    btn.style.display = 'none';
+}
+
+function handleTargetStartChange() {
+    const picker = document.getElementById('targetStartPicker');
+    const hint = document.getElementById('shiftHint');
+    const shiftBtn = document.getElementById('applySuggestedShift');
+    if (!picker || !lastAnalysisSummary || !lastAnalysisSummary.start) return;
+    const start = new Date(lastAnalysisSummary.start);
+    const end = lastAnalysisSummary.end ? new Date(lastAnalysisSummary.end) : start;
+    const spanMs = Math.max(0, end.getTime() - start.getTime());
+    const target = picker.value ? new Date(picker.value) : null;
+    if (!target || isNaN(target.getTime())) return;
+    const maxStart = new Date(Date.now() - spanMs);
+    if (target.getTime() > maxStart.getTime()) {
+        picker.value = formatDateTimeLocal(maxStart);
+        if (hint) {
+            hint.style.color = 'var(--color-error)';
+            hint.textContent = 'Adjusted: end cannot be in the future.';
+        }
+    }
+    const startMs = start.getTime();
+    const shiftMs = new Date(picker.value).getTime() - startMs;
+    setShiftMinutes(Math.round(shiftMs / 60000));
+    if (hint) {
+        hint.style.color = 'var(--text-muted)';
+        hint.textContent = `Shift set to ${Math.round(shiftMs / 60000)} min to align start.`;
+    }
+    if (shiftBtn) {
+        shiftBtn.style.display = 'none';
+    }
+}
+
+function shiftBundleToNow() {
+    if (!lastAnalysisSummary || !lastAnalysisSummary.start) return;
+    const start = new Date(lastAnalysisSummary.start);
+    const end = lastAnalysisSummary.end ? new Date(lastAnalysisSummary.end) : start;
+    const spanMs = Math.max(0, end.getTime() - start.getTime());
+    const targetStartMs = Date.now() - spanMs;
+    const picker = document.getElementById('targetStartPicker');
+    if (picker) {
+        picker.value = formatDateTimeLocal(new Date(targetStartMs));
+    }
+    const shiftMs = targetStartMs - start.getTime();
+    setShiftMinutes(Math.round(shiftMs / 60000));
+    const hint = document.getElementById('shiftHint');
+    if (hint) {
+        hint.style.color = 'var(--text-muted)';
+        hint.textContent = 'Shifted so the last sample lands at now.';
+    }
+    const shiftBtn = document.getElementById('applySuggestedShift');
+    if (shiftBtn) shiftBtn.style.display = 'none';
 }
 
 function renderImportResult(payload) {
@@ -430,6 +734,13 @@ function formatLabelList(labels = {}) {
     return `(${readable}${keys.length > 4 ? ', …' : ''})`;
 }
 
+function formatDateTimeLocal(date) {
+    if (!date) return '';
+    const tzOffset = date.getTimezoneOffset() * 60000;
+    const localISO = new Date(date.getTime() - tzOffset).toISOString().slice(0, 16);
+    return localISO;
+}
+
 function formatRFC(value) {
     if (!value) return 'n/a';
     try {
@@ -469,6 +780,10 @@ function formatBytes(bytes) {
 
 // Metric step reuse from VMExporter
 function initializeMetricStepSelector() {
+    const select = document.getElementById('metricStep');
+    if (select) {
+        select.addEventListener('change', () => applyRecommendedMetricStep(false));
+    }
     applyRecommendedMetricStep(true);
 }
 
@@ -490,8 +805,15 @@ function applyRecommendedMetricStep(forceApply) {
         }
     }
 
+    const selectedSeconds = Number(select.value || 0);
     if (hint) {
-        hint.textContent = `Current bundle suggests ${formatStepLabel(recommended)} batches.`;
+        if (selectedSeconds > 0) {
+            const recommendation = formatStepLabel(recommended);
+            const current = formatStepLabel(selectedSeconds);
+            hint.textContent = `Current step: ${current}. Recommended: ${recommendation} based on bundle size.`;
+        } else {
+            hint.textContent = `Current bundle suggests ${formatStepLabel(recommended)} batches.`;
+        }
     }
 
     if (forceApply && (!select.value || select.value === 'auto')) {
@@ -592,6 +914,8 @@ function updateJobProgressUI(job) {
     if (metricsEl) {
         metricsEl.textContent = job.remote_path || 'Streaming chunks…';
     }
+
+    renderResumeCTA(job);
 }
 
 function formatStage(stage) {
@@ -621,6 +945,44 @@ function unlockStartButton() {
     if (!startButton) return;
     startButton.disabled = false;
     startButton.textContent = 'Start Import';
+}
+
+function renderResumeCTA(job) {
+    if (!statusPanel) return;
+    clearResumeCTA();
+    if (job && job.state === 'failed' && job.resume_ready && job.id) {
+        const btn = document.createElement('button');
+        btn.textContent = 'Resume Import';
+        btn.className = 'btn-primary';
+        btn.style.marginLeft = '10px';
+        btn.onclick = () => resumeImport(job.id);
+        btn.id = 'resumeImportBtn';
+        statusPanel.appendChild(btn);
+    }
+}
+
+function clearResumeCTA() {
+    const existing = document.getElementById('resumeImportBtn');
+    if (existing && existing.parentNode) {
+        existing.parentNode.removeChild(existing);
+    }
+}
+
+async function resumeImport(jobId) {
+    if (!jobId) return;
+    try {
+        showStatus('Resuming import…', false, false);
+        const resp = await fetch(`/api/import/resume?id=${encodeURIComponent(jobId)}`, { method: 'POST' });
+        if (!resp.ok) {
+            const body = await resp.text();
+            showStatus(body || 'Resume failed', true);
+            return;
+        }
+        startJobPolling(jobId);
+        showImportProgressPanel();
+    } catch (err) {
+        showStatus(`Resume failed: ${err.message}`, true);
+    }
 }
 
 function getSelectedMetricStepSeconds() {
