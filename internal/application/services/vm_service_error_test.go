@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/VictoriaMetrics/support/internal/domain"
+	"github.com/VictoriaMetrics/VMGather/internal/domain"
 )
 
 // TestVMService_DiscoverComponents_NetworkError tests discovery with network errors

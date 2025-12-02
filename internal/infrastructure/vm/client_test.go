@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/VictoriaMetrics/support/internal/domain"
+	"github.com/VictoriaMetrics/VMGather/internal/domain"
 )
 
 // TestNewClient tests client creation

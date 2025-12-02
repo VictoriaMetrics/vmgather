@@ -34,7 +34,7 @@ VMGather collects VictoriaMetrics internal metrics, obfuscates sensitive data, a
 
 ## Downloads
 
-Grab the latest binaries from the [Releases page](https://github.com/VictoriaMetrics/support/releases) or reuse them from CI artifacts.
+Grab the latest binaries from the [Releases page](https://github.com/VictoriaMetrics/VMGather/releases) or reuse them from CI artifacts.
 
 | Platform | File name pattern | Notes |
 | --- | --- | --- |
@@ -85,8 +85,8 @@ The binary starts an HTTP server and opens a browser window at `http://localhost
 Requirements: Go 1.21+, Make, Git.
 
 ```bash
-git clone https://github.com/VictoriaMetrics/support.git
-cd support
+git clone https://github.com/VictoriaMetrics/VMGather.git
+cd VMGather
 make build
 ./vmgather
 ```
@@ -210,4 +210,4 @@ See the project's [SECURITY.md](SECURITY.md) for reporting instructions.
 ## License & support
 
 - License: [Apache 2.0](LICENSE)
-- Issues: https://github.com/VictoriaMetrics/support/issues
+- Issues: https://github.com/VictoriaMetrics/VMGather/issues

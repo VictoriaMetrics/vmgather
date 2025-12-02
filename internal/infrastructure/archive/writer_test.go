@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/VictoriaMetrics/support/internal/domain"
+	"github.com/VictoriaMetrics/VMGather/internal/domain"
 )
 
 // TestNewWriter tests writer creation

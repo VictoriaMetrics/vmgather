@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/VictoriaMetrics/support/internal/server"
+	"github.com/VictoriaMetrics/VMGather/internal/server"
 )
 
 const (

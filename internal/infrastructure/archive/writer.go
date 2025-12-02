@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/VictoriaMetrics/support/internal/domain"
+	"github.com/VictoriaMetrics/VMGather/internal/domain"
 )
 
 // Writer handles archive creation for export data

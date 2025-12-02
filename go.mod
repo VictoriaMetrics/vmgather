@@ -1,4 +1,4 @@
-module github.com/VictoriaMetrics/support
+module github.com/VictoriaMetrics/VMGather
 
 go 1.21
 

@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/VictoriaMetrics/support/internal/application/services"
-	"github.com/VictoriaMetrics/support/internal/domain"
-	"github.com/VictoriaMetrics/support/internal/infrastructure/obfuscation"
-	"github.com/VictoriaMetrics/support/internal/infrastructure/vm"
+	"github.com/VictoriaMetrics/VMGather/internal/application/services"
+	"github.com/VictoriaMetrics/VMGather/internal/domain"
+	"github.com/VictoriaMetrics/VMGather/internal/infrastructure/obfuscation"
+	"github.com/VictoriaMetrics/VMGather/internal/infrastructure/vm"
 )
 
 //go:embed static/*

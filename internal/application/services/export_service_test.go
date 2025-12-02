@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/VictoriaMetrics/support/internal/domain"
-	"github.com/VictoriaMetrics/support/internal/infrastructure/vm"
+	"github.com/VictoriaMetrics/VMGather/internal/domain"
+	"github.com/VictoriaMetrics/VMGather/internal/infrastructure/vm"
 )
 
 // TestNewExportService tests service creation

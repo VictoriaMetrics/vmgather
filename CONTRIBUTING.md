@@ -4,7 +4,7 @@ Thanks for helping improve the VictoriaMetrics toolchain! The guidelines below m
 
 ## Report bugs and feature requests
 
-- Use [GitHub Issues](https://github.com/VictoriaMetrics/support/issues) for all defects, regressions, and feature proposals.
+- Use [GitHub Issues](https://github.com/VictoriaMetrics/VMGather/issues) for all defects, regressions, and feature proposals.
 - Please attach:
   - VMGather version (binary name or git commit),
   - OS / architecture,
@@ -26,8 +26,8 @@ Prerequisites:
 Bootstrap:
 
 ```bash
-git clone https://github.com/VictoriaMetrics/support.git
-cd support
+git clone https://github.com/VictoriaMetrics/VMGather.git
+cd VMGather
 make deps        # optional helper to download UI deps
 make build
 ```

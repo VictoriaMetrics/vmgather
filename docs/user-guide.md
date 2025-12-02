@@ -13,7 +13,7 @@ Official walkthrough for the VictoriaMetrics metrics export wizard.
 
 ## Before you start
 
-- Download the latest binary from the [Releases page](https://github.com/VictoriaMetrics/support/releases).
+- Download the latest binary from the [Releases page](https://github.com/VictoriaMetrics/VMGather/releases).
 - Verify the SHA256 checksum using the `checksums.txt` file.
 - Ensure you have reachability to your VictoriaMetrics endpoints (single, cluster, VMAuth, or managed).
 - Have credentials ready for tenants that require authentication.
@@ -88,7 +88,7 @@ Downloads start automatically in the browser; you can also retrieve the archive 
 ## Support
 
 - Documentation updates: [docs/](../docs/)
-- Issues: https://github.com/VictoriaMetrics/support/issues
+- Issues: https://github.com/VictoriaMetrics/VMGather/issues
 - Email: info@victoriametrics.com
 - Slack: https://slack.victoriametrics.com/
 

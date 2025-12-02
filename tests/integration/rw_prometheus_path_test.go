@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/VictoriaMetrics/support/internal/application/services"
-	"github.com/VictoriaMetrics/support/internal/domain"
+	"github.com/VictoriaMetrics/VMGather/internal/application/services"
+	"github.com/VictoriaMetrics/VMGather/internal/domain"
 )
 
 // TestRealScenario_RwPrometheusPath tests the EXACT scenario from customer bug report

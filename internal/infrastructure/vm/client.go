@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/VictoriaMetrics/support/internal/domain"
+	"github.com/VictoriaMetrics/VMGather/internal/domain"
 )
 
 // Client is a VictoriaMetrics API client

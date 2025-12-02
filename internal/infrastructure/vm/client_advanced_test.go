@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/VictoriaMetrics/support/internal/domain"
+	"github.com/VictoriaMetrics/VMGather/internal/domain"
 )
 
 // TestClient_QueryRange tests range query functionality
