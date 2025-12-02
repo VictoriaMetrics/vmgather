@@ -1,4 +1,4 @@
-// VMExporter Frontend - Enhanced UX/UI
+// VMGather Frontend - Enhanced UX/UI
 // State
 let currentStep = 1;
 const totalSteps = 6;

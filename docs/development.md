@@ -1,6 +1,6 @@
 # Development guide
 
-Step-by-step instructions for hacking on VMExporter like any other VictoriaMetrics project.
+Step-by-step instructions for hacking on VMGather like any other VictoriaMetrics project.
 
 ## Prerequisites
 
@@ -14,8 +14,8 @@ Step-by-step instructions for hacking on VMExporter like any other VictoriaMetri
 ```bash
 git clone https://github.com/VictoriaMetrics/support.git
 cd support
-make build           # compiles ./vmexporter and ./vmimporter
-./vmexporter         # launches the export wizard
+make build           # compiles ./vmgather and ./vmimporter
+./vmgather         # launches the export wizard
 ./vmimporter         # launches the bundle uploader
 ```
 
@@ -24,7 +24,7 @@ make build           # compiles ./vmexporter and ./vmimporter
 ## Repository layout
 
 ```
-cmd/vmexporter/           - Export wizard entry point
+cmd/vmgather/           - Export wizard entry point
 cmd/vmimporter/           - Bundle uploader entry point
 internal/server/          - Exporter HTTP server + embedded UI
 internal/importer/server/ - Importer HTTP server + embedded UI
@@ -39,7 +39,7 @@ dist/                     - build outputs (ignored)
 
 ## Typical workflow
 
-1. Implement feature/fix inside `internal/...` or `cmd/vmexporter/`.
+1. Implement feature/fix inside `internal/...` or `cmd/vmgather/`.
 2. Update/extend unit tests near the code.
 3. Run checks:
 
@@ -79,7 +79,7 @@ make test-e2e
 ## Release builds
 
 ```bash
-make build             # local platform (vmexporter + vmimporter)
+make build             # local platform (vmgather + vmimporter)
 make build-all         # linux/macos/windows matrices + checksums for both binaries
 make docker-build      # buildx multi-arch images (linux/amd64 + linux/arm64)
 ```
@@ -88,6 +88,6 @@ Artifacts are placed in `dist/` and uploaded to GitHub releases. Docker images l
 
 ## Debug tips
 
-- `VMEXPORTER_LOG=debug ./vmexporter` enables verbose logging (see environment variables in code).
+- `VMEXPORTER_LOG=debug ./vmgather` enables verbose logging (see environment variables in code).
 - Use the docker scenarios in `local-test-env` to reproduce customer issues offline.
 - Browser dev tools help inspect API payloads when reproducing UI bugs.

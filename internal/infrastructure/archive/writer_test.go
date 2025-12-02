@@ -30,7 +30,7 @@ func TestNewWriter(t *testing.T) {
 // TestWriter_CreateArchive_Success tests successful archive creation
 func TestWriter_CreateArchive_Success(t *testing.T) {
 	// Create temp directory
-	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestWriter_CreateArchive_Success(t *testing.T) {
 		Jobs:              []string{"vmstorage-prod", "vmselect-prod"},
 		MetricsCount:      2,
 		Obfuscated:        false,
-		VMExporterVersion: "1.0.0",
+		VMGatherVersion: "1.0.0",
 	}
 
 	// Create archive
@@ -87,7 +87,7 @@ func TestWriter_CreateArchive_Success(t *testing.T) {
 
 // TestWriter_CreateArchive_ContainsRequiredFiles tests archive contents
 func TestWriter_CreateArchive_ContainsRequiredFiles(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestWriter_CreateArchive_ContainsRequiredFiles(t *testing.T) {
 		Components:        []string{"vmstorage"},
 		Jobs:              []string{"vmstorage-prod"},
 		MetricsCount:      1,
-		VMExporterVersion: "1.0.0",
+		VMGatherVersion: "1.0.0",
 	}
 
 	archivePath, _, err := writer.CreateArchive("test", strings.NewReader(metricsData), metadata)
@@ -135,7 +135,7 @@ func TestWriter_CreateArchive_ContainsRequiredFiles(t *testing.T) {
 
 // TestWriter_CreateArchive_MetricsContent tests metrics file content
 func TestWriter_CreateArchive_MetricsContent(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestWriter_CreateArchive_MetricsContent(t *testing.T) {
 		Components:        []string{"vmstorage"},
 		Jobs:              []string{"vmstorage-prod"},
 		MetricsCount:      1,
-		VMExporterVersion: "1.0.0",
+		VMGatherVersion: "1.0.0",
 	}
 
 	archivePath, _, err := writer.CreateArchive("test", strings.NewReader(expectedMetrics), metadata)
@@ -198,7 +198,7 @@ func TestWriter_CreateArchive_MetricsContent(t *testing.T) {
 
 // TestWriter_CreateArchive_MetadataContent tests metadata file content
 func TestWriter_CreateArchive_MetadataContent(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestWriter_CreateArchive_MetadataContent(t *testing.T) {
 		Obfuscated:        true,
 		InstanceMap:       map[string]string{"10.0.1.5:8482": "192.0.2.1:8482"},
 		JobMap:            map[string]string{"vmstorage-prod": "vm_component_vmstorage_1"},
-		VMExporterVersion: "1.0.0",
+		VMGatherVersion: "1.0.0",
 	}
 
 	archivePath, _, err := writer.CreateArchive("test", strings.NewReader(metricsData), metadata)
@@ -284,7 +284,7 @@ func TestWriter_CreateArchive_MetadataContent(t *testing.T) {
 // TestWriter_CreateArchive_MappingExcluded tests that obfuscation maps are excluded from archive
 // This test verifies the fix for issue #10
 func TestWriter_CreateArchive_MappingExcluded(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestWriter_CreateArchive_MappingExcluded(t *testing.T) {
 		Obfuscated:        true,
 		InstanceMap:       map[string]string{"10.0.1.5:8482": "777.777.1.1:8482", "10.0.1.6:8482": "777.777.1.2:8482"},
 		JobMap:            map[string]string{"vmstorage-prod": "vm_component_vmstorage_1", "vmselect-prod": "vm_component_vmselect_1"},
-		VMExporterVersion: "1.0.0",
+		VMGatherVersion: "1.0.0",
 	}
 
 	archivePath, _, err := writer.CreateArchive("test", strings.NewReader(metricsData), metadata)
@@ -349,7 +349,7 @@ func TestWriter_CreateArchive_MappingExcluded(t *testing.T) {
 		Obfuscated        bool              `json:"obfuscated"`
 		InstanceMap       map[string]string `json:"instance_map,omitempty"`
 		JobMap            map[string]string `json:"job_map,omitempty"`
-		VMExporterVersion string            `json:"vmexporter_version"`
+		VMGatherVersion string            `json:"vmgather_version"`
 	}
 
 	if err := json.NewDecoder(reader).Decode(&parsedMetadata); err != nil {
@@ -381,7 +381,7 @@ func TestWriter_CreateArchive_MappingExcluded(t *testing.T) {
 
 // TestWriter_CreateArchive_ReadmeContent tests README generation
 func TestWriter_CreateArchive_ReadmeContent(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -398,7 +398,7 @@ func TestWriter_CreateArchive_ReadmeContent(t *testing.T) {
 		Jobs:              []string{"vmstorage-prod"},
 		MetricsCount:      150,
 		Obfuscated:        true,
-		VMExporterVersion: "1.0.0",
+		VMGatherVersion: "1.0.0",
 	}
 
 	archivePath, _, err := writer.CreateArchive("test", strings.NewReader(metricsData), metadata)
@@ -464,7 +464,7 @@ func TestWriter_CreateArchive_ReadmeContent(t *testing.T) {
 
 // TestWriter_CalculateSHA256 tests SHA256 calculation
 func TestWriter_CalculateSHA256(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -503,7 +503,7 @@ func TestWriter_CalculateSHA256(t *testing.T) {
 
 // TestWriter_GetArchiveSize tests size retrieval
 func TestWriter_GetArchiveSize(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -519,7 +519,7 @@ func TestWriter_GetArchiveSize(t *testing.T) {
 		Components:        []string{"vmstorage"},
 		Jobs:              []string{"vmstorage-prod"},
 		MetricsCount:      1,
-		VMExporterVersion: "1.0.0",
+		VMGatherVersion: "1.0.0",
 	}
 
 	archivePath, _, err := writer.CreateArchive("test", strings.NewReader(metricsData), metadata)
@@ -546,7 +546,7 @@ func TestWriter_GetArchiveSize(t *testing.T) {
 
 // TestWriter_CreateArchive_CreatesOutputDir tests directory creation
 func TestWriter_CreateArchive_CreatesOutputDir(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -564,7 +564,7 @@ func TestWriter_CreateArchive_CreatesOutputDir(t *testing.T) {
 		Components:        []string{"vmstorage"},
 		Jobs:              []string{"vmstorage-prod"},
 		MetricsCount:      1,
-		VMExporterVersion: "1.0.0",
+		VMGatherVersion: "1.0.0",
 	}
 
 	_, _, err = writer.CreateArchive("test", strings.NewReader(metricsData), metadata)
@@ -580,7 +580,7 @@ func TestWriter_CreateArchive_CreatesOutputDir(t *testing.T) {
 
 // TestWriter_CreateArchive_EmptyMetrics tests handling of empty metrics
 func TestWriter_CreateArchive_EmptyMetrics(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -597,7 +597,7 @@ func TestWriter_CreateArchive_EmptyMetrics(t *testing.T) {
 		Components:        []string{"vmstorage"},
 		Jobs:              []string{"vmstorage-prod"},
 		MetricsCount:      0,
-		VMExporterVersion: "1.0.0",
+		VMGatherVersion: "1.0.0",
 	}
 
 	archivePath, _, err := writer.CreateArchive("test", metricsData, metadata)

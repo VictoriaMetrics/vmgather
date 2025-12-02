@@ -15,7 +15,7 @@ import (
 
 // TestWriter_CrossPlatformPaths tests path handling across different OS
 func TestWriter_CrossPlatformPaths(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-crossplatform-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-crossplatform-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestWriter_CrossPlatformPaths(t *testing.T) {
 			metadata := ArchiveMetadata{
 				ExportID:          tt.exportID,
 				ExportDate:        time.Now(),
-				VMExporterVersion: "1.0.0-test",
+				VMGatherVersion: "1.0.0-test",
 			}
 
 			archivePath, _, err := writer.CreateArchive(tt.exportID, metricsData, metadata)
@@ -101,7 +101,7 @@ func TestWriter_CrossPlatformPaths(t *testing.T) {
 
 // TestWriter_FileCollisions tests handling of duplicate export IDs
 func TestWriter_FileCollisions(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-collisions-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-collisions-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestWriter_FileCollisions(t *testing.T) {
 	metadata := ArchiveMetadata{
 		ExportID:          exportID,
 		ExportDate:        time.Now(),
-		VMExporterVersion: "1.0.0-test",
+		VMGatherVersion: "1.0.0-test",
 	}
 
 	// Create first archive
@@ -157,7 +157,7 @@ func TestWriter_LargeArchive(t *testing.T) {
 		t.Skip("skipping large archive test in short mode")
 	}
 
-	tmpDir, err := os.MkdirTemp("", "vmexporter-large-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-large-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestWriter_LargeArchive(t *testing.T) {
 	metadata := ArchiveMetadata{
 		ExportID:          "export-large",
 		ExportDate:        time.Now(),
-		VMExporterVersion: "1.0.0-test",
+		VMGatherVersion: "1.0.0-test",
 		MetricsCount:      100000,
 	}
 
@@ -225,7 +225,7 @@ func TestWriter_ConcurrentArchiveCreation(t *testing.T) {
 		t.Skip("skipping concurrent test in short mode")
 	}
 
-	tmpDir, err := os.MkdirTemp("", "vmexporter-concurrent-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-concurrent-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestWriter_ConcurrentArchiveCreation(t *testing.T) {
 			metadata := ArchiveMetadata{
 				ExportID:          exportID,
 				ExportDate:        time.Now(),
-				VMExporterVersion: "1.0.0-test",
+				VMGatherVersion: "1.0.0-test",
 			}
 
 			archivePath, _, err := writer.CreateArchive(exportID, metricsData, metadata)
@@ -293,7 +293,7 @@ func TestWriter_ConcurrentArchiveCreation(t *testing.T) {
 
 // TestWriter_EmptyMetricsStream tests handling of empty metrics
 func TestWriter_EmptyMetricsStream(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-empty-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-empty-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestWriter_EmptyMetricsStream(t *testing.T) {
 	metadata := ArchiveMetadata{
 		ExportID:          "export-empty",
 		ExportDate:        time.Now(),
-		VMExporterVersion: "1.0.0-test",
+		VMGatherVersion: "1.0.0-test",
 		MetricsCount:      0,
 	}
 
@@ -336,7 +336,7 @@ func TestWriter_EmptyMetricsStream(t *testing.T) {
 
 // TestWriter_SpecialCharactersInMetadata tests metadata with special characters
 func TestWriter_SpecialCharactersInMetadata(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-special-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-special-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -349,7 +349,7 @@ func TestWriter_SpecialCharactersInMetadata(t *testing.T) {
 	metadata := ArchiveMetadata{
 		ExportID:          "export-special",
 		ExportDate:        time.Now(),
-		VMExporterVersion: "1.0.0-test",
+		VMGatherVersion: "1.0.0-test",
 		Components:        []string{"vmstorage", "vmselect", "vm-insert"}, // dash in component name
 		Jobs:              []string{"job/with/slashes", "job:with:colons"},
 	}
@@ -448,7 +448,7 @@ func TestWriter_InvalidOutputDirectory(t *testing.T) {
 			metadata := ArchiveMetadata{
 				ExportID:          "export-test",
 				ExportDate:        time.Now(),
-				VMExporterVersion: "1.0.0-test",
+				VMGatherVersion: "1.0.0-test",
 			}
 
 			_, _, err := writer.CreateArchive("export-test", metricsData, metadata)
@@ -470,7 +470,7 @@ func TestWriter_InvalidOutputDirectory(t *testing.T) {
 
 // TestWriter_ArchiveNaming tests archive filename generation
 func TestWriter_ArchiveNaming(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-naming-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-naming-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -483,7 +483,7 @@ func TestWriter_ArchiveNaming(t *testing.T) {
 	metadata := ArchiveMetadata{
 		ExportID:          "export-123",
 		ExportDate:        time.Now(),
-		VMExporterVersion: "1.0.0-test",
+		VMGatherVersion: "1.0.0-test",
 	}
 
 	archivePath, _, err := writer.CreateArchive("export-123", metricsData, metadata)

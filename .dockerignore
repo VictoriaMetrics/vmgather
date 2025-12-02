@@ -5,7 +5,7 @@ dist/
 exports/
 local-development/
 local-test-env/
-vmexporter
+vmgather
 vmimporter
 coverage.out
 *.partial.jsonl

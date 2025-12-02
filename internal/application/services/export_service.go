@@ -376,7 +376,7 @@ func (s *exportServiceImpl) buildArchiveMetadata(
 		Jobs:              uniqueStrings(config.Jobs),
 		MetricsCount:      metricsCount,
 		Obfuscated:        config.Obfuscation.Enabled,
-		VMExporterVersion: s.vmExporterVersion,
+		VMGatherVersion: s.vmExporterVersion,
 	}
 
 	// Add obfuscation maps if present

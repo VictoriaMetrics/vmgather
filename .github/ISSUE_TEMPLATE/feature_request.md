@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Suggest a feature for VMExporter
+about: Suggest a feature for VMGather
 labels: enhancement
 ---
 

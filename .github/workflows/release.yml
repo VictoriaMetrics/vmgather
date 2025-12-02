@@ -47,11 +47,11 @@ jobs:
           # Lowercase repository owner
           OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           
-          # Tag and push vmexporter
-          docker tag vmexporter:$VERSION ghcr.io/$OWNER/vmexporter:$VERSION
-          docker tag vmexporter:$VERSION ghcr.io/$OWNER/vmexporter:latest
-          docker push ghcr.io/$OWNER/vmexporter:$VERSION
-          docker push ghcr.io/$OWNER/vmexporter:latest
+          # Tag and push vmgather
+          docker tag vmgather:$VERSION ghcr.io/$OWNER/vmgather:$VERSION
+          docker tag vmgather:$VERSION ghcr.io/$OWNER/vmgather:latest
+          docker push ghcr.io/$OWNER/vmgather:$VERSION
+          docker push ghcr.io/$OWNER/vmgather:latest
           
           # Tag and push vmimporter
           docker tag vmimporter:$VERSION ghcr.io/$OWNER/vmimporter:$VERSION
@@ -63,7 +63,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            dist/vmexporter-*
+            dist/vmgather-*
             dist/vmimporter-*
             dist/checksums.txt
         env:

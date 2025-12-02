@@ -1,8 +1,8 @@
-// VMExporter Frontend - Enhanced UX/UI
+// VMGather Frontend - Enhanced UX/UI
 // State
 let currentStep = 1;
 const totalSteps = 6;
-let DEFAULT_STAGING_DIR = '/tmp/vmexporter';
+let DEFAULT_STAGING_DIR = '/tmp/vmgather';
 let connectionValid = false;
 let discoveredComponents = [];
 let sampleMetrics = [];
@@ -133,7 +133,7 @@ function initializeDateTimePickers() {
 
 function markHelpAutoOpenFlag(value) {
     try {
-        localStorage.setItem('vmexporter_help_auto_open', value ? '1' : '0');
+        localStorage.setItem('vmgather_help_auto_open', value ? '1' : '0');
     } catch (e) {
         console.warn('Failed to set auto open flag', e);
     }
@@ -141,7 +141,7 @@ function markHelpAutoOpenFlag(value) {
 
 function shouldAutoOpenHelp() {
     try {
-        return localStorage.getItem('vmexporter_help_auto_open') === '1';
+        return localStorage.getItem('vmgather_help_auto_open') === '1';
     } catch {
         return false;
     }
@@ -1027,7 +1027,7 @@ function initializeStagingDirInput() {
         return;
     }
     input.placeholder = DEFAULT_STAGING_DIR;
-    const saved = localStorage.getItem('vmexporter_staging_dir');
+    const saved = localStorage.getItem('vmgather_staging_dir');
     if (saved) {
         input.value = saved;
         directoryPickerPath = saved;
@@ -1130,7 +1130,7 @@ function setStagingDirValue(value) {
     }
     input.value = value;
     directoryPickerPath = value;
-    localStorage.setItem('vmexporter_staging_dir', value);
+    localStorage.setItem('vmgather_staging_dir', value);
     validateStagingDir(true);
 }
 
@@ -1263,7 +1263,7 @@ function validateStagingDir(immediate = false, options = {}) {
         return;
     }
     const value = (input.value || '').trim();
-    const isE2ETarget = /(?:^|[\\/])vmexporter-e2e$/.test(value);
+    const isE2ETarget = /(?:^|[\\/])vmgather-e2e$/.test(value);
     const ensure = options.ensure === true || value === DEFAULT_STAGING_DIR || isE2ETarget;
     if (!value) {
         hint.textContent = 'Enter directory path';
@@ -1308,7 +1308,7 @@ function validateStagingDir(immediate = false, options = {}) {
                 updateCreateButton(false);
                 if (input.value !== normalized) {
                     input.value = normalized;
-                    localStorage.setItem('vmexporter_staging_dir', normalized);
+                    localStorage.setItem('vmgather_staging_dir', normalized);
                 }
                 userEditedStaging = false;
             } else {
@@ -1322,7 +1322,7 @@ function validateStagingDir(immediate = false, options = {}) {
                         updateCreateButton(false);
                         if (input.value !== normalized) {
                             input.value = normalized;
-                            localStorage.setItem('vmexporter_staging_dir', normalized);
+                            localStorage.setItem('vmgather_staging_dir', normalized);
                         }
                         userEditedStaging = false;
                     } else {

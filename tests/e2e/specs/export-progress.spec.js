@@ -3,8 +3,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const STAGING_DIR = path.join(os.tmpdir(), 'vmexporter-e2e');
-const UNWRITABLE_DIR = path.join(os.tmpdir(), 'vmexporter-readonly');
+const STAGING_DIR = path.join(os.tmpdir(), 'vmgather-e2e');
+const UNWRITABLE_DIR = path.join(os.tmpdir(), 'vmgather-readonly');
 const CREATE_TARGET_DIR = path.join(STAGING_DIR, 'nested');
 
 test.beforeAll(() => {
