@@ -20,7 +20,7 @@ func TestExportService_ExecuteExport_Integration(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	tmpDir, err := os.MkdirTemp("", "vmexporter-export-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-export-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestExportService_ExecuteExport_Integration(t *testing.T) {
 
 // TestExportService_ExecuteExport_Cancellation tests context cancellation
 func TestExportService_ExecuteExport_Cancellation(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-export-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-export-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestExportService_ConcurrentExports(t *testing.T) {
 		t.Skip("skipping concurrent test in short mode")
 	}
 
-	tmpDir, err := os.MkdirTemp("", "vmexporter-concurrent-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-concurrent-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}

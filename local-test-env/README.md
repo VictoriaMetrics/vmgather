@@ -1,4 +1,4 @@
-# VMExporter local test environment
+# VMGather local test environment
 
 Docker Compose stack that mirrors common VictoriaMetrics deployments for integration tests, Playwright suites, and manual verification.
 
@@ -8,7 +8,7 @@ Docker Compose stack that mirrors common VictoriaMetrics deployments for integra
 2. [Quick start](#quick-start)
 3. [Scenarios](#scenarios)
 4. [Configuration files](#configuration-files)
-5. [Using with VMExporter](#using-with-vmexporter)
+5. [Using with VMGather](#using-with-vmgather)
 6. [Troubleshooting](#troubleshooting)
 7. [Cleanup](#cleanup)
 
@@ -90,10 +90,10 @@ curl -u tenant2022-modern:password \
 
 Adjust ports or credentials there if they conflict with local services.
 
-## Using with VMExporter
+## Using with VMGather
 
 1. Start the stack and wait ~30 seconds.
-2. From repo root run `./vmexporter`.
+2. From repo root run `./vmgather`.
 3. In the wizard, try:
    - `http://localhost:8428` (no auth).
    - `http://localhost:8427` with Basic Auth.

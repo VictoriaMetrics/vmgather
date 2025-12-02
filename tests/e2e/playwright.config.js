@@ -2,7 +2,7 @@
 const { defineConfig, devices } = require('@playwright/test');
 
 /**
- * VMExporter E2E Test Configuration
+ * VMGather E2E Test Configuration
  * @see https://playwright.dev/docs/test-configuration
  */
 module.exports = defineConfig({
@@ -33,7 +33,7 @@ module.exports = defineConfig({
 
   // Start local dev server before tests
   webServer: {
-    command: '../../vmexporter -no-browser',
+    command: '../../vmgather -no-browser',
     url: 'http://localhost:8080',
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,

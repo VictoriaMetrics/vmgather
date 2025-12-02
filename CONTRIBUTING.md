@@ -1,4 +1,4 @@
-# Contributing to VMExporter
+# Contributing to VMGather
 
 Thanks for helping improve the VictoriaMetrics toolchain! The guidelines below mirror the workflow we use across other VictoriaMetrics repositories.
 
@@ -6,7 +6,7 @@ Thanks for helping improve the VictoriaMetrics toolchain! The guidelines below m
 
 - Use [GitHub Issues](https://github.com/VictoriaMetrics/support/issues) for all defects, regressions, and feature proposals.
 - Please attach:
-  - VMExporter version (binary name or git commit),
+  - VMGather version (binary name or git commit),
   - OS / architecture,
   - VictoriaMetrics flavour (single / cluster / managed) and version,
   - Exact repro steps and expected behaviour,
@@ -32,12 +32,12 @@ make deps        # optional helper to download UI deps
 make build
 ```
 
-`./vmexporter` starts the local UI on a random port.
+`./vmgather` starts the local UI on a random port.
 
 ## Project layout
 
 ```
-cmd/vmexporter/             - CLI entry point
+cmd/vmgather/             - CLI entry point
 internal/server/            - HTTP server + embedded static assets
 internal/application/       - services orchestrating validation/export
 internal/infrastructure/    - VictoriaMetrics client, obfuscation, archive writer

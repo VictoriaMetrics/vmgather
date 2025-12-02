@@ -75,7 +75,7 @@ test.describe('Complete E2E Flow Tests', () => {
 
     // ============ STEP 1: Welcome ============
     let activeStep = page.locator('.step.active');
-    await expect(activeStep.locator('h2.step-title')).toContainText('Welcome to VMExporter');
+    await expect(activeStep.locator('h2.step-title')).toContainText('Welcome to VMGather');
     await expect(page.locator('.step-info')).toContainText('Step 1 of 6: Welcome');
 
     await activeStep.locator('button.btn-primary:has-text("Next")').click();

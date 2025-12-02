@@ -1,4 +1,4 @@
-# VMExporter user guide
+# VMGather user guide
 
 Official walkthrough for the VictoriaMetrics metrics export wizard.
 
@@ -20,7 +20,7 @@ Official walkthrough for the VictoriaMetrics metrics export wizard.
 
 ## Launch and connection
 
-1. Run the binary for your platform (`./vmexporter-vX.Y.Z-linux-amd64`, `vmexporter-vX.Y.Z-windows-amd64.exe`, etc.).
+1. Run the binary for your platform (`./vmgather-vX.Y.Z-linux-amd64`, `vmgather-vX.Y.Z-windows-amd64.exe`, etc.).
 2. The application opens a browser window at `http://localhost:8080` (auto-switches to a free port if 8080 is taken).
 3. The landing page shows the 6-step wizard with the current step highlighted.
 
@@ -44,7 +44,7 @@ Official walkthrough for the VictoriaMetrics metrics export wizard.
 | --- | --- |
 | 1. **Time range** | Choose presets (15m, 1h, 6h, 24h) or define custom start/end timestamps. |
 | 2. **Connection** | Enter URL + auth method. Invalid URLs disable the **Test Connection** button instantly. |
-| 3. **Validation** | Click **Test connection**. VMExporter checks reachability, detects product flavour, and confirms `/api/v1/export` availability. |
+| 3. **Validation** | Click **Test connection**. VMGather checks reachability, detects product flavour, and confirms `/api/v1/export` availability. |
 | 4. **Component discovery** | Select which VictoriaMetrics components, tenants, and jobs to include. UI lists everything found via `vm_app_version` metrics. |
 | 5. **Obfuscation** | Enable anonymisation for IPs, job labels, or add custom label keys. An estimated series count per component/job is displayed based on discovery data. |
 | 6. **Summary** | Review time range, target, authentication, selected components, and pre-obfuscated sample data before exporting. |
@@ -55,7 +55,7 @@ Each card contains hints and sample values matching VictoriaMetrics defaults.
 
 Click **Start export** to execute the workflow:
 
-1. VMExporter streams data via `/api/v1/export` (and falls back to `query_range` when needed).
+1. VMGather streams data via `/api/v1/export` (and falls back to `query_range` when needed).
 2. Data is obfuscated on the fly.
 3. Archive contents are written to a temporary directory:
    - `metrics.jsonl` – raw metrics dump.
@@ -94,12 +94,12 @@ Downloads start automatically in the browser; you can also retrieve the archive 
 
 # VMImporter user guide
 
-Importer UI mirrors the exporter wizard but is tailored for replaying VMExporter bundles back into VictoriaMetrics.
+Importer UI mirrors the exporter wizard but is tailored for replaying VMGather bundles back into VictoriaMetrics.
 
 ## Steps
 
 1. **Connection**: enter the target import endpoint (`http://localhost:8428`, `https://vm.example.com/1234/prometheus`, `/select/0/prometheus`, etc.), optional Tenant / Account ID, and auth (None/Basic/Bearer/Header). Test Connection must be green.
-2. **Bundle**: drop a VMExporter bundle (`.jsonl` or `.zip`). Preflight starts automatically:
+2. **Bundle**: drop a VMGather bundle (`.jsonl` or `.zip`). Preflight starts automatically:
    - validates JSONL structure and values,
    - reads time range (UTC),
    - fetches target retention and shows cutoff,

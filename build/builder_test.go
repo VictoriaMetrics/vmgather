@@ -124,7 +124,7 @@ func TestBuildPlatform_InvalidPlatform(t *testing.T) {
 	}
 
 	// Create temporary dist directory
-	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestBuildPlatform_CurrentPlatform(t *testing.T) {
 		t.Skip("skipping build test in short mode")
 	}
 
-	// This test runs from build/ directory, so cmd/vmexporter is not accessible
+	// This test runs from build/ directory, so cmd/vmgather is not accessible
 	// Skip this test as it requires proper directory structure
 	// The actual builder.go works fine when run from project root
 	t.Skip("Skipping integration test - builder.go must be run from project root")
@@ -162,7 +162,7 @@ func TestBuildPlatform_CurrentPlatform(t *testing.T) {
 // TestListDistFiles tests listing files in dist directory
 func TestListDistFiles(t *testing.T) {
 	// Create temporary directory structure
-	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestListDistFiles(t *testing.T) {
 // TestGenerateChecksums tests checksum file generation
 func TestGenerateChecksums(t *testing.T) {
 	// Create temporary dist directory
-	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -190,9 +190,9 @@ func TestGenerateChecksums(t *testing.T) {
 	// Mock results
 	results := []BuildResult{
 		{
-			Binary:     "vmexporter",
+			Binary:     "vmgather",
 			Platform:   Platform{GOOS: "linux", GOARCH: "amd64"},
-			OutputPath: filepath.Join(tmpDir, "vmexporter-linux-amd64"),
+			OutputPath: filepath.Join(tmpDir, "vmgather-linux-amd64"),
 			SHA256:     "abc123",
 		},
 		{
@@ -233,7 +233,7 @@ func TestGenerateChecksums(t *testing.T) {
 // TestBuildResult_Structure tests BuildResult struct
 func TestBuildResult_Structure(t *testing.T) {
 	result := BuildResult{
-		Binary: "vmexporter",
+		Binary: "vmgather",
 		Platform: Platform{
 			GOOS:   "linux",
 			GOARCH: "amd64",

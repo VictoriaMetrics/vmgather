@@ -41,7 +41,7 @@ type BinaryTarget struct {
 }
 
 var binaries = []BinaryTarget{
-	{Name: "vmexporter", Main: "./cmd/vmexporter"},
+	{Name: "vmgather", Main: "./cmd/vmgather"},
 	{Name: "vmimporter", Main: "./cmd/vmimporter"},
 }
 

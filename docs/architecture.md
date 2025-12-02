@@ -1,4 +1,4 @@
-# VMExporter architecture
+# VMGather architecture
 
 A high-level breakdown of how the VictoriaMetrics metrics exporter is structured internally.
 
@@ -100,9 +100,9 @@ All endpoints accept/return JSON with error details suitable for UI presentation
 - Integration tests spin up VictoriaMetrics flavours through `local-test-env`.
 - Playwright E2E suites exercise the complete wizard flow, ensuring API contracts stay stable.
 
-## VMImport companion flow
+## VMImporter companion flow
 
-VMImport is purposely isolated from the exporter codebase to minimise coupling: aside from sharing the repo and build tooling it does not import exporter packages. Its flow is intentionally short:
+VMImporter is purposely isolated from the exporter codebase to minimise coupling: aside from sharing the repo and build tooling it does not import exporter packages. Its flow is intentionally short:
 
 ```
 Browser (drop zone + endpoint form)
@@ -112,9 +112,9 @@ internal/importer/server
 sendToEndpoint → VictoriaMetrics /api/v1/import
 ```
 
-The UI mirrors VMExporter's connection card but introduces tenant/account ID fields and a drag-and-drop area for `.jsonl`/`.zip` bundles. The backend treats uploaded data as opaque bytes and re-streams it to VictoriaMetrics, reusing the same auth/TLS toggles. Tests reuse `local-test-env` so uploads can be validated against real vmselect/vminsert setups before releasing.
+The UI mirrors VMGather's connection card but introduces tenant/account ID fields and a drag-and-drop area for `.jsonl`/`.zip` bundles. The backend treats uploaded data as opaque bytes and re-streams it to VictoriaMetrics, reusing the same auth/TLS toggles. Tests reuse `local-test-env` so uploads can be validated against real vmselect/vminsert setups before releasing.
 
-### VMImport specifics
+### VMImporter specifics
 
 - Bundle ingestion: accepts `.zip` (extracts `metrics.jsonl`/`metadata.json`) or raw `.jsonl`; rejects archives without metrics.
 - Chunked streaming: uploads in ~512KB chunks to `/api/v1/import`, with progress reporting, byte counters, and resumable offsets on failure.

@@ -1,6 +1,6 @@
-# Binaries
-vmexporter
-vmimporter
+# Binaries (only in root directory)
+/vmgather
+/vmimporter
 *.exe
 *.dll
 *.so

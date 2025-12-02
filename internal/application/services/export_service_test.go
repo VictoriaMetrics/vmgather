@@ -273,8 +273,8 @@ func TestExportService_BuildArchiveMetadata(t *testing.T) {
 		t.Error("Obfuscated flag not set")
 	}
 
-	if metadata.VMExporterVersion != "1.0.0-test" {
-		t.Errorf("VMExporterVersion = %v, want 1.0.0-test", metadata.VMExporterVersion)
+	if metadata.VMGatherVersion != "1.0.0-test" {
+		t.Errorf("VMGatherVersion = %v, want 1.0.0-test", metadata.VMGatherVersion)
 	}
 
 	if metadata.ExportDate.Location() != time.UTC {
@@ -630,7 +630,7 @@ func TestExportService_Integration_NoObfuscation(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 
-	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}

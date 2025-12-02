@@ -21,7 +21,7 @@ import (
 // This test verifies that sample data is correctly formatted with 'name' field
 // and handles edge cases like empty MetricName
 func TestServer_GetSampleDataFromResult(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestServer_GetSampleDataFromResult(t *testing.T) {
 // TestServer_HandleGetSample_ResponseFormat tests that /api/sample returns correct format
 // This test verifies the fix for undefined in preview (issue #7)
 func TestServer_HandleGetSample_ResponseFormat(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestServer_HandleGetSample_ResponseFormat(t *testing.T) {
 }
 
 func TestHandleExportStart_StagingPermissionDenied(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-test-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestHandleExportStart_StagingPermissionDenied(t *testing.T) {
 }
 
 func TestHandleListDirectory(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-list-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-list-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestHandleListDirectory(t *testing.T) {
 }
 
 func TestHandleCheckDirectory(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "vmexporter-check-*")
+	tmpDir, err := os.MkdirTemp("", "vmgather-check-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}

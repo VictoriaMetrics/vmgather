@@ -24,7 +24,7 @@ import (
 //go:embed static/*
 var staticFiles embed.FS
 
-// Server is the HTTP server for VMExporter
+// Server is the HTTP server for VMGather
 type Server struct {
 	vmService     services.VMService
 	exportService services.ExportService
@@ -510,7 +510,7 @@ func (s *Server) handleExportStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Check write permission by creating temp file
-	testFile := filepath.Join(stagingDir, ".vmexporter-write-test")
+	testFile := filepath.Join(stagingDir, ".vmgather-write-test")
 	testHandle, err := os.Create(testFile)
 	if err != nil {
 		respondWithError(w, http.StatusForbidden, fmt.Sprintf("Cannot write to staging directory %s: %v", stagingDir, err))
@@ -702,25 +702,25 @@ func recommendedStagingDir() string {
 	switch runtime.GOOS {
 	case "darwin":
 		if homeDir != "" {
-			return filepath.Join(homeDir, "Library", "Application Support", "VMExporter", "Staging")
+			return filepath.Join(homeDir, "Library", "Application Support", "VMGather", "Staging")
 		}
 	case "windows":
 		if local := os.Getenv("LOCALAPPDATA"); local != "" {
-			return filepath.Join(local, "VMExporter", "Staging")
+			return filepath.Join(local, "VMGather", "Staging")
 		}
 		if homeDir != "" {
-			return filepath.Join(homeDir, "AppData", "Local", "VMExporter", "Staging")
+			return filepath.Join(homeDir, "AppData", "Local", "VMGather", "Staging")
 		}
 	default:
 		if homeDir != "" {
-			return filepath.Join(homeDir, ".vmexporter", "staging")
+			return filepath.Join(homeDir, ".vmgather", "staging")
 		}
 	}
-	return filepath.Join(os.TempDir(), "vmexporter")
+	return filepath.Join(os.TempDir(), "vmgather")
 }
 
 func ensureWritableDirectory(path string) error {
-	testFile := filepath.Join(path, fmt.Sprintf(".vmexporter-check-%d", time.Now().UnixNano()))
+	testFile := filepath.Join(path, fmt.Sprintf(".vmgather-check-%d", time.Now().UnixNano()))
 	file, err := os.Create(testFile)
 	if err != nil {
 		return err
@@ -738,7 +738,7 @@ func canCreateDirectory(path string) bool {
 		}
 		info, err := os.Stat(parent)
 		if err == nil && info.IsDir() {
-			testDir := filepath.Join(parent, fmt.Sprintf(".vmexporter-create-%d", time.Now().UnixNano()))
+			testDir := filepath.Join(parent, fmt.Sprintf(".vmgather-create-%d", time.Now().UnixNano()))
 			if err := os.Mkdir(testDir, 0o755); err != nil {
 				return false
 			}

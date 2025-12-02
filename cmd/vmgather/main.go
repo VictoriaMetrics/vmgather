@@ -28,7 +28,7 @@ func main() {
 	noBrowser := flag.Bool("no-browser", false, "Don't open browser automatically")
 	flag.Parse()
 
-	log.Printf("VMExporter v%s starting...", version)
+	log.Printf("VMGather v%s starting...", version)
 
 	// Try to find available port if default is busy
 	finalAddr, err := ensureAvailablePort(*addr)

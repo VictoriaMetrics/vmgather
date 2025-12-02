@@ -1,6 +1,6 @@
-# VMExporter
+# VMGather
 
-VMExporter collects VictoriaMetrics internal metrics, obfuscates sensitive data, and produces support-ready bundles in a single binary.
+VMGather collects VictoriaMetrics internal metrics, obfuscates sensitive data, and produces support-ready bundles in a single binary.
 
 ## Table of contents
 
@@ -26,7 +26,7 @@ VMExporter collects VictoriaMetrics internal metrics, obfuscates sensitive data,
 - **Adjustable metric cadence** – choose 30s/1m/5m dedup steps per export or override explicitly.
 - **Batched exports with ETA** – splits long ranges into windows and shows progress + forecasted completion.
 - **Wide auth surface** – Basic, Bearer, custom headers, multi-tenant VMAuth flows; importer forwards tenant headers.
-- **Chunked importing** – importer streams VMExporter bundles in resumable chunks with post-upload verification.
+- **Chunked importing** – importer streams VMGather bundles in resumable chunks with post-upload verification.
 - **Retention-aware imports** – importer trims samples outside target retention by default and displays cutoff in UTC with auto preflight on file drop.
 - **Time alignment helper** – choose “Align first sample” or “Shift to now” to slide bundles into the active retention window before upload.
 - **Cross-platform builds** – Linux, macOS, Windows (amd64/arm64/386) with identical CLI flags.
@@ -38,17 +38,17 @@ Grab the latest binaries from the [Releases page](https://github.com/VictoriaMet
 
 | Platform | File name pattern | Notes |
 | --- | --- | --- |
-| Linux | `vmexporter-vX.Y.Z-linux-amd64`<br>`vmexporter-vX.Y.Z-linux-arm64` | mark executable: `chmod +x vmexporter-*` |
-| macOS | `vmexporter-vX.Y.Z-macos-apple-silicon`<br>`vmexporter-vX.Y.Z-macos-intel` | first launch may require “Open Anyway” in System Settings |
-| Windows | `vmexporter-vX.Y.Z-windows-amd64.exe`<br>`vmexporter-vX.Y.Z-windows-arm64.exe` | double-click or run from PowerShell |
+| Linux | `vmgather-vX.Y.Z-linux-amd64`<br>`vmgather-vX.Y.Z-linux-arm64` | mark executable: `chmod +x vmgather-*` |
+| macOS | `vmgather-vX.Y.Z-macos-apple-silicon`<br>`vmgather-vX.Y.Z-macos-intel` | first launch may require “Open Anyway” in System Settings |
+| Windows | `vmgather-vX.Y.Z-windows-amd64.exe`<br>`vmgather-vX.Y.Z-windows-arm64.exe` | double-click or run from PowerShell |
 
 VMImport binaries are shipped side-by-side using the same naming scheme: replace the prefix with `vmimporter-…`.
 
 Verify downloads with the published SHA256 hashes:
 
 ```bash
-sha256sum vmexporter-vX.Y.Z-linux-amd64
-cat checksums.txt | grep vmexporter-vX.Y.Z-linux-amd64
+sha256sum vmgather-vX.Y.Z-linux-amd64
+cat checksums.txt | grep vmgather-vX.Y.Z-linux-amd64
 ```
 
 ## Quick start
@@ -56,10 +56,10 @@ cat checksums.txt | grep vmexporter-vX.Y.Z-linux-amd64
 ### macOS
 
 ```bash
-chmod +x vmexporter-vX.Y.Z-macos-*
-open ./vmexporter-vX.Y.Z-macos-apple-silicon
+chmod +x vmgather-vX.Y.Z-macos-*
+open ./vmgather-vX.Y.Z-macos-apple-silicon
 # or run from terminal:
-./vmexporter-vX.Y.Z-macos-apple-silicon
+./vmgather-vX.Y.Z-macos-apple-silicon
 ```
 
 When Gatekeeper warns about an unidentified developer: System Settings → Privacy & Security → **Open Anyway**.
@@ -67,15 +67,15 @@ When Gatekeeper warns about an unidentified developer: System Settings → Priva
 ### Linux
 
 ```bash
-chmod +x vmexporter-vX.Y.Z-linux-amd64
-./vmexporter-vX.Y.Z-linux-amd64
+chmod +x vmgather-vX.Y.Z-linux-amd64
+./vmgather-vX.Y.Z-linux-amd64
 ```
 
 ### Windows
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\vmexporter-vX.Y.Z-windows-amd64.exe
+.\vmgather-vX.Y.Z-windows-amd64.exe
 ```
 
 The binary starts an HTTP server and opens a browser window at `http://localhost:8080` (falls back to a free port if busy).
@@ -88,10 +88,10 @@ Requirements: Go 1.21+, Make, Git.
 git clone https://github.com/VictoriaMetrics/support.git
 cd support
 make build
-./vmexporter
+./vmgather
 ```
 
-### Docker (vmexporter + vmimporter)
+### Docker (vmgather + vmimporter)
 
 Use [Buildx](https://docs.docker.com/build/buildx/) to produce linux/amd64 and linux/arm64 images locally:
 
@@ -99,31 +99,31 @@ Use [Buildx](https://docs.docker.com/build/buildx/) to produce linux/amd64 and l
 # Build both utilities
 make docker-build
 
-# Run VMExporter at http://localhost:8080
-docker run --rm -p 8080:8080 vmexporter:$(git describe --tags --always)
+# Run VMGather at http://localhost:8080
+docker run --rm -p 8080:8080 vmgather:$(git describe --tags --always)
 
 # Run VMImport at http://localhost:8081
 docker run --rm -p 8081:8081 vmimporter:$(git describe --tags --always)
 ```
 
-Set `DOCKER_OUTPUT=type=registry` to push directly to your registry, or override the tags via `docker buildx build -t <registry>/vmexporter:tag …`.
+Set `DOCKER_OUTPUT=type=registry` to push directly to your registry, or override the tags via `docker buildx build -t <registry>/vmgather:tag …`.
 
 Both Dockerfiles live in `build/docker/` and follow distroless best practices (scratch runtime, static binaries).
 
 ### CLI flags
 
-Both `vmexporter` and `vmimporter` support `-addr` (bind address) and `-no-browser` to skip auto-launching a browser during scripting or Docker-based runs. VMExporter's default is `localhost:8080` with automatic fallback to a free port; VMImport defaults to `0.0.0.0:8081` to avoid clashing with VMExporter. VMExporter also accepts `-output` to choose the directory for generated archives (defaults to `./exports`).
+Both `vmgather` and `vmimporter` support `-addr` (bind address) and `-no-browser` to skip auto-launching a browser during scripting or Docker-based runs. VMGather's default is `localhost:8080` with automatic fallback to a free port; VMImport defaults to `0.0.0.0:8081` to avoid clashing with VMGather. VMGather also accepts `-output` to choose the directory for generated archives (defaults to `./exports`).
 
 ## VMImport companion
 
-VMImport is a sibling utility that consumes VMExporter bundles (`.jsonl` or `.zip`) and replays them into VictoriaMetrics via the `/api/v1/import` endpoint. It ships with the same embedded UI/HTTP server approach for parity:
+VMImport is a sibling utility that consumes VMGather bundles (`.jsonl` or `.zip`) and replays them into VictoriaMetrics via the `/api/v1/import` endpoint. It ships with the same embedded UI/HTTP server approach for parity:
 
-- Reuses the connection card from VMExporter, but adds a dedicated **Tenant / Account ID** input so multi-tenant inserts are one click away.
+- Reuses the connection card from VMGather, but adds a dedicated **Tenant / Account ID** input so multi-tenant inserts are one click away.
 - Drag-and-drop bundle picker triggers an automatic preflight (JSONL sanity, retention cutoff, time range, suggested shift) and displays friendly progress/error states.
 - Retention trimming is enabled by default; the UI shows the target cutoff in UTC and the shifted bundle range before upload.
 - Time alignment controls stay disabled until analysis finishes; “Shift to now” and suggested-shift buttons ensure the bundle fits the active retention.
 - Supports Basic auth, TLS verification toggles, and streaming large files directly to VictoriaMetrics.
-- Shares the local-test environment (`local-test-env/`) so you can exercise uploads against the same scenarios used for VMExporter.
+- Shares the local-test environment (`local-test-env/`) so you can exercise uploads against the same scenarios used for VMGather.
 
 Run the importer binary directly:
 
@@ -137,7 +137,7 @@ Run the importer binary directly:
 docker run --rm -p 8081:8081 vmimporter:latest
 ```
 
-The UI exposes the same health endpoint (`/api/health`) as VMExporter for container liveness probes.
+The UI exposes the same health endpoint (`/api/health`) as VMGather for container liveness probes.
 
 ## Documentation set
 
@@ -158,7 +158,7 @@ Exporter
 
 Importer
 1. Start `./vmimporter` (or Docker) – UI runs at `:8081` by default.
-2. **Select bundle** – drop a VMExporter `.zip`/`.jsonl` or pick via file dialog.
+2. **Select bundle** – drop a VMGather `.zip`/`.jsonl` or pick via file dialog.
 3. **Endpoint & auth** – enter VictoriaMetrics import URL, tenant/account ID, and auth (Basic or custom header); toggle TLS verify as needed.
 4. **Analyze (optional)** – run preflight to see time range, series hints, retention warnings, and sample labels.
 5. **Import** – start upload; importer streams in ~512KB chunks, shows progress, and verifies data via `/api/v1/series` after completion. Resume is available if a job fails mid-flight.
@@ -187,7 +187,7 @@ See [docs/development.md](docs/development.md) and [local-test-env/README.md](lo
 
 ## Build & release
 
-`make build` compiles both `./vmexporter` and `./vmimporter`. `make build-all` produces the full cross-platform matrix for *each* binary in `dist/` and writes a combined `checksums.txt`. Update [CHANGELOG.md](CHANGELOG.md) before tagging and attach the generated artifacts to the GitHub release.
+`make build` compiles both `./vmgather` and `./vmimporter`. `make build-all` produces the full cross-platform matrix for *each* binary in `dist/` and writes a combined `checksums.txt`. Update [CHANGELOG.md](CHANGELOG.md) before tagging and attach the generated artifacts to the GitHub release.
 
 Docker images follow the same release train. Use `make docker-build` (or the per-app targets) to create multi-architecture images via Buildx. Override `PLATFORMS`, `VERSION`, or `DOCKER_OUTPUT` when pushing to your own registry.
 

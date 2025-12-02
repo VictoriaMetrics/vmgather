@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-full test-llm build build-safe build-all clean fmt lint help test-env test-env-up test-env-down test-env-logs test-scenarios docker-build docker-build-vmexporter docker-build-vmimporter
+.PHONY: test test-fast test-full test-llm build build-safe build-all clean fmt lint help test-env test-env-up test-env-down test-env-logs test-scenarios docker-build docker-build-vmgather docker-build-vmimporter
 
 VERSION ?= $(shell git describe --tags --always --dirty)
 PLATFORMS ?= linux/amd64,linux/arm64
@@ -14,14 +14,14 @@ DOCKER_COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo "docker
 # =============================================================================
 help:
 	@echo "================================================================================"
-	@echo "VMExporter - Makefile Commands"
+	@echo "VMGather - Makefile Commands"
 	@echo "================================================================================"
 	@echo ""
 	@echo "BUILD COMMANDS:"
 	@echo "  make build        - Build binary (with automatic tests)"
 	@echo "  make build-safe   - Build with full test suite + linting"
 	@echo "  make build-all    - Build for all platforms (8 targets)"
-	@echo "  make docker-build - Build multi-arch Docker images (vmexporter + vmimporter)"
+	@echo "  make docker-build - Build multi-arch Docker images (vmgather + vmimporter)"
 	@echo "  make clean        - Clean build artifacts"
 	@echo ""
 	@echo "TEST COMMANDS:"
@@ -211,10 +211,10 @@ build: test-fast
 	@echo "================================================================================"
 	@echo "Building binary..."
 	@echo "================================================================================"
-	@go build -o vmexporter ./cmd/vmexporter
+	@go build -o vmgather ./cmd/vmgather
 	@go build -o vmimporter ./cmd/vmimporter
-	@echo "[OK] Build complete: ./vmexporter"
-	@ls -lh vmexporter | awk '{print "Size:", $$5}'
+	@echo "[OK] Build complete: ./vmgather"
+	@ls -lh vmgather | awk '{print "Size:", $$5}'
 	@echo "[OK] Build complete: ./vmimporter"
 	@ls -lh vmimporter | awk '{print "Size:", $$5}'
 
@@ -224,9 +224,9 @@ build-safe: test-full lint
 	@echo "================================================================================"
 	@echo "Building binary (safe mode)..."
 	@echo "================================================================================"
-	@go build -o vmexporter ./cmd/vmexporter
+	@go build -o vmgather ./cmd/vmgather
 	@go build -o vmimporter ./cmd/vmimporter
-	@echo "[OK] Build complete (all checks passed): ./vmexporter"
+	@echo "[OK] Build complete (all checks passed): ./vmgather"
 	@echo "[OK] Build complete (all checks passed): ./vmimporter"
 
 # Build for all platforms
@@ -244,7 +244,7 @@ build-all: test-fast
 # Clean build artifacts
 clean:
 	@echo "Cleaning build artifacts..."
-	@rm -f vmexporter vmimporter coverage.out
+	@rm -f vmgather vmimporter coverage.out
 	@rm -rf dist/
 	@echo "[OK] Clean complete"
 
@@ -252,16 +252,16 @@ clean:
 # DOCKER TARGETS
 # =============================================================================
 
-docker-build: docker-build-vmexporter docker-build-vmimporter
+docker-build: docker-build-vmgather docker-build-vmimporter
 
-docker-build-vmexporter:
-	@echo "Building vmexporter image for $(PLATFORMS)..."
+docker-build-vmgather:
+	@echo "Building vmgather image for $(PLATFORMS)..."
 	@docker buildx build --platform $(PLATFORMS) \
 		--build-arg GO_VERSION=$(GO_VERSION) \
-		-f build/docker/Dockerfile.vmexporter \
-		-t vmexporter:$(VERSION) \
+		-f build/docker/Dockerfile.vmgather \
+		-t vmgather:$(VERSION) \
 		--output=$(DOCKER_OUTPUT) .
-	@echo "[OK] Docker image vmexporter:$(VERSION) built."
+	@echo "[OK] Docker image vmgather:$(VERSION) built."
 
 docker-build-vmimporter:
 	@echo "Building vmimporter image for $(PLATFORMS)..."

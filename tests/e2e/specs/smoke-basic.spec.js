@@ -1,13 +1,13 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
 
-test.describe('Smoke - VMExporter shell', () => {
+test.describe('Smoke - VMGather shell', () => {
   test('landing wizard renders primary CTA', async ({ page }) => {
     await page.goto('http://localhost:8080');
     await page.waitForLoadState('networkidle');
 
     const hero = page.locator('header h1');
-    await expect(hero).toContainText(/VMExporter/i);
+    await expect(hero).toContainText(/VMGather/i);
 
     const cta = page.locator('.step.active button.btn-primary');
     await expect(cta).toBeVisible();
