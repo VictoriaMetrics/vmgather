@@ -29,7 +29,7 @@ VMGather collects VictoriaMetrics internal metrics, obfuscates sensitive data, a
 - **Chunked importing** – importer streams VMGather bundles in resumable chunks with post-upload verification.
 - **Retention-aware imports** – importer trims samples outside target retention by default and displays cutoff in UTC with auto preflight on file drop.
 - **Time alignment helper** – choose “Align first sample” or “Shift to now” to slide bundles into the active retention window before upload.
-- **Cross-platform builds** – Linux, macOS, Windows (amd64/arm64/386) with identical CLI flags.
+- **Cross-platform builds** – Linux, macOS, Windows (amd64/arm64/386).
 - **First-run ready** – opens browser on launch and guides through validation, sampling, import, and export.
 
 ## Downloads
@@ -93,7 +93,7 @@ make build
 
 ### Docker (vmgather + vmimporter)
 
-Use [Buildx](https://docs.docker.com/build/buildx/) to produce linux/amd64 and linux/arm64 images locally:
+Use [Buildx](https://docs.docker.com/build/building/multi-platform/) to produce linux/amd64 and linux/arm64 images locally:
 
 ```bash
 # Build both utilities
