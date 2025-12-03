@@ -4,6 +4,17 @@ All notable changes to VMGather are documented here. The format follows [Keep a 
 
 ## [v1.4.0] - 2025-12-03
 
+### Added
+- Live discovery coverage against real VictoriaMetrics endpoints: integration (`live_discovery_test.go`) and E2E (`live-discovery.spec.js`) gated by `LIVE_VM_URL`, plus a healthcheck script to verify `vm_app_version` before tests.
+- Local test env healthcheck (`local-test-env/healthcheck.sh`) and published ports for single-node VM (`http://localhost:18428`), with quick-start docs updated.
+
+### Changed
+- CI integration job now runs live discovery with `LIVE_VM_URL=http://localhost:18428` and `-tags "integration realdiscovery"`.
+- Makefile `test-env-up` prints remapped URLs and runs healthcheck to ensure metrics exist before proceeding.
+- Discovery error responses now return a clear message when no VictoriaMetrics component metrics are found.
+- Download handler now normalizes paths and restricts downloads to the configured export directory.
+- Local dev env port conflicts resolved by remapping vmsingle host ports to 18428/18429 and pinning VM images to v1.129.1.
+
 ### Security
 - **Path Traversal Fix**: Implemented strict validation for `/api/download` to prevent arbitrary file access.
 - **Secure Logging**: Added `--debug` flag and redaction for sensitive data (tokens, passwords) in logs.
@@ -13,6 +24,12 @@ All notable changes to VMGather are documented here. The format follows [Keep a 
 
 ### Fixed
 - **Error Swallowing**: `getSampleDataFromResult` now propagates errors, improving UX diagnostics.
+- Discovery failures caused by `/prometheus` base paths now fall back cleanly; missing metrics report a clear reason instead of generic 500.
+
+### Testing
+- `./local-test-env/healthcheck.sh` validates `vm_app_version` availability on single and cluster endpoints.
+- `INTEGRATION_TEST=1 go test -tags "integration realdiscovery" ./tests/integration/...` (uses LIVE_VM_URL=http://localhost:18428).
+- `npm test` Playwright suite (92 specs; live discovery executed when `LIVE_VM_URL` is set).
 
 ## [v1.4.0] - 2025-12-02
 
