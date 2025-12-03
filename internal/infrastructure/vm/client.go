@@ -189,73 +189,39 @@ func (c *Client) Export(ctx context.Context, selector string, start, end time.Ti
 
 // buildRequest builds an HTTP request with authentication
 func (c *Client) buildRequest(ctx context.Context, method, path string, params url.Values) (*http.Request, error) {
-	// DEBUG: Log input parameters
-	log.Printf("buildRequest called:")
-	log.Printf("  Method: %s", method)
-	log.Printf("  Path: %s", path)
-	log.Printf("  Connection URL: %s", c.conn.URL)
-	log.Printf("  Connection ApiBasePath: %s", c.conn.ApiBasePath)
-	log.Printf("  Connection FullApiUrl: %s", c.conn.FullApiUrl)
-	log.Printf("  Connection TenantId: %s", c.conn.TenantId)
-
-	// Build URL
-	// If FullApiUrl is provided, use it as base; otherwise use URL + ApiBasePath
+	// Build URL logic
 	var baseURL string
-	
+
 	// CRITICAL: Detect if this is an /export request
 	isExportRequest := strings.Contains(path, "/export")
-	log.Printf("  Is Export Request: %v (path: %s)", isExportRequest, path)
-	
+
 	if c.conn.FullApiUrl != "" {
 		baseURL = c.conn.FullApiUrl
-		
-		// CRITICAL FIX: /rw/prometheus works for /query but NOT for /export
-		// VMAuth routes /rw/prometheus to write endpoints, which don't support /export
-		// Convert /rw/prometheus → /prometheus ONLY for /export endpoint
 		if isExportRequest && strings.Contains(baseURL, "/rw/prometheus") {
-			originalURL := baseURL
 			baseURL = strings.Replace(baseURL, "/rw/prometheus", "/prometheus", 1)
-			log.Printf("  [WARN] FullApiUrl normalized for /export: %s -> %s", originalURL, baseURL)
-		} else {
-			log.Printf("  Using FullApiUrl as base: %s", baseURL)
 		}
 	} else if c.conn.ApiBasePath != "" {
-		// NORMALIZE PATH: Support different customer URL formats
-		// Some customers use:
-		// - /rw/prometheus (write endpoint, works for /query but NOT for /export)
-		// - /ui/prometheus (UI endpoint, works for API too)
-		// - /prometheus (standard)
 		normalizedPath := c.conn.ApiBasePath
-		
-		// CRITICAL FIX: /rw/prometheus works for /query but NOT for /export
-		// VMAuth routes /rw/prometheus to write endpoints, which don't support /export
-		// Convert /rw/prometheus → /prometheus ONLY for /export endpoint
 		if isExportRequest && strings.Contains(normalizedPath, "/rw/prometheus") {
-			originalPath := normalizedPath
 			normalizedPath = strings.Replace(normalizedPath, "/rw/prometheus", "/prometheus", 1)
-			log.Printf("  [WARN] ApiBasePath normalized for /export: %s -> %s", originalPath, normalizedPath)
-		} else {
-			log.Printf("  Using ApiBasePath as-is: %s", normalizedPath)
 		}
-		
 		baseURL = c.conn.URL + normalizedPath
-		log.Printf("  Using URL + ApiBasePath as base: %s", baseURL)
 	} else {
 		baseURL = c.conn.URL
-		log.Printf("  Using URL as base: %s", baseURL)
 	}
 
 	// Append the API endpoint path
 	reqURL := baseURL + path
-	log.Printf("  Final request URL (before params): %s", reqURL)
-
 	if len(params) > 0 {
 		if method == http.MethodGet {
 			reqURL += "?" + params.Encode()
 		}
 	}
 
-	log.Printf("  [OK] Final request URL: %s", reqURL)
+	// Log request (securely)
+	if c.conn.Debug {
+		log.Printf("[DEBUG] Request: %s %s", method, redactURL(reqURL))
+	}
 
 	// Create request
 	var body io.Reader
@@ -265,7 +231,7 @@ func (c *Client) buildRequest(ctx context.Context, method, path string, params u
 
 	req, err := http.NewRequestWithContext(ctx, method, reqURL, body)
 	if err != nil {
-		log.Printf("  [ERROR] Failed to create request: %v", err)
+		log.Printf("[ERROR] Failed to create request: %v", err)
 		return nil, err
 	}
 
@@ -282,4 +248,29 @@ func (c *Client) buildRequest(ctx context.Context, method, path string, params u
 	}
 
 	return req, nil
+}
+
+// redactURL removes sensitive information from URL for logging
+func redactURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "invalid-url"
+	}
+
+	// Redact password if present
+	if _, hasPassword := u.User.Password(); hasPassword {
+		u.User = url.UserPassword(u.User.Username(), "xxxxx")
+	}
+
+	// Redact sensitive query parameters
+	q := u.Query()
+	sensitiveKeys := []string{"token", "password", "secret", "key", "auth"}
+	for _, key := range sensitiveKeys {
+		if q.Has(key) {
+			q.Set(key, "xxxxx")
+		}
+	}
+	u.RawQuery = q.Encode()
+
+	return u.String()
 }

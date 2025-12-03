@@ -131,39 +131,44 @@ func TestRealScenario_VMAuthWithTenant(t *testing.T) {
 // TestURLParsing_AllFormats tests that URL parsing works correctly
 func TestURLParsing_AllFormats(t *testing.T) {
 	tests := []struct {
-		name           string
-		inputURL       string
-		expectedURL    string
-		expectedPath   string
-		expectedTenant string
+		name               string
+		inputURL           string
+		expectedURL        string
+		expectedApiPath    string
+		expectedTenantId   string
+		expectedFullApiUrl string
 	}{
 		{
-			name:           "Base URL only",
-			inputURL:       "http://localhost:8428",
-			expectedURL:    "http://localhost:8428",
-			expectedPath:   "",
-			expectedTenant: "",
+			name:               "Base URL only",
+			inputURL:           "http://localhost:18428",
+			expectedURL:        "http://localhost:18428",
+			expectedApiPath:    "",
+			expectedTenantId:   "",
+			expectedFullApiUrl: "http://localhost:18428",
 		},
 		{
-			name:           "With tenant in path",
-			inputURL:       "http://localhost:8481/select/0/prometheus",
-			expectedURL:    "http://localhost:8481",
-			expectedPath:   "/select/0/prometheus",
-			expectedTenant: "0",
+			name:               "With tenant in path",
+			inputURL:           "http://localhost:8481/select/0/prometheus",
+			expectedURL:        "http://localhost:8481",
+			expectedApiPath:    "/select/0/prometheus",
+			expectedTenantId:   "0",
+			expectedFullApiUrl: "http://localhost:8481/select/0/prometheus",
 		},
 		{
-			name:           "VMAuth with tenant and /rw path (user's case)",
-			inputURL:       "http://localhost:8427/1011/rw/prometheus",
-			expectedURL:    "http://localhost:8427",
-			expectedPath:   "/1011/rw/prometheus",
-			expectedTenant: "1011",
+			name:               "VMAuth with tenant and /rw path (user's case)",
+			inputURL:           "http://localhost:8427/1011/rw/prometheus",
+			expectedURL:        "http://localhost:8427",
+			expectedApiPath:    "/1011/rw/prometheus",
+			expectedTenantId:   "1011",
+			expectedFullApiUrl: "http://localhost:8427/1011/rw/prometheus",
 		},
 		{
-			name:           "Full API path",
-			inputURL:       "http://localhost:8481/select/0/prometheus/api/v1/query",
-			expectedURL:    "http://localhost:8481",
-			expectedPath:   "/select/0/prometheus",
-			expectedTenant: "0",
+			name:               "Full API path",
+			inputURL:           "http://localhost:8481/select/0/prometheus/api/v1/query",
+			expectedURL:        "http://localhost:8481",
+			expectedApiPath:    "/select/0/prometheus",
+			expectedTenantId:   "0",
+			expectedFullApiUrl: "http://localhost:8481/select/0/prometheus",
 		},
 	}
 
@@ -173,8 +178,8 @@ func TestURLParsing_AllFormats(t *testing.T) {
 			// In real scenario, frontend sends: url, api_base_path, tenant_id
 			t.Logf("Input URL: %s", tt.inputURL)
 			t.Logf("Expected URL: %s", tt.expectedURL)
-			t.Logf("Expected Path: %s", tt.expectedPath)
-			t.Logf("Expected Tenant: %s", tt.expectedTenant)
+			t.Logf("Expected Path: %s", tt.expectedApiPath)
+			t.Logf("Expected Tenant: %s", tt.expectedTenantId)
 
 			// TODO: Add actual URL parsing logic here when we know the bug
 		})

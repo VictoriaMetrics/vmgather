@@ -76,7 +76,7 @@ echo ""
 # Scenario 1: VMSingle No Auth
 test_endpoint \
     "VMSingle No Auth" \
-    "http://localhost:8428" \
+    "http://localhost:18428" \
     "none" \
     ""
 

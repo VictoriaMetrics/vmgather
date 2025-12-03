@@ -1,6 +1,6 @@
 const { test, expect } = require('@playwright/test');
 
-async function completeConnectionStep(page, url = 'http://localhost:8428') {
+async function completeConnectionStep(page, url = 'http://localhost:18428') {
     const step3 = page.locator('.step[data-step="3"].active');
     await step3.locator('#vmUrl').fill(url);
     await step3.locator('#testConnectionBtn').click();
@@ -71,7 +71,7 @@ async function ensureDefaultNetworkMocks(page, { mockValidate = true, mockDiscov
     }
 }
 
-async function goToObfuscation(page, url = 'http://localhost:8428', options = {}) {
+async function goToObfuscation(page, url = 'http://localhost:18428', options = {}) {
     await ensureDefaultNetworkMocks(page, options);
     await page.goto('http://localhost:8080');
     await page.waitForLoadState('networkidle');
@@ -128,7 +128,7 @@ test.describe('Obfuscation Functionality', () => {
         await page.evaluate(() => {
             const config = window.getObfuscationConfig();
             console.log('Obfuscation config:', config);
-            
+
             // Verify config structure
             if (!config.hasOwnProperty('obfuscate_instance')) {
                 throw new Error('Missing obfuscate_instance field');
@@ -158,7 +158,7 @@ test.describe('Obfuscation Functionality', () => {
         await page.evaluate(() => {
             const config = window.getObfuscationConfig();
             console.log('Obfuscation config (both):', config);
-            
+
             if (config.obfuscate_instance !== true) {
                 throw new Error('obfuscate_instance should be true');
             }
@@ -183,7 +183,7 @@ test.describe('Obfuscation Functionality', () => {
         await page.evaluate(() => {
             const config = window.getObfuscationConfig();
             console.log('Obfuscation config (disabled):', config);
-            
+
             if (config.enabled !== false) {
                 throw new Error('enabled should be false');
             }
@@ -214,7 +214,7 @@ test.describe('Obfuscation Functionality', () => {
                 body: JSON.stringify({ samples: [sample], count: 1 }),
             });
         });
-        await goToObfuscation(page, 'http://localhost:8428', { mockSample: false });
+        await goToObfuscation(page, 'http://localhost:18428', { mockSample: false });
         await page.check('#enableObfuscation');
         await page.waitForSelector('#obfuscationOptions', { state: 'visible' });
 
@@ -230,7 +230,7 @@ test.describe('Obfuscation Functionality', () => {
         await page.evaluate(() => {
             const config = window.getObfuscationConfig();
             console.log('Obfuscation config (pod/namespace):', config);
-            
+
             // These should still be false because backend doesn't support them
             if (config.obfuscate_instance !== false) {
                 throw new Error('obfuscate_instance should be false (pod/namespace not supported)');
@@ -248,12 +248,12 @@ test.describe('Obfuscation Functionality', () => {
     test('should preserve structure flag in config', async ({ page }) => {
         await goToObfuscation(page);
         await page.check('#enableObfuscation');
-        
+
         // Verify preserve_structure is always true
         await page.evaluate(() => {
             const config = window.getObfuscationConfig();
             console.log('Obfuscation config (structure):', config);
-            
+
             if (!config.hasOwnProperty('preserve_structure')) {
                 throw new Error('Missing preserve_structure field');
             }

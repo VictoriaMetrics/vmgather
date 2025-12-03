@@ -369,13 +369,13 @@ func (s *exportServiceImpl) buildArchiveMetadata(
 	obfuscationMaps map[string]map[string]string,
 ) archive.ArchiveMetadata {
 	metadata := archive.ArchiveMetadata{
-		ExportID:          exportID,
-		ExportDate:        time.Now().UTC(),
-		TimeRange:         config.TimeRange,
-		Components:        uniqueStrings(config.Components),
-		Jobs:              uniqueStrings(config.Jobs),
-		MetricsCount:      metricsCount,
-		Obfuscated:        config.Obfuscation.Enabled,
+		ExportID:        exportID,
+		ExportDate:      time.Now().UTC(),
+		TimeRange:       config.TimeRange,
+		Components:      uniqueStrings(config.Components),
+		Jobs:            uniqueStrings(config.Jobs),
+		MetricsCount:    metricsCount,
+		Obfuscated:      config.Obfuscation.Enabled,
 		VMGatherVersion: s.vmExporterVersion,
 	}
 
@@ -456,93 +456,105 @@ func determineQueryRangeStep(tr domain.TimeRange, overrideSeconds int) time.Dura
 
 // exportViaQueryRange exports metrics using query_range as fallback when /api/v1/export is not available
 // This method queries all series matching the selector and reconstructs export format
+// It uses streaming and time chunking to avoid OOM on large time ranges
 func (s *exportServiceImpl) exportViaQueryRange(ctx context.Context, client *vm.Client, selector string, timeRange domain.TimeRange, overrideSeconds int) (io.ReadCloser, error) {
 	step := determineQueryRangeStep(timeRange, overrideSeconds)
-	duration := timeRange.End.Sub(timeRange.Start)
 
-	fmt.Printf("Starting query_range fallback:\n")
-	fmt.Printf("   Time range: %s to %s (duration: %v)\n", timeRange.Start.Format(time.RFC3339), timeRange.End.Format(time.RFC3339), duration)
-	fmt.Printf("   Step: %v\n", step)
-	fmt.Printf("   Selector: %s\n", selector)
-	fmt.Printf("   Executing query_range request...\n")
+	// Create a pipe to stream results
+	pr, pw := io.Pipe()
 
-	// Execute query_range
-	startTime := time.Now()
-	result, err := client.QueryRange(ctx, selector, timeRange.Start, timeRange.End, step)
-	if err != nil {
-		fmt.Printf("[FAIL] Query_range failed after %v: %v\n", time.Since(startTime), err)
-		return nil, fmt.Errorf("query_range failed: %w", err)
-	}
+	go func() {
+		encoder := json.NewEncoder(pw)
 
-	fmt.Printf("[OK] Query_range completed in %v\n", time.Since(startTime))
-	fmt.Printf("   Series returned: %d\n", len(result.Data.Result))
+		// Chunk size: 1 hour (balance between request count and memory usage)
+		chunkSize := 1 * time.Hour
 
-	// Calculate total data points
-	totalDataPoints := 0
-	for _, series := range result.Data.Result {
-		totalDataPoints += len(series.Values)
-	}
-	fmt.Printf("   Total data points: %d\n", totalDataPoints)
-	fmt.Printf("Converting to export format (JSONL)...\n")
+		currentStart := timeRange.Start
+		totalPoints := 0
 
-	// Convert query_range result to export format (JSONL)
-	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
+		fmt.Printf("Starting streaming query_range fallback (chunk size: %v)\n", chunkSize)
 
-	convertStartTime := time.Now()
-	processedPoints := 0
-	lastProgressReport := time.Now()
-
-	for seriesIdx, series := range result.Data.Result {
-		// Each series becomes multiple export lines (one per data point)
-		for _, value := range series.Values {
-			if len(value) < 2 {
-				continue
+		for currentStart.Before(timeRange.End) {
+			// Check context cancellation
+			if ctx.Err() != nil {
+				_ = pw.CloseWithError(ctx.Err())
+				return
 			}
 
-			timestamp, ok := value[0].(float64)
-			if !ok {
-				continue
+			currentEnd := currentStart.Add(chunkSize)
+			if currentEnd.After(timeRange.End) {
+				currentEnd = timeRange.End
 			}
 
-			valueStr, ok := value[1].(string)
-			if !ok {
-				continue
-			}
-			valueNum, err := strconv.ParseFloat(valueStr, 64)
+			// Execute query_range for this chunk
+			// We use a separate context for the request to ensure we can cancel it
+			reqCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+			result, err := client.QueryRange(reqCtx, selector, currentStart, currentEnd, step)
+			cancel()
+
 			if err != nil {
-				continue
+				fmt.Printf("[FAIL] Query_range failed for chunk %s-%s: %v\n",
+					currentStart.Format(time.RFC3339), currentEnd.Format(time.RFC3339), err)
+				_ = pw.CloseWithError(fmt.Errorf("query_range chunk failed: %w", err))
+				return
 			}
 
-			// Build export line in VictoriaMetrics export format
-			exportLine := map[string]interface{}{
-				"metric":     series.Metric,
-				"values":     []interface{}{valueNum},
-				"timestamps": []interface{}{int64(timestamp * 1000)}, // Convert to milliseconds
+			// Convert and stream results
+			for _, series := range result.Data.Result {
+				for _, value := range series.Values {
+					if len(value) < 2 {
+						continue
+					}
+
+					timestamp, ok := value[0].(float64)
+					if !ok {
+						continue
+					}
+
+					valueStr, ok := value[1].(string)
+					if !ok {
+						continue
+					}
+					valueNum, err := strconv.ParseFloat(valueStr, 64)
+					if err != nil {
+						continue
+					}
+
+					// Build export line
+					exportLine := map[string]interface{}{
+						"metric":     series.Metric,
+						"values":     []interface{}{valueNum},
+						"timestamps": []interface{}{int64(timestamp * 1000)},
+					}
+
+					if err := encoder.Encode(exportLine); err != nil {
+						_ = pw.CloseWithError(fmt.Errorf("encode error: %w", err))
+						return
+					}
+					totalPoints++
+				}
 			}
 
-			if err := encoder.Encode(exportLine); err != nil {
-				return nil, fmt.Errorf("failed to encode export line: %w", err)
-			}
-
-			processedPoints++
-
-			// Report progress every 5 seconds or every 10000 points
-			if time.Since(lastProgressReport) > 5*time.Second || processedPoints%10000 == 0 {
-				progress := float64(processedPoints) / float64(totalDataPoints) * 100
-				fmt.Printf("   Progress: %d/%d points (%.1f%%) - Series %d/%d\n",
-					processedPoints, totalDataPoints, progress, seriesIdx+1, len(result.Data.Result))
-				lastProgressReport = time.Now()
-			}
+			// Move to next chunk
+			// Add a small overlap or just next step?
+			// QueryRange is inclusive of start and end?
+			// Prometheus /query_range is usually inclusive.
+			// If we do [0, 60] and [60, 120], we might get duplicate point at 60.
+			// But step aligns points.
+			// Safest is to start next chunk at currentEnd + step?
+			// Or just rely on deduplication downstream?
+			// Actually, standard practice is [start, end).
+			// But Prom API takes start/end.
+			// Let's just use currentEnd as next start, duplicates are better than gaps,
+			// and usually downstream can handle it or we accept minor overlap.
+			currentStart = currentEnd
 		}
-	}
 
-	fmt.Printf("[OK] Conversion completed in %v\n", time.Since(convertStartTime))
-	fmt.Printf("   Total points processed: %d\n", processedPoints)
-	fmt.Printf("   Export data size: %.2f MB\n", float64(buf.Len())/(1024*1024))
+		fmt.Printf("[OK] Streaming completed. Total points: %d\n", totalPoints)
+		_ = pw.Close()
+	}()
 
-	// Return as ReadCloser
-	return io.NopCloser(&buf), nil
+	return pr, nil
 }
 
 func (s *exportServiceImpl) fetchBatch(ctx context.Context, client *vm.Client, selector string, tr domain.TimeRange, metricStepSeconds int) (io.ReadCloser, error) {

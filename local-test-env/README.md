@@ -16,7 +16,7 @@ Docker Compose stack that mirrors common VictoriaMetrics deployments for integra
 
 | Component | Purpose | Ports / credentials |
 | --- | --- | --- |
-| VMSingle (no auth) | Baseline VictoriaMetrics single-node | `http://localhost:8428` |
+| VMSingle (no auth) | Baseline VictoriaMetrics single-node | `http://localhost:18428` |
 | VMSingle + VMAuth | Tests Basic Auth and VMAuth headers | `http://localhost:8427`, user `monitoring-read`, pass `secret-password-123` |
 | VMCluster | vmselect/vmstorage/vminsert trio | vmselect `:8481`, vminsert `:8480`, vmstorage `:8482/:8483` |
 | VMCluster + VMAuth | Emulates VictoriaMetrics Managed (`/rw/prometheus` and `/r/prometheus`) | `http://localhost:8426/<tenant>/rw/prometheus` |
@@ -50,7 +50,7 @@ docker-compose -f docker-compose.test.yml down
 
 ### Scenario 1 – VMSingle (no auth)
 ```bash
-curl http://localhost:8428/api/v1/query?query=up
+curl http://localhost:18428/api/v1/query?query=up
 ```
 
 ### Scenario 2 – VMSingle behind VMAuth
@@ -95,7 +95,7 @@ Adjust ports or credentials there if they conflict with local services.
 1. Start the stack and wait ~30 seconds.
 2. From repo root run `./vmgather`.
 3. In the wizard, try:
-   - `http://localhost:8428` (no auth).
+   - `http://localhost:18428` (no auth).
    - `http://localhost:8427` with Basic Auth.
    - `http://localhost:8481/select/0/prometheus`.
    - `http://localhost:8426/1011/rw/prometheus` for Managed-style paths.

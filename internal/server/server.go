@@ -31,10 +31,11 @@ type Server struct {
 	jobManager    *ExportJobManager
 	outputDir     string
 	version       string
+	debug         bool
 }
 
 // NewServer creates a new HTTP server
-func NewServer(outputDir, version string) *Server {
+func NewServer(outputDir, version string, debug bool) *Server {
 	if version == "" {
 		version = "dev"
 	}
@@ -44,6 +45,7 @@ func NewServer(outputDir, version string) *Server {
 		jobManager:    nil,
 		outputDir:     outputDir,
 		version:       version,
+		debug:         debug,
 	}
 	server.jobManager = NewExportJobManager(server.exportService)
 	return server
@@ -266,32 +268,54 @@ func (s *Server) handleDiscoverComponents(w http.ResponseWriter, r *http.Request
 	}
 
 	// Parse request body
-	var req struct {
+	var request struct {
 		Connection domain.VMConnection `json:"connection"`
 		TimeRange  domain.TimeRange    `json:"time_range"`
 	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err))
 		return
 	}
 
+	// Propagate debug flag
+	if s.debug {
+		request.Connection.Debug = true
+	}
+
 	// DEBUG: Log discovery request
 	log.Printf("🔎 Component Discovery:")
-	log.Printf("  Time Range: %s to %s", req.TimeRange.Start.Format(time.RFC3339), req.TimeRange.End.Format(time.RFC3339))
-	log.Printf("  URL: %s", req.Connection.URL)
-	log.Printf("  Tenant ID: %s", req.Connection.TenantId)
-	log.Printf("  Multitenant: %v", req.Connection.IsMultitenant)
+	log.Printf("  Time Range: %s to %s", request.TimeRange.Start.Format(time.RFC3339), request.TimeRange.End.Format(time.RFC3339))
+	log.Printf("  URL: %s", request.Connection.URL)
+	log.Printf("  Tenant ID: %s", request.Connection.TenantId)
+	log.Printf("  Multitenant: %v", request.Connection.IsMultitenant)
 
 	// Discover components using VM service
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	components, err := s.vmService.DiscoverComponents(ctx, req.Connection, req.TimeRange)
+	components, err := s.vmService.DiscoverComponents(ctx, request.Connection, request.TimeRange)
 	if err != nil {
-		log.Printf("[ERROR] Discovery failed: %v", err)
-		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Discovery failed: %v", err))
-		return
+		// If discovery fails and the client provided an ApiBasePath (common when users paste full /prometheus URLs),
+		// retry without the path so we still find VM components on single-node endpoints.
+		if request.Connection.ApiBasePath != "" && !request.Connection.IsMultitenant {
+			log.Printf("[WARN] Discovery failed with api_base_path=%q, retrying without base path...", request.Connection.ApiBasePath)
+			fallbackConn := request.Connection
+			fallbackConn.ApiBasePath = ""
+			fallbackConn.FullApiUrl = ""
+
+			components, err = s.vmService.DiscoverComponents(ctx, fallbackConn, request.TimeRange)
+			if err != nil {
+				log.Printf("[ERROR] Discovery retry without base path failed: %v", err)
+				respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("No VictoriaMetrics component metrics found at the provided URL: %v", err))
+				return
+			}
+			// Success on fallback
+			request.Connection = fallbackConn
+		} else {
+			log.Printf("[ERROR] Discovery failed: %v", err)
+			respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("No VictoriaMetrics component metrics found at the provided URL: %v", err))
+			return
+		}
 	}
 
 	// Log discovery results
@@ -325,6 +349,11 @@ func (s *Server) handleGetSample(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err))
 		return
+	}
+
+	// Propagate debug flag
+	if s.debug {
+		req.Config.Connection.Debug = true
 	}
 
 	// Set default limit if not specified
@@ -429,15 +458,22 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 
 	ensureBatchDefaults(&config)
 
+	// Propagate debug flag
+	if s.debug {
+		config.Connection.Debug = true
+	}
+
 	// DEBUG: Log export request
-	log.Printf("[SEND] Metrics Export:")
-	log.Printf("  Time Range: %s to %s", config.TimeRange.Start.Format(time.RFC3339), config.TimeRange.End.Format(time.RFC3339))
-	log.Printf("  Components: %v", config.Components)
-	log.Printf("  Jobs: %v", config.Jobs)
-	log.Printf("  Obfuscation Enabled: %v", config.Obfuscation.Enabled)
-	if config.Obfuscation.Enabled {
-		log.Printf("  Obfuscate Instance: %v", config.Obfuscation.ObfuscateInstance)
-		log.Printf("  Obfuscate Job: %v", config.Obfuscation.ObfuscateJob)
+	if s.debug {
+		log.Printf("[SEND] Metrics Export:")
+		log.Printf("  Time Range: %s to %s", config.TimeRange.Start.Format(time.RFC3339), config.TimeRange.End.Format(time.RFC3339))
+		log.Printf("  Components: %v", config.Components)
+		log.Printf("  Jobs: %v", config.Jobs)
+		log.Printf("  Obfuscation Enabled: %v", config.Obfuscation.Enabled)
+		if config.Obfuscation.Enabled {
+			log.Printf("  Obfuscate Instance: %v", config.Obfuscation.ObfuscateInstance)
+			log.Printf("  Obfuscate Job: %v", config.Obfuscation.ObfuscateJob)
+		}
 	}
 
 	// Execute export using export service
@@ -460,7 +496,11 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 
 	// Get sample data from the exported archive for preview
 	// This shows the top 5 metrics that were exported
-	sampleData := s.getSampleDataFromResult(ctx, config)
+	sampleData, sampleErr := s.getSampleDataFromResult(ctx, config)
+	var sampleErrorMsg string
+	if sampleErr != nil {
+		sampleErrorMsg = sampleErr.Error()
+	}
 
 	// Build response
 	response := map[string]interface{}{
@@ -475,6 +515,10 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		},
 		"obfuscation_applied": result.ObfuscationApplied,
 		"sample_data":         sampleData,
+	}
+
+	if sampleErrorMsg != "" {
+		response["sample_error"] = sampleErrorMsg
 	}
 
 	// Return export result
@@ -916,12 +960,12 @@ func (s *Server) handleCheckDirectory(w http.ResponseWriter, r *http.Request) {
 }
 
 // getSampleDataFromResult retrieves sample data for preview
-func (s *Server) getSampleDataFromResult(ctx context.Context, config domain.ExportConfig) []map[string]interface{} {
+func (s *Server) getSampleDataFromResult(ctx context.Context, config domain.ExportConfig) ([]map[string]interface{}, error) {
 	// Get sample metrics (limit to 5 for preview)
 	samples, err := s.vmService.GetSample(ctx, config, 5)
 	if err != nil {
 		log.Printf("Failed to get sample data: %v", err)
-		return []map[string]interface{}{}
+		return nil, err
 	}
 
 	if config.Obfuscation.Enabled {
@@ -953,7 +997,7 @@ func (s *Server) getSampleDataFromResult(ctx context.Context, config domain.Expo
 		})
 	}
 
-	return sampleData
+	return sampleData, nil
 }
 
 // handleDownload serves archive file for download
@@ -971,31 +1015,68 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// DEBUG: Log download request
-	log.Printf("Archive Download:")
-	log.Printf("  File Path: %s", filePath)
-	log.Printf("  Client IP: %s", r.RemoteAddr)
+	if s.debug {
+		log.Printf("Archive Download:")
+		log.Printf("  File Path: %s", filePath)
+		log.Printf("  Client IP: %s", r.RemoteAddr)
+	}
 
 	// Security: ensure file is within output directory
-	// For now, serve from relative path
-	// TODO: Add proper path validation
-
-	// Check if file exists
-	fileInfo, err := http.Dir(".").Open(filePath)
+	absOutputDir, err := filepath.Abs(s.outputDir)
 	if err != nil {
-		log.Printf("[ERROR] File not found: %s", filePath)
-		respondWithError(w, http.StatusNotFound, fmt.Sprintf("File not found: %s", filePath))
+		log.Printf("[ERROR] Failed to resolve output directory: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-	_ = fileInfo.Close()
+
+	// Resolve requested path to absolute path
+	// Note: We treat relative paths as relative to CWD, which matches http.Dir(".").Open behavior
+	absFilePath, err := filepath.Abs(filePath)
+	if err != nil {
+		log.Printf("[ERROR] Failed to resolve file path: %v", err)
+		respondWithError(w, http.StatusBadRequest, "Invalid path")
+		return
+	}
+
+	// Ensure the path is clean
+	absFilePath = filepath.Clean(absFilePath)
+
+	// Check if the file is inside the output directory
+	// We append PathSeparator to ensure we don't match partial directory names (e.g. /tmp/exp vs /tmp/export)
+	// We also allow the output directory itself (though downloading a dir usually fails or is not what we want)
+	prefix := absOutputDir + string(os.PathSeparator)
+	if !strings.HasPrefix(absFilePath, prefix) && absFilePath != absOutputDir {
+		log.Printf("[WARN] Blocked path traversal attempt: %s (resolved: %s, allowed: %s)", filePath, absFilePath, absOutputDir)
+		respondWithError(w, http.StatusForbidden, "Access denied: file must be in export directory")
+		return
+	}
+
+	// Check if file exists
+	info, err := os.Stat(absFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("[ERROR] File not found: %s", absFilePath)
+			respondWithError(w, http.StatusNotFound, fmt.Sprintf("File not found: %s", filePath))
+			return
+		}
+		log.Printf("[ERROR] File access error: %v", err)
+		respondWithError(w, http.StatusInternalServerError, "File access error")
+		return
+	}
+
+	if info.IsDir() {
+		respondWithError(w, http.StatusBadRequest, "Cannot download a directory")
+		return
+	}
 
 	// Set headers for download
 	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+filePath+"\"")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+filepath.Base(absFilePath)+"\"")
 
-	log.Printf("[OK] Serving file for download")
+	log.Printf("[OK] Serving file for download: %s", absFilePath)
 
 	// Serve file
-	http.ServeFile(w, r, filePath)
+	http.ServeFile(w, r, absFilePath)
 }
 
 // obfuscateSamples applies obfuscation to sample metrics

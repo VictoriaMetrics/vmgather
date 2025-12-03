@@ -117,7 +117,7 @@ test.describe('Complete E2E Flow Tests', () => {
     await expect(urlExamples).toHaveCount(11);
 
     // Fill VM URL
-    await page.locator('#vmUrl').fill('http://localhost:8428');
+    await page.locator('#vmUrl').fill('http://localhost:18428');
 
     // Test authentication options
     await page.locator('#authType').selectOption('none');
@@ -202,7 +202,7 @@ test.describe('Complete E2E Flow Tests', () => {
   });
 
   test('should validate time range on Step 2', async ({ page }) => {
-  await page.locator('.step.active button:has-text("Next")').first().click();
+    await page.locator('.step.active button:has-text("Next")').first().click();
     await page.waitForTimeout(300);
 
     // Clear inputs
@@ -216,7 +216,7 @@ test.describe('Complete E2E Flow Tests', () => {
       await dialog.accept();
     });
 
-  await page.locator('.step.active button:has-text("Next")').first().click();
+    await page.locator('.step.active button:has-text("Next")').first().click();
     await page.waitForTimeout(200);
 
     await expect(page.locator('.step-info')).toContainText('Step 2 of 6');
@@ -307,7 +307,7 @@ test.describe('Complete E2E Flow Tests', () => {
     await page.waitForTimeout(200);
 
     // Provide valid URL so validation enables the button
-    await page.locator('#vmUrl').fill('http://localhost:8428');
+    await page.locator('#vmUrl').fill('http://localhost:18428');
     await expect(page.locator('#testConnectionBtn')).toBeEnabled();
 
     // Click Test Connection (mocked)

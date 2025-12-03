@@ -8,13 +8,14 @@ services:
   # Scenario 1: VMSingle without auth (simplest case)
   # ============================================================================
   vmsingle-noauth:
-    image: victoriametrics/victoria-metrics:latest
+    image: victoriametrics/victoria-metrics:v1.129.1
     container_name: vmsingle-noauth
     ports:
-      - "8428:8428"
+      - "18428:8428" # use non-default host port to avoid conflicts with host/local VM
     command:
       - "--storageDataPath=/storage"
       - "--httpListenAddr=:8428"
+      - "-selfScrapeInterval=10s"
     volumes:
       - vmsingle-noauth-data:/storage
     networks:
@@ -24,10 +25,10 @@ services:
   # Scenario 2: VMSingle with basic auth via vmauth
   # ============================================================================
   vmsingle-auth:
-    image: victoriametrics/victoria-metrics:latest
+    image: victoriametrics/victoria-metrics:v1.129.1
     container_name: vmsingle-auth
     ports:
-      - "8429:8428"
+      - "18429:8428"
     command:
       - "--storageDataPath=/storage"
       - "--httpListenAddr=:8428"
@@ -228,4 +229,3 @@ volumes:
 networks:
   vmtest:
     driver: bridge
-

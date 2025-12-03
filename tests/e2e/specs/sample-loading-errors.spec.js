@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Sample Loading - Error Handling', () => {
-  
+
   test.beforeEach(async ({ page }) => {
     // Mock validation and discovery
     await page.route('/api/validate', async route => {
@@ -15,7 +15,7 @@ test.describe('Sample Loading - Error Handling', () => {
         })
       });
     });
-    
+
     await page.route('/api/discover', async route => {
       await route.fulfill({
         status: 200,
@@ -33,7 +33,7 @@ test.describe('Sample Loading - Error Handling', () => {
       });
     });
   });
-  
+
   test('should display error message when sample loading fails', async ({ page }) => {
     // Mock sample endpoint to return error
     await page.route('/api/sample', async route => {
@@ -45,35 +45,35 @@ test.describe('Sample Loading - Error Handling', () => {
         })
       });
     });
-    
+
     // Navigate to step 5
     await page.goto('/');
     await page.locator('.step.active button:has-text("Next")').first().click();
     await page.locator('.step.active button:has-text("Next")').first().click();
-    await page.locator('.step.active #vmUrl').fill('http://localhost:8428');
+    await page.locator('.step.active #vmUrl').fill('http://localhost:18428');
     await page.locator('.step.active #testConnectionBtn').click();
     await page.waitForSelector('.step.active #step3Next:not([disabled])', { timeout: 10000 });
     await page.locator('.step.active #step3Next').click();
     await page.waitForSelector('.component-item');
     await page.locator('.component-header input[type="checkbox"]').first().click();
     await page.locator('.step.active button:has-text("Next")').first().click();
-    
+
     // Step 5: Obfuscation - open advanced labels
     await page.waitForSelector('.step.active h2:has-text("Obfuscation")');
     await page.locator('summary:has-text("Advanced: Obfuscate other labels")').click();
-    
+
     // Wait for error message
     await page.waitForSelector('.error-message', { timeout: 5000 });
-    
+
     // Verify error is displayed
     const errorText = await page.locator('.error-message').first().textContent();
     expect(errorText).toContain('Failed to load sample metrics');
     expect(errorText).toContain('VM connection timeout');
-    
+
     // Verify retry button is present
     await expect(page.locator('button:has-text("Retry")')).toBeVisible();
   });
-  
+
   test('should show loading spinner while loading samples', async ({ page }) => {
     // Mock sample endpoint with delay
     await page.route('/api/sample', async route => {
@@ -97,61 +97,61 @@ test.describe('Sample Loading - Error Handling', () => {
         })
       });
     });
-    
+
     // Navigate to step 5
     await page.goto('/');
     await page.locator('.step.active button:has-text("Next")').first().click();
     await page.locator('.step.active button:has-text("Next")').first().click();
-    await page.locator('.step.active #vmUrl').fill('http://localhost:8428');
+    await page.locator('.step.active #vmUrl').fill('http://localhost:18428');
     await page.locator('.step.active #testConnectionBtn').click();
     await page.waitForSelector('.step.active #step3Next:not([disabled])', { timeout: 10000 });
     await page.locator('.step.active #step3Next').click();
     await page.waitForSelector('.component-item');
     await page.locator('.component-header input[type="checkbox"]').first().click();
     await page.locator('.step.active button:has-text("Next")').click();
-    
+
     await page.waitForSelector('.step.active h2:has-text("Obfuscation")');
     await page.locator('summary:has-text("Advanced: Obfuscate other labels")').click();
-    
+
     // Verify loading spinner appears
     await expect(page.locator('text=Loading sample metrics')).toBeVisible();
-    
+
     // Wait for loading to complete
     await page.waitForSelector('.label-item', { timeout: 5000 });
   });
-  
+
   test('should handle network errors gracefully', async ({ page }) => {
     // Mock sample endpoint to fail with network error
     await page.route('/api/sample', async route => {
       await route.abort('failed');
     });
-    
+
     // Navigate to step 5
     await page.goto('/');
     await page.locator('.step.active button:has-text("Next")').click();
     await page.locator('.step.active button:has-text("Next")').click();
-    await page.locator('.step.active #vmUrl').fill('http://localhost:8428');
+    await page.locator('.step.active #vmUrl').fill('http://localhost:18428');
     await page.locator('.step.active #testConnectionBtn').click();
     await page.waitForSelector('.step.active #step3Next:not([disabled])', { timeout: 10000 });
     await page.locator('.step.active #step3Next').click();
     await page.waitForSelector('.component-item');
     await page.locator('.component-header input[type="checkbox"]').first().click();
     await page.locator('.step.active button:has-text("Next")').click();
-    
+
     await page.waitForSelector('.step.active h2:has-text("Obfuscation")');
     await page.locator('summary:has-text("Advanced: Obfuscate other labels")').click();
-    
+
     // Wait for error message
     await page.waitForSelector('.error-message', { timeout: 5000 });
-    
+
     // Verify error message is shown
     const errorText = await page.locator('.error-message').first().textContent();
     expect(errorText).toContain('Failed to load sample metrics');
   });
-  
+
   test('should allow retry after error', async ({ page }) => {
     let callCount = 0;
-    
+
     // Mock sample endpoint to fail first time, succeed second time
     await page.route('/api/sample', async route => {
       callCount++;
@@ -178,31 +178,31 @@ test.describe('Sample Loading - Error Handling', () => {
         });
       }
     });
-    
+
     // Navigate to step 5
     await page.goto('/');
     await page.locator('.step.active button:has-text("Next")').click();
     await page.locator('.step.active button:has-text("Next")').click();
-    await page.locator('.step.active #vmUrl').fill('http://localhost:8428');
+    await page.locator('.step.active #vmUrl').fill('http://localhost:18428');
     await page.locator('.step.active #testConnectionBtn').click();
     await page.waitForSelector('.step.active #step3Next:not([disabled])', { timeout: 10000 });
     await page.locator('.step.active #step3Next').click();
     await page.waitForSelector('.component-item');
     await page.locator('.component-header input[type="checkbox"]').first().click();
     await page.locator('.step.active button:has-text("Next")').click();
-    
+
     await page.waitForSelector('.step.active h2:has-text("Obfuscation")');
     await page.locator('summary:has-text("Advanced: Obfuscate other labels")').click();
-    
+
     // Wait for error
     await page.waitForSelector('.error-message', { timeout: 5000 });
-    
+
     // Click retry
     await page.locator('button:has-text("Retry")').click();
-    
+
     // Wait for success - labels should appear
     await page.waitForSelector('.label-item', { timeout: 5000 });
-    
+
     // Verify no error is shown
     await expect(page.locator('.error-message')).not.toBeVisible();
   });

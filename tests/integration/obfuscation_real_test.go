@@ -28,7 +28,7 @@ func TestObfuscation_RealExport(t *testing.T) {
 
 	// Use local VM without auth
 	conn := domain.VMConnection{
-		URL: "http://localhost:8428",
+		URL: "http://localhost:18428",
 	}
 
 	exportService := services.NewExportService(t.TempDir(), "integration-test")
@@ -113,7 +113,7 @@ func TestObfuscation_NoObfuscation(t *testing.T) {
 	defer cancel()
 
 	conn := domain.VMConnection{
-		URL: "http://localhost:8428",
+		URL: "http://localhost:18428",
 	}
 
 	exportService := services.NewExportService(t.TempDir(), "integration-test")
@@ -167,7 +167,7 @@ func TestObfuscation_OnlyInstance(t *testing.T) {
 	defer cancel()
 
 	conn := domain.VMConnection{
-		URL: "http://localhost:8428",
+		URL: "http://localhost:18428",
 	}
 
 	exportService := services.NewExportService(t.TempDir(), "integration-test")

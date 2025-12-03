@@ -14,16 +14,16 @@ import (
 // curl --user 'monitoring-read:PASSWORD' 'https://vm.example.com/1011/ui/prometheus/api/v1/query?query=sum(1)'
 func TestRealCustomerURL(t *testing.T) {
 	t.Skip("Skipping test with real customer URL - requires real credentials")
-	
+
 	config := domain.ExportConfig{
 		Connection: domain.VMConnection{
 			URL:         "https://vm.example.com",
-			ApiBasePath: "/1011/ui/prometheus",  // Customer's actual path
+			ApiBasePath: "/1011/ui/prometheus", // Customer's actual path
 			TenantId:    "1011",
 			Auth: domain.AuthConfig{
 				Type:     domain.AuthTypeBasic,
 				Username: "monitoring-read",
-				Password: "FAKE_PASSWORD",  // User must provide real password
+				Password: "FAKE_PASSWORD", // User must provide real password
 			},
 		},
 		TimeRange: domain.TimeRange{
@@ -40,7 +40,7 @@ func TestRealCustomerURL(t *testing.T) {
 
 	// Test simple query
 	samples, err := vmService.GetSample(ctx, config, 5)
-	
+
 	if err != nil {
 		t.Logf("[FAIL] Sample failed: %v", err)
 		t.Fatalf("Sample failed (expected with fake password): %v", err)
@@ -77,7 +77,7 @@ func TestURLPathNormalization(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			config := domain.ExportConfig{
 				Connection: domain.VMConnection{
-					URL:         "http://localhost:8428",
+					URL:         "http://localhost:18428",
 					ApiBasePath: tt.inputPath,
 					Auth: domain.AuthConfig{
 						Type: domain.AuthTypeNone,
@@ -95,12 +95,12 @@ func TestURLPathNormalization(t *testing.T) {
 
 			// This will fail (no VM at localhost:8428), but we can check logs
 			_, err := vmService.GetSample(ctx, config, 1)
-			
+
 			// We expect it to fail, but logs should show normalization
 			if err == nil {
 				t.Fatal("Expected error (no VM running), but got success")
 			}
-			
+
 			t.Logf("Error (expected): %v", err)
 			t.Logf("Check logs above for: %s", tt.expectedLog)
 		})
@@ -158,10 +158,9 @@ func TestFrontendURLParsing(t *testing.T) {
 			t.Logf("Expected ApiPath: %s", tt.expectedApiPath)
 			t.Logf("Expected TenantId: %s", tt.expectedTenantId)
 			t.Logf("Expected FullApiUrl: %s", tt.expectedFullApiUrl)
-			
+
 			// TODO: Implement actual frontend parsing logic here
 			// For now, this test just documents expected behavior
 		})
 	}
 }
-

@@ -37,6 +37,7 @@ type VMConnection struct {
 	FullApiUrl    string     `json:"full_api_url,omitempty"`   // Complete URL with base path
 	Auth          AuthConfig `json:"auth"`
 	SkipTLSVerify bool       `json:"skip_tls_verify"`
+	Debug         bool       `json:"debug,omitempty"`
 }
 
 // VMComponent represents a discovered VictoriaMetrics component

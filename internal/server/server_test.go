@@ -27,7 +27,12 @@ func TestServer_GetSampleDataFromResult(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	server := NewServer(tmpDir, "test-version")
+	server := NewServer(tmpDir, "test-version", false)
+	// Use mock service to avoid network calls
+	server.vmService = &mockVMService{
+		samples: []domain.MetricSample{},
+	}
+
 	ctx := context.Background()
 
 	// Create a mock config
@@ -50,9 +55,15 @@ func TestServer_GetSampleDataFromResult(t *testing.T) {
 	}
 
 	// Test with empty samples (should return empty array, not error)
-	sampleData := server.getSampleDataFromResult(ctx, config)
+	sampleData, err := server.getSampleDataFromResult(ctx, config)
+	if err != nil {
+		t.Errorf("getSampleDataFromResult returned error: %v", err)
+	}
 	if sampleData == nil {
 		t.Error("getSampleDataFromResult should return non-nil array")
+	}
+	if len(sampleData) != 0 {
+		t.Errorf("expected 0 samples, got %d", len(sampleData))
 	}
 }
 
@@ -65,7 +76,7 @@ func TestServer_HandleGetSample_ResponseFormat(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	server := NewServer(tmpDir, "test-version")
+	server := NewServer(tmpDir, "test-version", false)
 
 	// Create request
 	reqBody := map[string]interface{}{
@@ -192,7 +203,7 @@ func TestHandleExportStart_StagingPermissionDenied(t *testing.T) {
 		t.Fatalf("failed to create read-only dir: %v", err)
 	}
 
-	server := NewServer(tmpDir, "test-version")
+	server := NewServer(tmpDir, "test-version", false)
 	reqBody := map[string]interface{}{
 		"connection": map[string]interface{}{
 			"url":  "http://localhost:8428",
@@ -232,7 +243,7 @@ func TestHandleListDirectory(t *testing.T) {
 		t.Fatalf("failed to create child dir: %v", err)
 	}
 
-	server := NewServer(tmpDir, "test-version")
+	server := NewServer(tmpDir, "test-version", false)
 	req := httptest.NewRequest(http.MethodGet, "/api/fs/list?path="+tmpDir, nil)
 	w := httptest.NewRecorder()
 
@@ -258,7 +269,7 @@ func TestHandleCheckDirectory(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	server := NewServer(tmpDir, "test-version")
+	server := NewServer(tmpDir, "test-version", false)
 	reqBody := map[string]string{"path": tmpDir}
 	body, _ := json.Marshal(reqBody)
 	req := httptest.NewRequest(http.MethodPost, "/api/fs/check", bytes.NewReader(body))
@@ -289,7 +300,7 @@ func TestHandleCheckDirectoryCreatesMissing(t *testing.T) {
 	tmpDir := t.TempDir()
 	missing := filepath.Join(tmpDir, "nested", "dir")
 
-	server := NewServer(tmpDir, "test-version")
+	server := NewServer(tmpDir, "test-version", false)
 
 	// First call without ensure should indicate it can be created
 	reqBody := map[string]interface{}{"path": missing}
@@ -335,7 +346,7 @@ func TestHandleCheckDirectoryCreatesMissing(t *testing.T) {
 
 func TestHandleExportCancel(t *testing.T) {
 	tmpDir := t.TempDir()
-	server := NewServer(tmpDir, "test-version")
+	server := NewServer(tmpDir, "test-version", false)
 	blocker := &blockingExportService{blockCh: make(chan struct{})}
 	server.jobManager = NewExportJobManager(blocker)
 
@@ -365,12 +376,12 @@ func TestHandleExportCancel(t *testing.T) {
 
 	// Give the cancel signal time to be processed
 	time.Sleep(50 * time.Millisecond)
-	
+
 	close(blocker.blockCh)
 	deadline := time.After(3 * time.Second)
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-deadline:
@@ -402,7 +413,7 @@ func TestEnsureBatchDefaultsSetsMetricStep(t *testing.T) {
 
 func TestServer_GetSampleDataFromResult_ObfuscatesWhenEnabled(t *testing.T) {
 	tmpDir := t.TempDir()
-	server := NewServer(tmpDir, "test-version")
+	server := NewServer(tmpDir, "test-version", false)
 
 	server.vmService = &mockVMService{
 		samples: []domain.MetricSample{
@@ -427,7 +438,10 @@ func TestServer_GetSampleDataFromResult_ObfuscatesWhenEnabled(t *testing.T) {
 		},
 	}
 
-	data := server.getSampleDataFromResult(context.Background(), config)
+	data, err := server.getSampleDataFromResult(context.Background(), config)
+	if err != nil {
+		t.Fatalf("getSampleDataFromResult failed: %v", err)
+	}
 	if len(data) != 1 {
 		t.Fatalf("expected 1 sample, got %d", len(data))
 	}
@@ -447,7 +461,7 @@ func TestServer_GetSampleDataFromResult_ObfuscatesWhenEnabled(t *testing.T) {
 
 func TestServer_GetSampleDataFromResult_NoSamplesMock(t *testing.T) {
 	tmpDir := t.TempDir()
-	server := NewServer(tmpDir, "test-version")
+	server := NewServer(tmpDir, "test-version", false)
 	server.vmService = &mockVMService{
 		samples: []domain.MetricSample{},
 	}
@@ -459,7 +473,10 @@ func TestServer_GetSampleDataFromResult_NoSamplesMock(t *testing.T) {
 		},
 	}
 
-	data := server.getSampleDataFromResult(context.Background(), config)
+	data, err := server.getSampleDataFromResult(context.Background(), config)
+	if err != nil {
+		t.Fatalf("getSampleDataFromResult failed: %v", err)
+	}
 	if data == nil {
 		t.Fatal("expected non-nil slice")
 	}

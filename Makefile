@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-full test-llm build build-safe build-all clean fmt lint help test-env test-env-up test-env-down test-env-logs test-scenarios docker-build docker-build-vmgather docker-build-vmimporter
+.PHONY: test test-fast test-llm build build-safe build-all clean fmt lint help test-env test-env-up test-env-down test-env-logs test-scenarios docker-build docker-build-vmgather docker-build-vmimporter
 
 VERSION ?= $(shell git describe --tags --always --dirty)
 PLATFORMS ?= linux/amd64,linux/arm64
@@ -293,6 +293,15 @@ lint:
 # =============================================================================
 
 # Start test environment with all VM scenarios
+# Start test environment with all VM test instances
+# Full clean-slate test environment cycle (cleans up before and after)
+test-env-full:
+	$(MAKE) test-env-down
+	docker volume prune -f || true
+	$(MAKE) test-env-up
+	$(MAKE) test
+	$(MAKE) test-env-down
+
 test-env-up:
 	@echo "================================================================================"
 	@echo "Starting Test Environment"
@@ -307,10 +316,13 @@ test-env-up:
 	@echo "Waiting for services to be ready (30 seconds)..."
 	@sleep 30
 	@echo ""
+	@echo "Running healthcheck..."
+	@cd local-test-env && ./healthcheck.sh
+	@echo ""
 	@echo "[OK] Test environment is ready!"
 	@echo ""
 	@echo "Available instances:"
-	@echo "  - VMSingle No Auth:     http://localhost:8428"
+	@echo "  - VMSingle No Auth:     http://localhost:18428"
 	@echo "  - VMSingle via VMAuth:  http://localhost:8427"
 	@echo "  - VM Cluster:           http://localhost:8481"
 	@echo "  - VM Cluster via VMAuth: http://localhost:8426"

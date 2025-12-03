@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	version = "1.0.0"
+	version = "1.4.0"
 )
 
 func main() {
@@ -26,6 +26,7 @@ func main() {
 	addr := flag.String("addr", "localhost:8080", "HTTP server address")
 	outputDir := flag.String("output", "./exports", "Export output directory")
 	noBrowser := flag.Bool("no-browser", false, "Don't open browser automatically")
+	debug := flag.Bool("debug", false, "Enable debug logging")
 	flag.Parse()
 
 	log.Printf("VMGather v%s starting...", version)
@@ -40,7 +41,7 @@ func main() {
 	}
 
 	// Create HTTP server
-	srv := server.NewServer(*outputDir, version)
+	srv := server.NewServer(*outputDir, version, *debug)
 	httpServer := &http.Server{
 		Addr:    finalAddr,
 		Handler: srv.Router(),

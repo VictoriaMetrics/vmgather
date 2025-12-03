@@ -26,7 +26,7 @@ Official walkthrough for the VictoriaMetrics metrics export wizard.
 
 ### Supported target URLs
 
-- VMSingle: `https://vm.example.com:8428`
+- VMSingle: `https://vm.example.com:18428`
 - VMCluster (tenant 0): `https://vmselect.example.com:8481/select/0/prometheus`
 - VMCluster + VMAuth: `https://vmauth.example.com/select/0/prometheus`
 - VictoriaMetrics Managed / MaaS: `https://<tenant>.victoriametrics.cloud/<tenant-id>/rw/prometheus`
@@ -98,7 +98,7 @@ Importer UI mirrors the exporter wizard but is tailored for replaying VMGather b
 
 ## Steps
 
-1. **Connection**: enter the target import endpoint (`http://localhost:8428`, `https://vm.example.com/1234/prometheus`, `/select/0/prometheus`, etc.), optional Tenant / Account ID, and auth (None/Basic/Bearer/Header). Test Connection must be green.
+1. **Connection**: enter the target import endpoint (`http://localhost:18428`, `https://vm.example.com/1234/prometheus`, `/select/0/prometheus`, etc.), optional Tenant / Account ID, and auth (None/Basic/Bearer/Header). Test Connection must be green.
 2. **Bundle**: drop a VMGather bundle (`.jsonl` or `.zip`). Preflight starts automatically:
    - validates JSONL structure and values,
    - reads time range (UTC),

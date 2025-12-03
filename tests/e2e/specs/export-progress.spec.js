@@ -145,7 +145,7 @@ async function goToObfuscationStep(page) {
   }
   await page.waitForSelector('.step[data-step="2"].active');
   await page.locator('.step.active button:has-text("Next")').first().click();
-  await page.locator('#vmUrl').fill('http://localhost:8428');
+  await page.locator('#vmUrl').fill('http://localhost:18428');
   await page.locator('#testConnectionBtn').click();
   await page.waitForSelector('#step3Next:enabled');
   await page.locator('#step3Next').click();
@@ -283,25 +283,25 @@ test('allows canceling an export job', async ({ page }) => {
   await page.route('**/api/export/status**', route => {
     const body = canceledState
       ? {
-          job_id: 'job-cancel',
-          state: 'canceled',
-          total_batches: 5,
-          completed_batches: 2,
-          progress: 0.4,
-          metrics_processed: 20000,
-          batch_window_seconds: 60,
-          staging_path: STAGING_DIR,
-        }
+        job_id: 'job-cancel',
+        state: 'canceled',
+        total_batches: 5,
+        completed_batches: 2,
+        progress: 0.4,
+        metrics_processed: 20000,
+        batch_window_seconds: 60,
+        staging_path: STAGING_DIR,
+      }
       : {
-          job_id: 'job-cancel',
-          state: 'running',
-          total_batches: 5,
-          completed_batches: 1,
-          progress: 0.2,
-          metrics_processed: 10000,
-          batch_window_seconds: 60,
-          staging_path: STAGING_DIR,
-        };
+        job_id: 'job-cancel',
+        state: 'running',
+        total_batches: 5,
+        completed_batches: 1,
+        progress: 0.2,
+        metrics_processed: 10000,
+        batch_window_seconds: 60,
+        staging_path: STAGING_DIR,
+      };
     route.fulfill({
       status: 200,
       headers: { 'content-type': 'application/json' },
