@@ -37,27 +37,31 @@ jobs:
           echo "Building version: $VERSION"
           go run ./build/builder.go
 
-      - name: Build Docker images
-        run: make docker-build PLATFORMS=linux/amd64 VERSION=${{ github.ref_name }}
-
-      - name: Push Docker images
+      - name: Build & push vmgather (multi-arch to GHCR)
         env:
           VERSION: ${{ github.ref_name }}
         run: |
-          # Lowercase repository owner
           OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          
-          # Tag and push vmgather
-          docker tag vmgather:$VERSION ghcr.io/$OWNER/vmgather:$VERSION
-          docker tag vmgather:$VERSION ghcr.io/$OWNER/vmgather:latest
-          docker push ghcr.io/$OWNER/vmgather:$VERSION
-          docker push ghcr.io/$OWNER/vmgather:latest
-          
-          # Tag and push vmimporter
-          docker tag vmimporter:$VERSION ghcr.io/$OWNER/vmimporter:$VERSION
-          docker tag vmimporter:$VERSION ghcr.io/$OWNER/vmimporter:latest
-          docker push ghcr.io/$OWNER/vmimporter:$VERSION
-          docker push ghcr.io/$OWNER/vmimporter:latest
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg GO_VERSION=1.22 \
+            -f build/docker/Dockerfile.vmgather \
+            -t ghcr.io/$OWNER/vmgather:$VERSION \
+            -t ghcr.io/$OWNER/vmgather:latest \
+            --push .
+
+      - name: Build & push vmimporter (multi-arch to GHCR)
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg GO_VERSION=1.22 \
+            -f build/docker/Dockerfile.vmimporter \
+            -t ghcr.io/$OWNER/vmimporter:$VERSION \
+            -t ghcr.io/$OWNER/vmimporter:latest \
+            --push .
 
       - name: Upload binaries to release
         uses: softprops/action-gh-release@v1
