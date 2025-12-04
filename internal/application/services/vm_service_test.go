@@ -3,8 +3,8 @@ package services
 import (
 	"testing"
 
-	"github.com/VictoriaMetrics/VMGather/internal/domain"
-	"github.com/VictoriaMetrics/VMGather/internal/infrastructure/vm"
+	"github.com/VictoriaMetrics/vmgather/internal/domain"
+	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/vm"
 )
 
 // TestNewVMService tests service creation

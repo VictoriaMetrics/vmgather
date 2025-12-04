@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/VictoriaMetrics/VMGather/internal/domain"
-	"github.com/VictoriaMetrics/VMGather/internal/infrastructure/vm"
+	"github.com/VictoriaMetrics/vmgather/internal/domain"
+	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/vm"
 )
 
 // VMService interface for VictoriaMetrics operations

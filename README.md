@@ -1,6 +1,6 @@
-# VMGather
+# vmgather
 
-VMGather collects VictoriaMetrics internal metrics, obfuscates sensitive data, and produces support-ready bundles in a single binary.
+vmgather collects VictoriaMetrics internal metrics, obfuscates sensitive data, and produces support-ready bundles in a single binary.
 
 ## Table of contents
 
@@ -26,7 +26,7 @@ VMGather collects VictoriaMetrics internal metrics, obfuscates sensitive data, a
 - **Adjustable metric cadence** – choose 30s/1m/5m dedup steps per export or override explicitly.
 - **Batched exports with ETA** – splits long ranges into windows and shows progress + forecasted completion.
 - **Wide auth surface** – Basic, Bearer, custom headers, multi-tenant VMAuth flows; importer forwards tenant headers.
-- **Chunked importing** – importer streams VMGather bundles in resumable chunks with post-upload verification.
+- **Chunked importing** – importer streams vmgather bundles in resumable chunks with post-upload verification.
 - **Retention-aware imports** – importer trims samples outside target retention by default and displays cutoff in UTC with auto preflight on file drop.
 - **Time alignment helper** – choose “Align first sample” or “Shift to now” to slide bundles into the active retention window before upload.
 - **Cross-platform builds** – Linux, macOS, Windows (amd64/arm64/386).
@@ -34,7 +34,7 @@ VMGather collects VictoriaMetrics internal metrics, obfuscates sensitive data, a
 
 ## Downloads
 
-Grab the latest binaries from the [Releases page](https://github.com/VictoriaMetrics/VMGather/releases) or reuse them from CI artifacts.
+Grab the latest binaries from the [Releases page](https://github.com/VictoriaMetrics/vmgather/releases) or reuse them from CI artifacts.
 
 | Platform | File name pattern | Notes |
 | --- | --- | --- |
@@ -85,8 +85,8 @@ The binary starts an HTTP server and opens a browser window at `http://localhost
 Requirements: Go 1.21+, Make, Git.
 
 ```bash
-git clone https://github.com/VictoriaMetrics/VMGather.git
-cd VMGather
+git clone https://github.com/VictoriaMetrics/vmgather.git
+cd vmgather
 make build
 ./vmgather
 ```
@@ -99,7 +99,7 @@ Use [Buildx](https://docs.docker.com/build/building/multi-platform/) to produce 
 # Build both utilities
 make docker-build
 
-# Run VMGather at http://localhost:8080
+# Run vmgather at http://localhost:8080
 docker run --rm -p 8080:8080 vmgather:$(git describe --tags --always)
 
 # Run VMImport at http://localhost:8081
@@ -112,18 +112,18 @@ Both Dockerfiles live in `build/docker/` and follow distroless best practices (s
 
 ### CLI flags
 
-Both `vmgather` and `vmimporter` support `-addr` (bind address) and `-no-browser` to skip auto-launching a browser during scripting or Docker-based runs. VMGather's default is `localhost:8080` with automatic fallback to a free port; VMImport defaults to `0.0.0.0:8081` to avoid clashing with VMGather. VMGather also accepts `-output` to choose the directory for generated archives (defaults to `./exports`).
+Both `vmgather` and `vmimporter` support `-addr` (bind address) and `-no-browser` to skip auto-launching a browser during scripting or Docker-based runs. vmgather's default is `localhost:8080` with automatic fallback to a free port; VMImport defaults to `0.0.0.0:8081` to avoid clashing with vmgather. vmgather also accepts `-output` to choose the directory for generated archives (defaults to `./exports`).
 
 ## VMImport companion
 
-VMImport is a sibling utility that consumes VMGather bundles (`.jsonl` or `.zip`) and replays them into VictoriaMetrics via the `/api/v1/import` endpoint. It ships with the same embedded UI/HTTP server approach for parity:
+VMImport is a sibling utility that consumes vmgather bundles (`.jsonl` or `.zip`) and replays them into VictoriaMetrics via the `/api/v1/import` endpoint. It ships with the same embedded UI/HTTP server approach for parity:
 
-- Reuses the connection card from VMGather, but adds a dedicated **Tenant / Account ID** input so multi-tenant inserts are one click away.
+- Reuses the connection card from vmgather, but adds a dedicated **Tenant / Account ID** input so multi-tenant inserts are one click away.
 - Drag-and-drop bundle picker triggers an automatic preflight (JSONL sanity, retention cutoff, time range, suggested shift) and displays friendly progress/error states.
 - Retention trimming is enabled by default; the UI shows the target cutoff in UTC and the shifted bundle range before upload.
 - Time alignment controls stay disabled until analysis finishes; “Shift to now” and suggested-shift buttons ensure the bundle fits the active retention.
 - Supports Basic auth, TLS verification toggles, and streaming large files directly to VictoriaMetrics.
-- Shares the local-test environment (`local-test-env/`) so you can exercise uploads against the same scenarios used for VMGather.
+- Shares the local-test environment (`local-test-env/`) so you can exercise uploads against the same scenarios used for vmgather.
 
 Run the importer binary directly:
 
@@ -137,7 +137,7 @@ Run the importer binary directly:
 docker run --rm -p 8081:8081 vmimporter:latest
 ```
 
-The UI exposes the same health endpoint (`/api/health`) as VMGather for container liveness probes.
+The UI exposes the same health endpoint (`/api/health`) as vmgather for container liveness probes.
 
 ## Documentation set
 
@@ -158,7 +158,7 @@ Exporter
 
 Importer
 1. Start `./vmimporter` (or Docker) – UI runs at `:8081` by default.
-2. **Select bundle** – drop a VMGather `.zip`/`.jsonl` or pick via file dialog.
+2. **Select bundle** – drop a vmgather `.zip`/`.jsonl` or pick via file dialog.
 3. **Endpoint & auth** – enter VictoriaMetrics import URL, tenant/account ID, and auth (Basic or custom header); toggle TLS verify as needed.
 4. **Analyze (optional)** – run preflight to see time range, series hints, retention warnings, and sample labels.
 5. **Import** – start upload; importer streams in ~512KB chunks, shows progress, and verifies data via `/api/v1/series` after completion. Resume is available if a job fails mid-flight.
@@ -210,4 +210,4 @@ See the project's [SECURITY.md](SECURITY.md) for reporting instructions.
 ## License & support
 
 - License: [Apache 2.0](LICENSE)
-- Issues: https://github.com/VictoriaMetrics/VMGather/issues
+- Issues: https://github.com/VictoriaMetrics/vmgather/issues

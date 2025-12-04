@@ -1,12 +1,12 @@
-# Contributing to VMGather
+# Contributing to vmgather
 
 Thanks for helping improve the VictoriaMetrics toolchain! The guidelines below mirror the workflow we use across other VictoriaMetrics repositories.
 
 ## Report bugs and feature requests
 
-- Use [GitHub Issues](https://github.com/VictoriaMetrics/VMGather/issues) for all defects, regressions, and feature proposals.
+- Use [GitHub Issues](https://github.com/VictoriaMetrics/vmgather/issues) for all defects, regressions, and feature proposals.
 - Please attach:
-  - VMGather version (binary name or git commit),
+  - vmgather version (binary name or git commit),
   - OS / architecture,
   - VictoriaMetrics flavour (single / cluster / managed) and version,
   - Exact repro steps and expected behaviour,
@@ -26,8 +26,8 @@ Prerequisites:
 Bootstrap:
 
 ```bash
-git clone https://github.com/VictoriaMetrics/VMGather.git
-cd VMGather
+git clone https://github.com/VictoriaMetrics/vmgather.git
+cd vmgather
 make deps        # optional helper to download UI deps
 make build
 ```

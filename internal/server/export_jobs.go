@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/VictoriaMetrics/VMGather/internal/application/services"
-	"github.com/VictoriaMetrics/VMGather/internal/domain"
+	"github.com/VictoriaMetrics/vmgather/internal/application/services"
+	"github.com/VictoriaMetrics/vmgather/internal/domain"
 )
 
 type ExportJobState string

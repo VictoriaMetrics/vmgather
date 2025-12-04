@@ -2,7 +2,7 @@
 const { defineConfig, devices } = require('@playwright/test');
 
 /**
- * VMGather E2E Test Configuration
+ * vmgather E2E Test Configuration
  * @see https://playwright.dev/docs/test-configuration
  */
 module.exports = defineConfig({

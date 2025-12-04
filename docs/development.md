@@ -1,6 +1,6 @@
 # Development guide
 
-Step-by-step instructions for hacking on VMGather like any other VictoriaMetrics project.
+Step-by-step instructions for hacking on vmgather like any other VictoriaMetrics project.
 
 ## Prerequisites
 
@@ -12,8 +12,8 @@ Step-by-step instructions for hacking on VMGather like any other VictoriaMetrics
 ## Bootstrap
 
 ```bash
-git clone https://github.com/VictoriaMetrics/VMGather.git
-cd VMGather
+git clone https://github.com/VictoriaMetrics/vmgather.git
+cd vmgather
 make build           # compiles ./vmgather and ./vmimporter
 ./vmgather         # launches the export wizard
 ./vmimporter         # launches the bundle uploader

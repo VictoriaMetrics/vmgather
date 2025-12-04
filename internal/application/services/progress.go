@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/VictoriaMetrics/VMGather/internal/domain"
+	"github.com/VictoriaMetrics/vmgather/internal/domain"
 )
 
 type progressKeyType struct{}

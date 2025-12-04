@@ -1,4 +1,4 @@
-// VMGather Frontend - Enhanced UX/UI
+// vmgather Frontend - Enhanced UX/UI
 // State
 let currentStep = 1;
 const totalSteps = 6;

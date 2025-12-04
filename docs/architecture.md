@@ -1,4 +1,4 @@
-# VMGather architecture
+# vmgather architecture
 
 A high-level breakdown of how the VictoriaMetrics metrics exporter is structured internally.
 
@@ -112,7 +112,7 @@ internal/importer/server
 sendToEndpoint → VictoriaMetrics /api/v1/import
 ```
 
-The UI mirrors VMGather's connection card but introduces tenant/account ID fields and a drag-and-drop area for `.jsonl`/`.zip` bundles. The backend treats uploaded data as opaque bytes and re-streams it to VictoriaMetrics, reusing the same auth/TLS toggles. Tests reuse `local-test-env` so uploads can be validated against real vmselect/vminsert setups before releasing.
+The UI mirrors vmgather's connection card but introduces tenant/account ID fields and a drag-and-drop area for `.jsonl`/`.zip` bundles. The backend treats uploaded data as opaque bytes and re-streams it to VictoriaMetrics, reusing the same auth/TLS toggles. Tests reuse `local-test-env` so uploads can be validated against real vmselect/vminsert setups before releasing.
 
 ### VMImporter specifics
 

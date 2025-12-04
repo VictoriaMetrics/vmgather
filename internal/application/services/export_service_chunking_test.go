@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/VictoriaMetrics/VMGather/internal/domain"
-	"github.com/VictoriaMetrics/VMGather/internal/infrastructure/vm"
+	"github.com/VictoriaMetrics/vmgather/internal/domain"
+	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/vm"
 )
 
 func TestExportViaQueryRange_Chunking(t *testing.T) {

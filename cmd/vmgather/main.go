@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/VictoriaMetrics/VMGather/internal/server"
+	"github.com/VictoriaMetrics/vmgather/internal/server"
 )
 
 const (
@@ -29,7 +29,7 @@ func main() {
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	flag.Parse()
 
-	log.Printf("VMGather v%s starting...", version)
+	log.Printf("vmgather v%s starting...", version)
 
 	// Try to find available port if default is busy
 	finalAddr, err := ensureAvailablePort(*addr)

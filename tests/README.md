@@ -1,6 +1,6 @@
-# VMGather Tests
+# vmgather Tests
 
-This directory contains all tests for VMGather.
+This directory contains all tests for vmgather.
 
 ## Test Structure
 
@@ -70,7 +70,7 @@ Located in `tests/e2e/`. Test the full application flow through the browser.
 
 **Prerequisites:**
 - Node.js 18+
-- VMGather running locally
+- vmgather running locally
 - Local test environment (for some tests)
 
 **Run E2E tests:**
@@ -94,7 +94,7 @@ npm test -- timezone-support.spec.js
 
 ## Test Environment
 
-VMGather includes a complete Docker-based test environment in `local-test-env/`.
+vmgather includes a complete Docker-based test environment in `local-test-env/`.
 
 See [local-test-env/README.md](../local-test-env/README.md) for details.
 

@@ -14,7 +14,7 @@ DOCKER_COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo "docker
 # =============================================================================
 help:
 	@echo "================================================================================"
-	@echo "VMGather - Makefile Commands"
+	@echo "vmgather - Makefile Commands"
 	@echo "================================================================================"
 	@echo ""
 	@echo "BUILD COMMANDS:"

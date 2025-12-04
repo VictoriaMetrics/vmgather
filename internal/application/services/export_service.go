@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/VictoriaMetrics/VMGather/internal/domain"
-	"github.com/VictoriaMetrics/VMGather/internal/infrastructure/archive"
-	"github.com/VictoriaMetrics/VMGather/internal/infrastructure/obfuscation"
-	"github.com/VictoriaMetrics/VMGather/internal/infrastructure/vm"
+	"github.com/VictoriaMetrics/vmgather/internal/domain"
+	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/archive"
+	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/obfuscation"
+	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/vm"
 )
 
 const defaultBatchTimeout = 2 * time.Minute

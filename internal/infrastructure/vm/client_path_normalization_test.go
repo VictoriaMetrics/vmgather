@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/VictoriaMetrics/VMGather/internal/domain"
+	"github.com/VictoriaMetrics/vmgather/internal/domain"
 )
 
 // TestBuildRequest_PathNormalization tests the path normalization logic for /export endpoint

@@ -10,7 +10,7 @@ test.describe('Navigation Tests', () => {
   test('should navigate from Step 1 (Welcome) to Step 2 (Time Range)', async ({ page }) => {
     // Verify we're on Step 1
     const step1 = page.locator('.step.active[data-step="1"]');
-    await expect(step1.locator('h2.step-title')).toContainText('Welcome to VMGather');
+    await expect(step1.locator('h2.step-title')).toContainText('Welcome to vmgather');
     await expect(page.locator('.step-info')).toContainText('Step 1 of 6: Welcome');
 
     // Find and click Next button in active step
@@ -45,7 +45,7 @@ test.describe('Navigation Tests', () => {
     
     // Verify we're back on Step 1
     await expect(page.locator('.step-info')).toContainText('Step 1 of 6: Welcome');
-    await expect(page.locator('.step.active h2.step-title')).toContainText('Welcome to VMGather');
+    await expect(page.locator('.step.active h2.step-title')).toContainText('Welcome to vmgather');
   });
 
   test('should have disabled Back button on Step 1', async ({ page }) => {

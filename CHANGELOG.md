@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to VMGather are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and versions adhere to semantic versioning.
+All notable changes to vmgather are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and versions adhere to semantic versioning.
 
 ## [v1.4.0] - 2025-12-03
 
@@ -112,7 +112,7 @@ Please report regressions or feature requests via GitHub issues or info@victoria
 ## [v1.0.0] - 2025-11-20
 
 ### Added
-- VMImport – a companion UI/binary/Docker image that replays VMGather bundles back into VictoriaMetrics (`cmd/vmimporter`, `internal/importer/server`). Includes tenant-aware endpoint form, drag-and-drop uploader, and unit tests.
+- VMImport – a companion UI/binary/Docker image that replays vmgather bundles back into VictoriaMetrics (`cmd/vmimporter`, `internal/importer/server`). Includes tenant-aware endpoint form, drag-and-drop uploader, and unit tests.
 - Official Dockerfiles for both utilities with Buildx-compatible multi-arch builds (`build/docker/Dockerfile.vmgather` and `build/docker/Dockerfile.vmimporter`), plus Make targets to produce amd64+arm64 images in CI.
 - Builder script now emits vmgather **and** vmimporter binaries across the entire platform matrix with combined checksums.
 - Docker image push automation to GitHub Container Registry (GHCR) in release workflow with versioned and `latest` tags.

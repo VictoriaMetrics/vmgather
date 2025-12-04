@@ -778,7 +778,7 @@ function formatBytes(bytes) {
     return `${value.toFixed(1)} ${units[idx]}`;
 }
 
-// Metric step reuse from VMGather
+// Metric step reuse from vmgather
 function initializeMetricStepSelector() {
     const select = document.getElementById('metricStep');
     if (select) {

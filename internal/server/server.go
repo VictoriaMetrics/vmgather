@@ -15,16 +15,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/VictoriaMetrics/VMGather/internal/application/services"
-	"github.com/VictoriaMetrics/VMGather/internal/domain"
-	"github.com/VictoriaMetrics/VMGather/internal/infrastructure/obfuscation"
-	"github.com/VictoriaMetrics/VMGather/internal/infrastructure/vm"
+	"github.com/VictoriaMetrics/vmgather/internal/application/services"
+	"github.com/VictoriaMetrics/vmgather/internal/domain"
+	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/obfuscation"
+	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/vm"
 )
 
 //go:embed static/*
 var staticFiles embed.FS
 
-// Server is the HTTP server for VMGather
+// Server is the HTTP server for vmgather
 type Server struct {
 	vmService     services.VMService
 	exportService services.ExportService
@@ -746,14 +746,14 @@ func recommendedStagingDir() string {
 	switch runtime.GOOS {
 	case "darwin":
 		if homeDir != "" {
-			return filepath.Join(homeDir, "Library", "Application Support", "VMGather", "Staging")
+			return filepath.Join(homeDir, "Library", "Application Support", "vmgather", "Staging")
 		}
 	case "windows":
 		if local := os.Getenv("LOCALAPPDATA"); local != "" {
-			return filepath.Join(local, "VMGather", "Staging")
+			return filepath.Join(local, "vmgather", "Staging")
 		}
 		if homeDir != "" {
-			return filepath.Join(homeDir, "AppData", "Local", "VMGather", "Staging")
+			return filepath.Join(homeDir, "AppData", "Local", "vmgather", "Staging")
 		}
 	default:
 		if homeDir != "" {

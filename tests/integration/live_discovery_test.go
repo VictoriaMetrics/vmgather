@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/VictoriaMetrics/VMGather/internal/application/services"
-	"github.com/VictoriaMetrics/VMGather/internal/domain"
+	"github.com/VictoriaMetrics/vmgather/internal/application/services"
+	"github.com/VictoriaMetrics/vmgather/internal/domain"
 )
 
 // This test hits a real VictoriaMetrics endpoint (default: http://localhost:18428).

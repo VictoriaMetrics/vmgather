@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/VictoriaMetrics/VMGather/internal/application/services"
-	"github.com/VictoriaMetrics/VMGather/internal/domain"
+	"github.com/VictoriaMetrics/vmgather/internal/application/services"
+	"github.com/VictoriaMetrics/vmgather/internal/domain"
 )
 
 // TestRealCustomerURL tests with the EXACT customer URL format
