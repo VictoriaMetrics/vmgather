@@ -291,7 +291,7 @@ test.describe('Complete E2E Flow Tests', () => {
     // Expand help section to verify documentation
     await page.locator('details.help-section summary').click();
     await expect(page.locator('.help-section').getByText('http://vmselect:8481').first()).toBeVisible();
-    await expect(page.locator('.help-section').getByText('http://vmsingle:8428').first()).toBeVisible();
+    await expect(page.locator('.help-section').getByText('http://vmsingle:18428').first()).toBeVisible();
     await expect(page.getByText('From Grafana datasource:')).toBeVisible();
     await expect(page.getByText('How it works')).toBeVisible();
   });
