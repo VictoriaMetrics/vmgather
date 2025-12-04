@@ -1,5 +1,4 @@
 //go:build integration && realdiscovery
-// +build integration,realdiscovery
 
 package integration
 
