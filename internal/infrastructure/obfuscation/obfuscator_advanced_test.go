@@ -14,7 +14,7 @@ import (
 // This test documents expected behavior, not current behavior
 func TestObfuscator_IPv6_Addresses(t *testing.T) {
 	t.Skip("IPv6 obfuscation not implemented yet - see test-report.md Grey Zone #1")
-	
+
 	obf := NewObfuscator()
 
 	testCases := []struct {
@@ -357,7 +357,7 @@ func TestObfuscator_MemoryUsage(t *testing.T) {
 }
 
 // TestObfuscator_SameIPDifferentPorts_SmartMapping tests smart IP preservation
-// This is a design question test - should same IP with different ports 
+// This is a design question test - should same IP with different ports
 // map to same obfuscated IP?
 func TestObfuscator_SameIPDifferentPorts_SmartMapping(t *testing.T) {
 	obf := NewObfuscator()
@@ -401,8 +401,8 @@ func TestObfuscator_JobNameSanitization(t *testing.T) {
 	obf := NewObfuscator()
 
 	testCases := []struct {
-		input    string
-		contains []string    // Result should contain these
+		input       string
+		contains    []string // Result should contain these
 		notContains []string // Result should NOT contain these
 	}{
 		{
@@ -435,4 +435,3 @@ func TestObfuscator_JobNameSanitization(t *testing.T) {
 		})
 	}
 }
-

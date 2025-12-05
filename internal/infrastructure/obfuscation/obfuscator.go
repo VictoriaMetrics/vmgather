@@ -10,8 +10,8 @@ import (
 
 // Obfuscator handles data obfuscation for sensitive labels
 type Obfuscator struct {
-	instanceMap  map[string]string // original -> obfuscated
-	jobMap       map[string]string // original -> obfuscated
+	instanceMap  map[string]string            // original -> obfuscated
+	jobMap       map[string]string            // original -> obfuscated
 	customLabels map[string]map[string]string // label -> (original -> obfuscated)
 	mu           sync.RWMutex
 
@@ -134,4 +134,3 @@ func (o *Obfuscator) hashString(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:8]) // Use first 8 bytes (16 hex chars)
 }
-

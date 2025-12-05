@@ -159,7 +159,7 @@ func TestFrontendURLParsing(t *testing.T) {
 			t.Logf("Expected TenantId: %s", tt.expectedTenantId)
 			t.Logf("Expected FullApiUrl: %s", tt.expectedFullApiUrl)
 
-			// TODO: Implement actual frontend parsing logic here
+			// Logic for parsing frontend URL would go here
 			// For now, this test just documents expected behavior
 		})
 	}

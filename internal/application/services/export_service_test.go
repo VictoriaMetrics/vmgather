@@ -219,7 +219,7 @@ func TestExportService_GenerateExportID(t *testing.T) {
 // TestExportService_BuildArchiveMetadata tests metadata building
 func TestExportService_BuildArchiveMetadata(t *testing.T) {
 	service := &exportServiceImpl{
-		vmExporterVersion: "1.0.0-test",
+		vmGatherVersion: "1.0.0-test",
 	}
 
 	now := time.Now()

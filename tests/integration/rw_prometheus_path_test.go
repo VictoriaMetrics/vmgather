@@ -85,7 +85,7 @@ func TestRealScenario_RwPrometheusPath(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		// Export should WORK because VMexporter automatically normalizes
+		// Export should WORK because VMGather automatically normalizes
 		// /rw/prometheus → /prometheus for export operations
 		_, err := exportService.ExecuteExport(ctx, config)
 		if err != nil {
@@ -180,10 +180,10 @@ func TestRealScenario_RwPrometheusPath(t *testing.T) {
 	})
 
 	// ============================================================================
-	// Scenario 3: VMexporter should normalize /rw/prometheus → /prometheus for export
+	// Scenario 3: VMGather should normalize /rw/prometheus → /prometheus for export
 	// ============================================================================
 	t.Run("Normalization_RwToPrometheus", func(t *testing.T) {
-		// This tests that VMexporter automatically normalizes the path
+		// This tests that VMGather automatically normalizes the path
 		config := domain.ExportConfig{
 			Connection: domain.VMConnection{
 				URL:        "http://localhost:8888",
@@ -208,11 +208,11 @@ func TestRealScenario_RwPrometheusPath(t *testing.T) {
 
 		// With normalization, export should work (path will be normalized to /prometheus)
 		// But in our test environment, /rw/prometheus export is blocked by design
-		// So we expect it to fail, but VMexporter should have tried to normalize
+		// So we expect it to fail, but VMGather should have tried to normalize
 		_, err := exportService.ExecuteExport(ctx, config)
 
 		// The error should NOT contain "/rw/prometheus" in the final URL
-		// because VMexporter should have normalized it
+		// because VMGather should have normalized it
 		if err != nil {
 			errMsg := err.Error()
 			// Check that error doesn't mention /rw/prometheus in the export URL

@@ -73,10 +73,10 @@ func TestWriter_CrossPlatformPaths(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			metricsData := strings.NewReader(`{"metric":{"__name__":"test"},"values":[1],"timestamps":[1]}`)
-			
+
 			metadata := ArchiveMetadata{
-				ExportID:          tt.exportID,
-				ExportDate:        time.Now(),
+				ExportID:        tt.exportID,
+				ExportDate:      time.Now(),
 				VMGatherVersion: "1.0.0-test",
 			}
 
@@ -111,10 +111,10 @@ func TestWriter_FileCollisions(t *testing.T) {
 	exportID := "export-collision-test"
 
 	metricsData := strings.NewReader(`{"metric":{"__name__":"test"},"values":[1],"timestamps":[1]}`)
-	
+
 	metadata := ArchiveMetadata{
-		ExportID:          exportID,
-		ExportDate:        time.Now(),
+		ExportID:        exportID,
+		ExportDate:      time.Now(),
 		VMGatherVersion: "1.0.0-test",
 	}
 
@@ -173,12 +173,12 @@ func TestWriter_LargeArchive(t *testing.T) {
 	}
 
 	metricsData := bytes.NewReader(buf.Bytes())
-	
+
 	metadata := ArchiveMetadata{
-		ExportID:          "export-large",
-		ExportDate:        time.Now(),
+		ExportID:        "export-large",
+		ExportDate:      time.Now(),
 		VMGatherVersion: "1.0.0-test",
-		MetricsCount:      100000,
+		MetricsCount:    100000,
 	}
 
 	start := time.Now()
@@ -245,10 +245,10 @@ func TestWriter_ConcurrentArchiveCreation(t *testing.T) {
 
 			exportID := fmt.Sprintf("export-concurrent-%d", id)
 			metricsData := strings.NewReader(fmt.Sprintf(`{"metric":{"__name__":"test_%d"},"values":[%d],"timestamps":[1]}`, id, id))
-			
+
 			metadata := ArchiveMetadata{
-				ExportID:          exportID,
-				ExportDate:        time.Now(),
+				ExportID:        exportID,
+				ExportDate:      time.Now(),
 				VMGatherVersion: "1.0.0-test",
 			}
 
@@ -303,12 +303,12 @@ func TestWriter_EmptyMetricsStream(t *testing.T) {
 
 	// Empty metrics stream
 	metricsData := strings.NewReader("")
-	
+
 	metadata := ArchiveMetadata{
-		ExportID:          "export-empty",
-		ExportDate:        time.Now(),
+		ExportID:        "export-empty",
+		ExportDate:      time.Now(),
 		VMGatherVersion: "1.0.0-test",
-		MetricsCount:      0,
+		MetricsCount:    0,
 	}
 
 	archivePath, _, err := writer.CreateArchive("export-empty", metricsData, metadata)
@@ -345,13 +345,13 @@ func TestWriter_SpecialCharactersInMetadata(t *testing.T) {
 	writer := NewWriter(tmpDir)
 
 	metricsData := strings.NewReader(`{"metric":{"__name__":"test"},"values":[1],"timestamps":[1]}`)
-	
+
 	metadata := ArchiveMetadata{
-		ExportID:          "export-special",
-		ExportDate:        time.Now(),
+		ExportID:        "export-special",
+		ExportDate:      time.Now(),
 		VMGatherVersion: "1.0.0-test",
-		Components:        []string{"vmstorage", "vmselect", "vm-insert"}, // dash in component name
-		Jobs:              []string{"job/with/slashes", "job:with:colons"},
+		Components:      []string{"vmstorage", "vmselect", "vm-insert"}, // dash in component name
+		Jobs:            []string{"job/with/slashes", "job:with:colons"},
 	}
 
 	archivePath, _, err := writer.CreateArchive("export-special", metricsData, metadata)
@@ -392,7 +392,7 @@ func TestWriter_SpecialCharactersInMetadata(t *testing.T) {
 // TestWriter_DiskSpaceHandling tests behavior when disk space is low
 func TestWriter_DiskSpaceHandling(t *testing.T) {
 	t.Skip("Disk space simulation requires platform-specific mocking")
-	
+
 	// NOTE: This test would require:
 	// 1. Mock filesystem with quota
 	// 2. Or actual disk space limitation (risky for CI)
@@ -444,10 +444,10 @@ func TestWriter_InvalidOutputDirectory(t *testing.T) {
 			writer := NewWriter(tt.outputDir)
 
 			metricsData := strings.NewReader(`{"metric":{"__name__":"test"},"values":[1],"timestamps":[1]}`)
-			
+
 			metadata := ArchiveMetadata{
-				ExportID:          "export-test",
-				ExportDate:        time.Now(),
+				ExportID:        "export-test",
+				ExportDate:      time.Now(),
 				VMGatherVersion: "1.0.0-test",
 			}
 
@@ -479,10 +479,10 @@ func TestWriter_ArchiveNaming(t *testing.T) {
 	writer := NewWriter(tmpDir)
 
 	metricsData := strings.NewReader(`{"metric":{"__name__":"test"},"values":[1],"timestamps":[1]}`)
-	
+
 	metadata := ArchiveMetadata{
-		ExportID:          "export-123",
-		ExportDate:        time.Now(),
+		ExportID:        "export-123",
+		ExportDate:      time.Now(),
 		VMGatherVersion: "1.0.0-test",
 	}
 
@@ -493,7 +493,7 @@ func TestWriter_ArchiveNaming(t *testing.T) {
 
 	// Verify filename format: vmexport_<exportID>_<timestamp>.zip
 	filename := filepath.Base(archivePath)
-	
+
 	if !strings.HasPrefix(filename, "vmexport_") {
 		t.Errorf("filename should start with 'vmexport_', got: %s", filename)
 	}
@@ -508,4 +508,3 @@ func TestWriter_ArchiveNaming(t *testing.T) {
 
 	t.Logf("Generated filename: %s", filename)
 }
-

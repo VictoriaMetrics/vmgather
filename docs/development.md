@@ -88,6 +88,6 @@ Artifacts are placed in `dist/` and uploaded to GitHub releases. Docker images l
 
 ## Debug tips
 
-- `VMEXPORTER_LOG=debug ./vmgather` enables verbose logging (see environment variables in code).
+- `VMGATHER_LOG=debug ./vmgather` enables verbose logging (see environment variables in code).
 - Use the docker scenarios in `local-test-env` to reproduce customer issues offline.
 - Browser dev tools help inspect API payloads when reproducing UI bugs.

@@ -12,18 +12,18 @@ import (
 // TestBuildRequest_PathNormalization tests the path normalization logic for /export endpoint
 func TestBuildRequest_PathNormalization(t *testing.T) {
 	tests := []struct {
-		name           string
-		connection     domain.VMConnection
-		requestPath    string
-		expectedURL    string
-		shouldContain  string
+		name             string
+		connection       domain.VMConnection
+		requestPath      string
+		expectedURL      string
+		shouldContain    string
 		shouldNotContain string
 	}{
 		{
 			name: "Export with /rw/prometheus in FullApiUrl - should normalize",
 			connection: domain.VMConnection{
-				URL:         "https://vm.example.com",
-				FullApiUrl:  "https://vm.example.com/1011/rw/prometheus",
+				URL:        "https://vm.example.com",
+				FullApiUrl: "https://vm.example.com/1011/rw/prometheus",
 				Auth: domain.AuthConfig{
 					Type: domain.AuthTypeNone,
 				},
@@ -36,8 +36,8 @@ func TestBuildRequest_PathNormalization(t *testing.T) {
 		{
 			name: "Query with /rw/prometheus in FullApiUrl - should NOT normalize",
 			connection: domain.VMConnection{
-				URL:         "https://vm.example.com",
-				FullApiUrl:  "https://vm.example.com/1011/rw/prometheus",
+				URL:        "https://vm.example.com",
+				FullApiUrl: "https://vm.example.com/1011/rw/prometheus",
 				Auth: domain.AuthConfig{
 					Type: domain.AuthTypeNone,
 				},
@@ -76,8 +76,8 @@ func TestBuildRequest_PathNormalization(t *testing.T) {
 		{
 			name: "Export with standard /prometheus path - no normalization needed",
 			connection: domain.VMConnection{
-				URL:         "https://vm.example.com",
-				FullApiUrl:  "https://vm.example.com/1011/prometheus",
+				URL:        "https://vm.example.com",
+				FullApiUrl: "https://vm.example.com/1011/prometheus",
 				Auth: domain.AuthConfig{
 					Type: domain.AuthTypeNone,
 				},
@@ -89,8 +89,8 @@ func TestBuildRequest_PathNormalization(t *testing.T) {
 		{
 			name: "Export with /ui/prometheus path - no normalization",
 			connection: domain.VMConnection{
-				URL:         "https://vm.example.com",
-				FullApiUrl:  "https://vm.example.com/1011/ui/prometheus",
+				URL:        "https://vm.example.com",
+				FullApiUrl: "https://vm.example.com/1011/ui/prometheus",
 				Auth: domain.AuthConfig{
 					Type: domain.AuthTypeNone,
 				},
@@ -102,8 +102,8 @@ func TestBuildRequest_PathNormalization(t *testing.T) {
 		{
 			name: "Export CSV with /rw/prometheus - should normalize",
 			connection: domain.VMConnection{
-				URL:         "https://vm.example.com",
-				FullApiUrl:  "https://vm.example.com/1011/rw/prometheus",
+				URL:        "https://vm.example.com",
+				FullApiUrl: "https://vm.example.com/1011/rw/prometheus",
 				Auth: domain.AuthConfig{
 					Type: domain.AuthTypeNone,
 				},
@@ -116,8 +116,8 @@ func TestBuildRequest_PathNormalization(t *testing.T) {
 		{
 			name: "Export native with /rw/prometheus - should normalize",
 			connection: domain.VMConnection{
-				URL:         "https://vm.example.com",
-				FullApiUrl:  "https://vm.example.com/1011/rw/prometheus",
+				URL:        "https://vm.example.com",
+				FullApiUrl: "https://vm.example.com/1011/rw/prometheus",
 				Auth: domain.AuthConfig{
 					Type: domain.AuthTypeNone,
 				},
@@ -130,8 +130,8 @@ func TestBuildRequest_PathNormalization(t *testing.T) {
 		{
 			name: "Query range with /rw/prometheus - should NOT normalize",
 			connection: domain.VMConnection{
-				URL:         "https://vm.example.com",
-				FullApiUrl:  "https://vm.example.com/1011/rw/prometheus",
+				URL:        "https://vm.example.com",
+				FullApiUrl: "https://vm.example.com/1011/rw/prometheus",
 				Auth: domain.AuthConfig{
 					Type: domain.AuthTypeNone,
 				},
@@ -143,8 +143,8 @@ func TestBuildRequest_PathNormalization(t *testing.T) {
 		{
 			name: "Series with /rw/prometheus - should NOT normalize",
 			connection: domain.VMConnection{
-				URL:         "https://vm.example.com",
-				FullApiUrl:  "https://vm.example.com/1011/rw/prometheus",
+				URL:        "https://vm.example.com",
+				FullApiUrl: "https://vm.example.com/1011/rw/prometheus",
 				Auth: domain.AuthConfig{
 					Type: domain.AuthTypeNone,
 				},
@@ -220,8 +220,8 @@ func TestBuildRequest_PathNormalization_EdgeCases(t *testing.T) {
 		{
 			name: "Multiple /rw/prometheus occurrences - only first should be replaced",
 			connection: domain.VMConnection{
-				URL:         "https://example.com",
-				FullApiUrl:  "https://example.com/rw/prometheus/rw/prometheus",
+				URL:        "https://example.com",
+				FullApiUrl: "https://example.com/rw/prometheus/rw/prometheus",
 				Auth: domain.AuthConfig{
 					Type: domain.AuthTypeNone,
 				},
@@ -243,8 +243,8 @@ func TestBuildRequest_PathNormalization_EdgeCases(t *testing.T) {
 		{
 			name: "Path with trailing slash",
 			connection: domain.VMConnection{
-				URL:         "https://example.com",
-				FullApiUrl:  "https://example.com/1011/rw/prometheus/",
+				URL:        "https://example.com",
+				FullApiUrl: "https://example.com/1011/rw/prometheus/",
 				Auth: domain.AuthConfig{
 					Type: domain.AuthTypeNone,
 				},
@@ -255,8 +255,8 @@ func TestBuildRequest_PathNormalization_EdgeCases(t *testing.T) {
 		{
 			name: "Case sensitivity - should match /rw/prometheus exactly",
 			connection: domain.VMConnection{
-				URL:         "https://example.com",
-				FullApiUrl:  "https://example.com/1011/RW/PROMETHEUS",
+				URL:        "https://example.com",
+				FullApiUrl: "https://example.com/1011/RW/PROMETHEUS",
 				Auth: domain.AuthConfig{
 					Type: domain.AuthTypeNone,
 				},
@@ -295,8 +295,8 @@ func TestBuildRequest_Authentication(t *testing.T) {
 		{
 			name: "Basic auth preserved after normalization",
 			connection: domain.VMConnection{
-				URL:         "https://vm.example.com",
-				FullApiUrl:  "https://vm.example.com/1011/rw/prometheus",
+				URL:        "https://vm.example.com",
+				FullApiUrl: "https://vm.example.com/1011/rw/prometheus",
 				Auth: domain.AuthConfig{
 					Type:     domain.AuthTypeBasic,
 					Username: "test-user",
@@ -309,8 +309,8 @@ func TestBuildRequest_Authentication(t *testing.T) {
 		{
 			name: "Bearer token preserved after normalization",
 			connection: domain.VMConnection{
-				URL:         "https://vm.example.com",
-				FullApiUrl:  "https://vm.example.com/1011/rw/prometheus",
+				URL:        "https://vm.example.com",
+				FullApiUrl: "https://vm.example.com/1011/rw/prometheus",
 				Auth: domain.AuthConfig{
 					Type:  domain.AuthTypeBearer,
 					Token: "test-token-123",
@@ -322,8 +322,8 @@ func TestBuildRequest_Authentication(t *testing.T) {
 		{
 			name: "Custom header preserved after normalization",
 			connection: domain.VMConnection{
-				URL:         "https://vm.example.com",
-				FullApiUrl:  "https://vm.example.com/1011/rw/prometheus",
+				URL:        "https://vm.example.com",
+				FullApiUrl: "https://vm.example.com/1011/rw/prometheus",
 				Auth: domain.AuthConfig{
 					Type:        domain.AuthTypeHeader,
 					HeaderName:  "X-Custom-Auth",
@@ -368,4 +368,3 @@ func TestBuildRequest_Authentication(t *testing.T) {
 		})
 	}
 }
-

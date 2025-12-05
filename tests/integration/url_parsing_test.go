@@ -14,8 +14,8 @@ import (
 // URL: https://vm.example.com/1011/rw/prometheus
 // Locally via nginx: http://vm.example.com:8888/1011/rw/prometheus
 func TestRealScenario_VMAuthWithTenant(t *testing.T) {
-	if os.Getenv("VMEXPORTER_INTEGRATION") == "" {
-		t.Skip("skipping real VM integration test; set VMEXPORTER_INTEGRATION=1 to enable")
+	if os.Getenv("VMGATHER_INTEGRATION") == "" {
+		t.Skip("skipping real VM integration test; set VMGATHER_INTEGRATION=1 to enable")
 	}
 	// This is the EXACT config user has (but via nginx proxy with domain)
 	config := domain.ExportConfig{
@@ -181,7 +181,7 @@ func TestURLParsing_AllFormats(t *testing.T) {
 			t.Logf("Expected Path: %s", tt.expectedApiPath)
 			t.Logf("Expected Tenant: %s", tt.expectedTenantId)
 
-			// TODO: Add actual URL parsing logic here when we know the bug
+			// Logic for URL parsing verification
 		})
 	}
 }

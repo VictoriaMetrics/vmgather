@@ -41,4 +41,3 @@ func (d *ExportDecoder) Decode() (*ExportedMetric, error) {
 
 	return &metric, nil
 }
-

@@ -142,7 +142,7 @@ func TestObfuscator_ObfuscateInstance_SameIPDifferentPorts(t *testing.T) {
 	for i, instance := range instances {
 		_, originalPort, _ := net.SplitHostPort(instance)
 		_, obfuscatedPort, _ := net.SplitHostPort(results[i])
-		
+
 		if originalPort != obfuscatedPort {
 			t.Errorf("port not preserved: original=%s, obfuscated=%s", originalPort, obfuscatedPort)
 		}
@@ -199,8 +199,8 @@ func TestObfuscator_ObfuscateJob_MultipleComponents(t *testing.T) {
 	obf := NewObfuscator()
 
 	testCases := []struct {
-		job       string
-		component string
+		job        string
+		component  string
 		wantPrefix string
 	}{
 		{"vmstorage-prod", "vmstorage", "vm_component_vmstorage_"},
@@ -324,4 +324,3 @@ func TestObfuscator_Concurrent(t *testing.T) {
 		<-done
 	}
 }
-

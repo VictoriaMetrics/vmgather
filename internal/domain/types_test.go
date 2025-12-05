@@ -81,4 +81,3 @@ func TestTimeRange_Duration(t *testing.T) {
 		t.Errorf("Duration = %v, want %v", duration, expectedDuration)
 	}
 }
-

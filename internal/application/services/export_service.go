@@ -30,9 +30,9 @@ type ExportService interface {
 
 // exportServiceImpl implements ExportService
 type exportServiceImpl struct {
-	clientFactory     func(domain.VMConnection) *vm.Client
-	archiveWriter     *archive.Writer
-	vmExporterVersion string
+	clientFactory   func(domain.VMConnection) *vm.Client
+	archiveWriter   *archive.Writer
+	vmGatherVersion string
 }
 
 // NewExportService creates a new export service
@@ -41,9 +41,9 @@ func NewExportService(outputDir, version string) ExportService {
 		version = "dev"
 	}
 	return &exportServiceImpl{
-		clientFactory:     vm.NewClient,
-		archiveWriter:     archive.NewWriter(outputDir),
-		vmExporterVersion: version,
+		clientFactory:   vm.NewClient,
+		archiveWriter:   archive.NewWriter(outputDir),
+		vmGatherVersion: version,
 	}
 }
 
@@ -376,7 +376,7 @@ func (s *exportServiceImpl) buildArchiveMetadata(
 		Jobs:            uniqueStrings(config.Jobs),
 		MetricsCount:    metricsCount,
 		Obfuscated:      config.Obfuscation.Enabled,
-		VMGatherVersion: s.vmExporterVersion,
+		VMGatherVersion: s.vmGatherVersion,
 	}
 
 	// Add obfuscation maps if present

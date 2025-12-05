@@ -71,7 +71,7 @@ func TestTimezoneConversion(t *testing.T) {
 
 			// Verify conversion worked
 			if converted.Location().String() != loc.String() {
-				t.Errorf("Timezone conversion failed: got %s, want %s", 
+				t.Errorf("Timezone conversion failed: got %s, want %s",
 					converted.Location().String(), loc.String())
 			}
 		})
@@ -136,7 +136,7 @@ func TestTimeRangeWithTimezone(t *testing.T) {
 			expectedDuration := 1 * time.Hour
 
 			if duration != expectedDuration {
-				t.Errorf("Duration mismatch in %s: got %v, want %v", 
+				t.Errorf("Duration mismatch in %s: got %v, want %v",
 					tz, duration, expectedDuration)
 			}
 		})
@@ -229,4 +229,3 @@ func TestTimezoneDefaultSelection(t *testing.T) {
 		}
 	}
 }
-

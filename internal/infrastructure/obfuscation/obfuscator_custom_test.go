@@ -137,4 +137,3 @@ func TestObfuscator_MixedObfuscation(t *testing.T) {
 		t.Errorf("Expected namespace-1, got %s", namespace)
 	}
 }
-

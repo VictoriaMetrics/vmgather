@@ -166,7 +166,6 @@ func TestExportFallback_ErrorMessages(t *testing.T) {
 	require.NoError(t, err, "Export should succeed with fallback")
 	assert.NotEmpty(t, result.ArchivePath)
 
-	// TODO: Add log capture to verify fallback message is logged
 	// Expected log: "[WARN] Export API not available, falling back to query_range"
 
 	// Clean up

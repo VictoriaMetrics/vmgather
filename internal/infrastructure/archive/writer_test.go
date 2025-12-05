@@ -52,10 +52,10 @@ func TestWriter_CreateArchive_Success(t *testing.T) {
 			Start: time.Now().Add(-1 * time.Hour),
 			End:   time.Now(),
 		},
-		Components:        []string{"vmstorage", "vmselect"},
-		Jobs:              []string{"vmstorage-prod", "vmselect-prod"},
-		MetricsCount:      2,
-		Obfuscated:        false,
+		Components:      []string{"vmstorage", "vmselect"},
+		Jobs:            []string{"vmstorage-prod", "vmselect-prod"},
+		MetricsCount:    2,
+		Obfuscated:      false,
 		VMGatherVersion: "1.0.0",
 	}
 
@@ -97,12 +97,12 @@ func TestWriter_CreateArchive_ContainsRequiredFiles(t *testing.T) {
 
 	metricsData := `{"metric":{"__name__":"test"},"values":[1],"timestamps":[1]}`
 	metadata := ArchiveMetadata{
-		ExportID:          "test",
-		ExportDate:        time.Now(),
-		TimeRange:         domain.TimeRange{Start: time.Now(), End: time.Now()},
-		Components:        []string{"vmstorage"},
-		Jobs:              []string{"vmstorage-prod"},
-		MetricsCount:      1,
+		ExportID:        "test",
+		ExportDate:      time.Now(),
+		TimeRange:       domain.TimeRange{Start: time.Now(), End: time.Now()},
+		Components:      []string{"vmstorage"},
+		Jobs:            []string{"vmstorage-prod"},
+		MetricsCount:    1,
 		VMGatherVersion: "1.0.0",
 	}
 
@@ -145,12 +145,12 @@ func TestWriter_CreateArchive_MetricsContent(t *testing.T) {
 
 	expectedMetrics := `{"metric":{"__name__":"vm_app_version"},"values":[1],"timestamps":[1699728000000]}`
 	metadata := ArchiveMetadata{
-		ExportID:          "test",
-		ExportDate:        time.Now(),
-		TimeRange:         domain.TimeRange{Start: time.Now(), End: time.Now()},
-		Components:        []string{"vmstorage"},
-		Jobs:              []string{"vmstorage-prod"},
-		MetricsCount:      1,
+		ExportID:        "test",
+		ExportDate:      time.Now(),
+		TimeRange:       domain.TimeRange{Start: time.Now(), End: time.Now()},
+		Components:      []string{"vmstorage"},
+		Jobs:            []string{"vmstorage-prod"},
+		MetricsCount:    1,
 		VMGatherVersion: "1.0.0",
 	}
 
@@ -208,15 +208,15 @@ func TestWriter_CreateArchive_MetadataContent(t *testing.T) {
 
 	metricsData := `{"metric":{"__name__":"test"},"values":[1],"timestamps":[1]}`
 	metadata := ArchiveMetadata{
-		ExportID:          "test-export-456",
-		ExportDate:        time.Now(),
-		TimeRange:         domain.TimeRange{Start: time.Now(), End: time.Now()},
-		Components:        []string{"vmstorage", "vmselect"},
-		Jobs:              []string{"vmstorage-prod", "vmselect-prod"},
-		MetricsCount:      100,
-		Obfuscated:        true,
-		InstanceMap:       map[string]string{"10.0.1.5:8482": "192.0.2.1:8482"},
-		JobMap:            map[string]string{"vmstorage-prod": "vm_component_vmstorage_1"},
+		ExportID:        "test-export-456",
+		ExportDate:      time.Now(),
+		TimeRange:       domain.TimeRange{Start: time.Now(), End: time.Now()},
+		Components:      []string{"vmstorage", "vmselect"},
+		Jobs:            []string{"vmstorage-prod", "vmselect-prod"},
+		MetricsCount:    100,
+		Obfuscated:      true,
+		InstanceMap:     map[string]string{"10.0.1.5:8482": "192.0.2.1:8482"},
+		JobMap:          map[string]string{"vmstorage-prod": "vm_component_vmstorage_1"},
 		VMGatherVersion: "1.0.0",
 	}
 
@@ -294,15 +294,15 @@ func TestWriter_CreateArchive_MappingExcluded(t *testing.T) {
 
 	metricsData := `{"metric":{"__name__":"test"},"values":[1],"timestamps":[1]}`
 	metadata := ArchiveMetadata{
-		ExportID:          "test-mapping-excluded",
-		ExportDate:        time.Now(),
-		TimeRange:         domain.TimeRange{Start: time.Now(), End: time.Now()},
-		Components:        []string{"vmstorage"},
-		Jobs:              []string{"vmstorage-prod"},
-		MetricsCount:      1,
-		Obfuscated:        true,
-		InstanceMap:       map[string]string{"10.0.1.5:8482": "777.777.1.1:8482", "10.0.1.6:8482": "777.777.1.2:8482"},
-		JobMap:            map[string]string{"vmstorage-prod": "vm_component_vmstorage_1", "vmselect-prod": "vm_component_vmselect_1"},
+		ExportID:        "test-mapping-excluded",
+		ExportDate:      time.Now(),
+		TimeRange:       domain.TimeRange{Start: time.Now(), End: time.Now()},
+		Components:      []string{"vmstorage"},
+		Jobs:            []string{"vmstorage-prod"},
+		MetricsCount:    1,
+		Obfuscated:      true,
+		InstanceMap:     map[string]string{"10.0.1.5:8482": "777.777.1.1:8482", "10.0.1.6:8482": "777.777.1.2:8482"},
+		JobMap:          map[string]string{"vmstorage-prod": "vm_component_vmstorage_1", "vmselect-prod": "vm_component_vmselect_1"},
 		VMGatherVersion: "1.0.0",
 	}
 
@@ -340,15 +340,15 @@ func TestWriter_CreateArchive_MappingExcluded(t *testing.T) {
 
 	// Parse as public metadata (without maps)
 	var parsedMetadata struct {
-		ExportID          string            `json:"export_id"`
-		ExportDate        string            `json:"export_date"`
-		TimeRange         domain.TimeRange   `json:"time_range"`
-		Components        []string          `json:"components"`
-		Jobs              []string          `json:"jobs"`
-		MetricsCount      int               `json:"metrics_count"`
-		Obfuscated        bool              `json:"obfuscated"`
-		InstanceMap       map[string]string `json:"instance_map,omitempty"`
-		JobMap            map[string]string `json:"job_map,omitempty"`
+		ExportID        string            `json:"export_id"`
+		ExportDate      string            `json:"export_date"`
+		TimeRange       domain.TimeRange  `json:"time_range"`
+		Components      []string          `json:"components"`
+		Jobs            []string          `json:"jobs"`
+		MetricsCount    int               `json:"metrics_count"`
+		Obfuscated      bool              `json:"obfuscated"`
+		InstanceMap     map[string]string `json:"instance_map,omitempty"`
+		JobMap          map[string]string `json:"job_map,omitempty"`
 		VMGatherVersion string            `json:"vmgather_version"`
 	}
 
@@ -391,13 +391,13 @@ func TestWriter_CreateArchive_ReadmeContent(t *testing.T) {
 
 	metricsData := `{"metric":{"__name__":"test"},"values":[1],"timestamps":[1]}`
 	metadata := ArchiveMetadata{
-		ExportID:          "test",
-		ExportDate:        time.Now(),
-		TimeRange:         domain.TimeRange{Start: time.Now(), End: time.Now()},
-		Components:        []string{"vmstorage"},
-		Jobs:              []string{"vmstorage-prod"},
-		MetricsCount:      150,
-		Obfuscated:        true,
+		ExportID:        "test",
+		ExportDate:      time.Now(),
+		TimeRange:       domain.TimeRange{Start: time.Now(), End: time.Now()},
+		Components:      []string{"vmstorage"},
+		Jobs:            []string{"vmstorage-prod"},
+		MetricsCount:    150,
+		Obfuscated:      true,
 		VMGatherVersion: "1.0.0",
 	}
 
@@ -513,12 +513,12 @@ func TestWriter_GetArchiveSize(t *testing.T) {
 
 	metricsData := `{"metric":{"__name__":"test"},"values":[1],"timestamps":[1]}`
 	metadata := ArchiveMetadata{
-		ExportID:          "test",
-		ExportDate:        time.Now(),
-		TimeRange:         domain.TimeRange{Start: time.Now(), End: time.Now()},
-		Components:        []string{"vmstorage"},
-		Jobs:              []string{"vmstorage-prod"},
-		MetricsCount:      1,
+		ExportID:        "test",
+		ExportDate:      time.Now(),
+		TimeRange:       domain.TimeRange{Start: time.Now(), End: time.Now()},
+		Components:      []string{"vmstorage"},
+		Jobs:            []string{"vmstorage-prod"},
+		MetricsCount:    1,
 		VMGatherVersion: "1.0.0",
 	}
 
@@ -558,12 +558,12 @@ func TestWriter_CreateArchive_CreatesOutputDir(t *testing.T) {
 
 	metricsData := `{"metric":{"__name__":"test"},"values":[1],"timestamps":[1]}`
 	metadata := ArchiveMetadata{
-		ExportID:          "test",
-		ExportDate:        time.Now(),
-		TimeRange:         domain.TimeRange{Start: time.Now(), End: time.Now()},
-		Components:        []string{"vmstorage"},
-		Jobs:              []string{"vmstorage-prod"},
-		MetricsCount:      1,
+		ExportID:        "test",
+		ExportDate:      time.Now(),
+		TimeRange:       domain.TimeRange{Start: time.Now(), End: time.Now()},
+		Components:      []string{"vmstorage"},
+		Jobs:            []string{"vmstorage-prod"},
+		MetricsCount:    1,
 		VMGatherVersion: "1.0.0",
 	}
 
@@ -591,12 +591,12 @@ func TestWriter_CreateArchive_EmptyMetrics(t *testing.T) {
 	// Empty metrics
 	metricsData := bytes.NewReader([]byte{})
 	metadata := ArchiveMetadata{
-		ExportID:          "test",
-		ExportDate:        time.Now(),
-		TimeRange:         domain.TimeRange{Start: time.Now(), End: time.Now()},
-		Components:        []string{"vmstorage"},
-		Jobs:              []string{"vmstorage-prod"},
-		MetricsCount:      0,
+		ExportID:        "test",
+		ExportDate:      time.Now(),
+		TimeRange:       domain.TimeRange{Start: time.Now(), End: time.Now()},
+		Components:      []string{"vmstorage"},
+		Jobs:            []string{"vmstorage-prod"},
+		MetricsCount:    0,
 		VMGatherVersion: "1.0.0",
 	}
 
@@ -610,4 +610,3 @@ func TestWriter_CreateArchive_EmptyMetrics(t *testing.T) {
 		t.Error("archive not created for empty metrics")
 	}
 }
-

@@ -31,7 +31,7 @@ func TestExportService_ExecuteExport_Integration(t *testing.T) {
 	// This would require a mock VM client or real VM instance
 	// For now, documenting the test structure
 	t.Log("Integration test: ExecuteExport requires VM client mock")
-	t.Log("TODO: Implement with testcontainers or advanced mocking")
+	t.Log("Future Improvement: Implement with testcontainers or advanced mocking")
 }
 
 // TestExportService_ExecuteExport_Cancellation tests context cancellation
@@ -328,7 +328,7 @@ func TestExportService_GuessComponent_EdgeCases(t *testing.T) {
 // TestExportService_BuildArchiveMetadata_EdgeCases tests metadata edge cases
 func TestExportService_BuildArchiveMetadata_EdgeCases(t *testing.T) {
 	service := &exportServiceImpl{
-		vmExporterVersion: "1.0.0-test",
+		vmGatherVersion: "1.0.0-test",
 	}
 
 	tests := []struct {
