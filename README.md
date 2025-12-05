@@ -91,7 +91,29 @@ make build
 ./vmgather
 ```
 
+### Official Images
+The latest release is automatically published to:
+
+- [Docker Hub](https://hub.docker.com/u/victoriametrics): `victoriametrics/vmgather`, `victoriametrics/vmimporter`
+- [Quay.io](https://quay.io/organization/victoriametrics): `quay.io/victoriametrics/vmgather`, `quay.io/victoriametrics/vmimporter`
+- [GHCR](https://github.com/orgs/VictoriaMetrics/packages): `ghcr.io/victoriametrics/vmgather`, `ghcr.io/victoriametrics/vmimporter`
+
+
 ### Docker (vmgather + vmimporter)
+
+You can pull the official images directly:
+
+```bash
+# vmgather
+docker pull victoriametrics/vmgather:latest
+# or
+docker pull ghcr.io/victoriametrics/vmgather:latest
+
+# vmimporter
+docker pull victoriametrics/vmimporter:latest
+# or
+docker pull ghcr.io/victoriametrics/vmimporter:latest
+```
 
 Use [Buildx](https://docs.docker.com/build/building/multi-platform/) to produce linux/amd64 and linux/arm64 images locally:
 

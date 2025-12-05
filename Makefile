@@ -1,13 +1,67 @@
 .PHONY: test test-fast test-llm build build-safe build-all clean fmt lint help test-env test-env-up test-env-down test-env-logs test-scenarios docker-build docker-build-vmgather docker-build-vmimporter
 
 VERSION ?= $(shell git describe --tags --always --dirty)
-PLATFORMS ?= linux/amd64,linux/arm64
+PKG_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "latest")
+# Platforms supported by VictoriaMetrics (consistent with upstream)
+# Platforms supported by VictoriaMetrics (limited by distroless support)
+PLATFORMS ?= linux/amd64,linux/arm64,linux/arm
+
+# Go version for build
 GO_VERSION ?= 1.22
 DOCKER_OUTPUT ?= type=docker
 DOCKER_COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo "docker compose" || echo "docker-compose")
 
+# Docker registries and namespace (standard across VictoriaMetrics)
+# NOTE: quay.io disabled temporarily due to permission issues
+DOCKER_REGISTRIES ?= docker.io ghcr.io
+# DOCKER_REGISTRIES ?= docker.io quay.io ghcr.io
+DOCKER_NAMESPACE ?= victoriametrics
+
 # Default target: show help
 .DEFAULT_GOAL := help
+
+# Alias for release publishing (consistent with VM standards)
+release: publish-via-docker
+
+# ... (snipped) ...
+
+
+# Valid target for publish-via-docker
+publish-via-docker: publish-vmgather publish-vmimporter
+
+publish-vmgather:
+	@echo "Building and pushing vmgather:$(PKG_TAG)"
+	@docker buildx build \
+		--platform $(PLATFORMS) \
+		--build-arg GO_VERSION=$(GO_VERSION) \
+		--label "org.opencontainers.image.source=https://github.com/VictoriaMetrics/vmgather" \
+		--label "org.opencontainers.image.vendor=VictoriaMetrics" \
+		--label "org.opencontainers.image.version=$(PKG_TAG)" \
+		--label "org.opencontainers.image.created=$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+		-f build/docker/Dockerfile.vmgather \
+		$(foreach registry,$(DOCKER_REGISTRIES), \
+			--tag $(registry)/$(DOCKER_NAMESPACE)/vmgather:$(PKG_TAG) \
+			--tag $(registry)/$(DOCKER_NAMESPACE)/vmgather:latest \
+		) \
+		--push \
+		.
+
+publish-vmimporter:
+	@echo "Building and pushing vmimporter:$(PKG_TAG)"
+	@docker buildx build \
+		--platform $(PLATFORMS) \
+		--build-arg GO_VERSION=$(GO_VERSION) \
+		--label "org.opencontainers.image.source=https://github.com/VictoriaMetrics/vmgather" \
+		--label "org.opencontainers.image.vendor=VictoriaMetrics" \
+		--label "org.opencontainers.image.version=$(PKG_TAG)" \
+		--label "org.opencontainers.image.created=$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+		-f build/docker/Dockerfile.vmimporter \
+		$(foreach registry,$(DOCKER_REGISTRIES), \
+			--tag $(registry)/$(DOCKER_NAMESPACE)/vmimporter:$(PKG_TAG) \
+			--tag $(registry)/$(DOCKER_NAMESPACE)/vmimporter:latest \
+		) \
+		--push \
+		.
 
 # =============================================================================
 # HELP - Display available targets
@@ -21,7 +75,8 @@ help:
 	@echo "  make build        - Build binary (with automatic tests)"
 	@echo "  make build-safe   - Build with full test suite + linting"
 	@echo "  make build-all    - Build for all platforms (8 targets)"
-	@echo "  make docker-build - Build multi-arch Docker images (vmgather + vmimporter)"
+	@echo "  make publish-via-docker - Build & Push multi-arch images to registries"
+	@echo "  make release      - Alias for publish-via-docker"
 	@echo "  make clean        - Clean build artifacts"
 	@echo ""
 	@echo "TEST COMMANDS:"
@@ -254,23 +309,7 @@ clean:
 
 docker-build: docker-build-vmgather docker-build-vmimporter
 
-docker-build-vmgather:
-	@echo "Building vmgather image for $(PLATFORMS)..."
-	@docker buildx build --platform $(PLATFORMS) \
-		--build-arg GO_VERSION=$(GO_VERSION) \
-		-f build/docker/Dockerfile.vmgather \
-		-t vmgather:$(VERSION) \
-		--output=$(DOCKER_OUTPUT) .
-	@echo "[OK] Docker image vmgather:$(VERSION) built."
 
-docker-build-vmimporter:
-	@echo "Building vmimporter image for $(PLATFORMS)..."
-	@docker buildx build --platform $(PLATFORMS) \
-		--build-arg GO_VERSION=$(GO_VERSION) \
-		-f build/docker/Dockerfile.vmimporter \
-		-t vmimporter:$(VERSION) \
-		--output=$(DOCKER_OUTPUT) .
-	@echo "[OK] Docker image vmimporter:$(VERSION) built."
 
 # Format code
 fmt:

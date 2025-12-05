@@ -13,6 +13,14 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 ### Fixed
 - **Error Swallowing**: `getSampleDataFromResult` now propagates errors, improving UX diagnostics.
 
+### Changed
+- **Release Engineering**: Standardized release process to align with VictoriaMetrics "Local-First" methodology.
+    - Added `docs/release-guide.md` with detailed instructions.
+    - Updated `Makefile` with `publish-via-docker` target for standardized local publication to Docker Hub and GHCR.
+    - Removed Docker publishing from CI (`release.yml`) to enforce local security context.
+- **Docker**: Updated official images to use `linux/amd64`, `linux/arm64`, and `linux/arm` (v7) platforms.
+- **Build**: Default Go version set to `1.22` for consistency using `alpine` base images.
+
 
 ## [v1.4.0] - 2025-12-03
 
