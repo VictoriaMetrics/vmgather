@@ -1,6 +1,27 @@
 # Changelog
 
 All notable changes to vmgather are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and versions adhere to semantic versioning.
+
+## [v1.5.0] - 2025-12-12
+
+### Added
+- Type-safe Go configuration utility (`testconfig`) for test environments with auto-detection of Docker/local setup and dynamic URL construction.
+- Clear test separation: `make test` (unit, no Docker), `make test-integration` (13 scenarios with Docker), `make test-full` (complete suite).
+- Configuration inspection targets: `test-config-validate`, `test-config-json`, `test-config-env`.
+
+### Changed
+- Replaced shell-based test configuration with type-safe Go implementation.
+- Refactored test infrastructure: hardcoded URLs → dynamic configuration via `testconfig`.
+- Enhanced VMAuth configuration with additional bearer token entries for tenant 0 and custom headers.
+- Consolidated testing documentation in `docs/development.md`.
+
+### Fixed
+- Bearer token authentication: fixed shell variable expansion in test scripts (single → double quotes).
+- `build-safe` target: changed dependency from `test-full` to `test-race` (no Docker required).
+- Testconfig binary: added `config.go` as build prerequisite for automatic rebuilds on changes.
+- Test script error handling: added explicit check for `testconfig env` success before eval to prevent silent failures.
+- Added pre-flight checks for Docker environment before integration tests.
+
 ## [v1.4.1] - 2025-12-05
 
 ### Security

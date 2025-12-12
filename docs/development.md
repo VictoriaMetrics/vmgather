@@ -59,15 +59,63 @@ make test-e2e
 
 ## Testing commands
 
+### Tests WITHOUT Docker (fast)
+
 | Command | Purpose |
 | --- | --- |
-| `make test` | Run Go unit tests with race detector disabled (faster for CI). |
-| `make test-coverage` | Produce `coverage.out`. |
-| `INTEGRATION_TEST=1 go test ./tests/integration/...` | Exercises VM client against dockerised VictoriaMetrics. |
-| `go test ./internal/importer/server` | Quick importer-only tests. |
-| `make test-env-up` / `make test-env-down` | Start/stop the `local-test-env`. |
-| `make test-scenarios` | Runs the curated scenario script across VM flavours. |
-| `make test-e2e` | Playwright UI suite (requires local-test-env). |
+| `make test` | Go unit tests - **no Docker required** |
+| `make test-fast` | Skip slow tests |
+| `make test-coverage` | Generate coverage report |
+
+**Use for:** Quick validation during development, CI pipelines without Docker.
+
+### Tests WITH Docker (comprehensive)
+
+| Command | Purpose |
+| --- | --- |
+| `make test-integration` | Binary tests Docker environment (13 scenarios) |
+| `make test-env-up` | Start Docker environment |
+| `make test-env-down` | Stop Docker environment |
+
+**Use for:** Full validation before merge, testing real VM scenarios.
+
+### Complete test suite
+
+| Command | Purpose |
+| --- | --- |
+| `make test-full` | Everything: unit tests + Docker + integration |
+
+**Use for:** Final validation, release candidate testing.
+
+### Test configuration
+
+Test environment uses type-safe Go configuration (`local-test-env/config.go`):
+- No manual environment variables needed
+- Automatic port detection
+- Dynamic URL construction
+- Validates before running
+
+```bash
+# View current test configuration
+make test-config-json
+
+# Validate configuration
+make test-config-validate
+
+# Override if needed (optional)
+export VM_SINGLE_NOAUTH_URL=http://custom:18428
+make test-scenarios
+```
+
+### E2E tests (Playwright)
+
+```bash
+cd tests/e2e
+npm install
+npm test
+```
+
+Requires `make test-env-up` running in background.
 
 ## Code style
 
@@ -79,12 +127,12 @@ make test-e2e
 ## Release builds
 
 ```bash
-make build             # local platform (vmgather + vmimporter)
-make build-all         # linux/macos/windows matrices + checksums for both binaries
-make docker-build      # buildx multi-arch images (linux/amd64 + linux/arm64)
+make build             # Local platform (vmgather + vmimporter)
+make build-all         # Cross-platform binaries + checksums
+make docker-build      # Multi-arch Docker images
 ```
 
-Artifacts are placed in `dist/` and uploaded to GitHub releases. Docker images land in your local Buildx cache (or registry when `DOCKER_OUTPUT=type=registry`). Ensure [CHANGELOG.md](../CHANGELOG.md) reflects user-visible changes before tagging.
+Artifacts are placed in `dist/`. See [release-guide.md](release-guide.md) for publishing instructions.
 
 ## Debug tips
 

@@ -58,3 +58,4 @@ temp/
 
 # Reports (internal analysis)
 reports/
+local-test-env/testconfig

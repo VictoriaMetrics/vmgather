@@ -12,9 +12,8 @@ DOCKER_OUTPUT ?= type=docker
 DOCKER_COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo "docker compose" || echo "docker-compose")
 
 # Docker registries and namespace (standard across VictoriaMetrics)
-# NOTE: quay.io disabled temporarily due to permission issues
-DOCKER_REGISTRIES ?= docker.io ghcr.io
-# DOCKER_REGISTRIES ?= docker.io quay.io ghcr.io
+# GHCR is handled by CI; local `make release` targets public hubs only.
+DOCKER_REGISTRIES ?= docker.io quay.io
 DOCKER_NAMESPACE ?= victoriametrics
 
 # Default target: show help
@@ -73,7 +72,7 @@ help:
 	@echo ""
 	@echo "BUILD COMMANDS:"
 	@echo "  make build        - Build binary (with automatic tests)"
-	@echo "  make build-safe   - Build with full test suite + linting"
+	@echo "  make build-safe   - Build with race detector tests + linting (no Docker)"
 	@echo "  make build-all    - Build for all platforms (8 targets)"
 	@echo "  make publish-via-docker - Build & Push multi-arch images to registries"
 	@echo "  make release      - Alias for publish-via-docker"
@@ -97,13 +96,23 @@ help:
 	@echo "  make fmt    - Format code"
 	@echo "  make lint   - Run linter"
 	@echo ""
-	@echo "TEST ENVIRONMENT (Docker):"
-	@echo "  make test-env-up       - Start all VM test instances"
-	@echo "  make test-scenarios    - Test all 14 scenarios"
-	@echo "  make test-env          - Full E2E: start + test"
+	@echo "TESTS WITHOUT DOCKER:"
+	@echo "  make test              - Unit tests only (fast, no Docker required)"
+	@echo "  make test-fast         - Even faster (skips slow tests)"
+	@echo "  make test-coverage     - Generate coverage report"
+	@echo ""
+	@echo "TESTS WITH DOCKER:"
+	@echo "  make test-integration  - Binary tests Docker environment (needs Docker)"
+	@echo "  make test-env-up       - Start test environment"
 	@echo "  make test-env-down     - Stop test environment"
-	@echo "  make test-env-clean    - Stop and remove all data"
-	@echo "  make test-env-logs     - Show logs"
+	@echo ""
+	@echo "FULL TEST SUITE:"
+	@echo "  make test-full         - Everything: unit + Docker scenarios"
+	@echo ""
+	@echo "TEST CONFIGURATION:"
+	@echo "  make test-config-validate - Validate test configuration"
+	@echo "  make test-config-env      - Show config as environment variables"
+	@echo "  make test-config-json     - Show config as JSON"
 	@echo ""
 	@echo "================================================================================"
 
@@ -131,10 +140,10 @@ test-fast:
 	@echo ""
 	@$(MAKE) --no-print-directory test-summary
 
-# Full test suite with race detector
-test-full:
+# Full test suite with race detector (unit tests only)
+test-race:
 	@echo "================================================================================"
-	@echo "TEST SUITE: Full Mode (race detector + all tests)"
+	@echo "TEST SUITE: Race detector mode"
 	@echo "================================================================================"
 	@echo ""
 	@go test -v -race -coverprofile=coverage.out ./... | $(MAKE) --no-print-directory format-test-output
@@ -273,8 +282,8 @@ build: test-fast
 	@echo "[OK] Build complete: ./vmimporter"
 	@ls -lh vmimporter | awk '{print "Size:", $$5}'
 
-# Build with full test suite and linting (recommended for releases)
-build-safe: test-full lint
+# Build with race detector tests and linting (no Docker required)
+build-safe: test-race lint
 	@echo ""
 	@echo "================================================================================"
 	@echo "Building binary (safe mode)..."
@@ -331,8 +340,23 @@ lint:
 # TEST ENVIRONMENT - Docker-based VM instances for E2E testing
 # =============================================================================
 
-# Start test environment with all VM scenarios
-# Start test environment with all VM test instances
+# Build test config utility
+local-test-env/testconfig: local-test-env/config.go
+	@cd local-test-env && go build -o testconfig config.go
+
+# Load and validate test configuration
+test-config-validate: local-test-env/testconfig
+	@echo "Validating test configuration..."
+	@cd local-test-env && ./testconfig validate
+
+# Export test configuration as environment variables
+test-config-env: local-test-env/testconfig
+	@cd local-test-env && ./testconfig env
+
+# Show test configuration as JSON
+test-config-json: local-test-env/testconfig
+	@cd local-test-env && ./testconfig json
+
 # Full clean-slate test environment cycle (cleans up before and after)
 test-env-full:
 	$(MAKE) test-env-down
@@ -341,7 +365,7 @@ test-env-full:
 	$(MAKE) test
 	$(MAKE) test-env-down
 
-test-env-up:
+test-env-up: local-test-env/testconfig
 	@echo "================================================================================"
 	@echo "Starting Test Environment"
 	@echo "================================================================================"
@@ -350,6 +374,7 @@ test-env-up:
 		echo "This directory is gitignored. Please ensure you have it locally."; \
 		exit 1; \
 	fi
+	@cd local-test-env && ./testconfig validate
 	@$(DOCKER_COMPOSE) -f local-test-env/docker-compose.test.yml up -d
 	@echo ""
 	@echo "Waiting for services to be ready (30 seconds)..."
@@ -360,11 +385,7 @@ test-env-up:
 	@echo ""
 	@echo "[OK] Test environment is ready!"
 	@echo ""
-	@echo "Available instances:"
-	@echo "  - VMSingle No Auth:     http://localhost:18428"
-	@echo "  - VMSingle via VMAuth:  http://localhost:8427"
-	@echo "  - VM Cluster:           http://localhost:8481"
-	@echo "  - VM Cluster via VMAuth: http://localhost:8426"
+	@cd local-test-env && ./testconfig json | jq -r '"Available instances:\n  - VMGather:             \(.vmgather_url)\n  - VMSingle No Auth:     \(.vm_single_noauth.url)\n  - VMSingle via VMAuth:  \(.vm_single_auth.url)\n  - VM Cluster:           \(.vm_cluster.base_url)\n  - VM Cluster via VMAuth: \(.vmauth_cluster.url)"'
 	@echo ""
 	@echo "Run 'make test-scenarios' to test all scenarios"
 	@echo "Run 'make test-env-logs' to see logs"
@@ -386,19 +407,53 @@ test-env-clean:
 test-env-logs:
 	@$(DOCKER_COMPOSE) -f local-test-env/docker-compose.test.yml logs -f
 
-# Test all scenarios against running test environment
-test-scenarios:
+# Integration tests: binary tests Docker environment
+test-integration: local-test-env/testconfig
 	@echo "================================================================================"
-	@echo "Testing All Scenarios"
+	@echo "Integration Tests: Binary testing Docker environment"
 	@echo "================================================================================"
 	@if [ ! -f "local-test-env/test-all-scenarios.sh" ]; then \
-		echo "[ERROR] Error: test-all-scenarios.sh not found in local-test-env/"; \
+		echo "[ERROR] test-all-scenarios.sh not found"; \
 		exit 1; \
 	fi
-	@cd local-test-env && ./test-all-scenarios.sh
+	@if ! docker ps | grep -q vmsingle-noauth; then \
+		echo "[ERROR] Docker test environment not running"; \
+		echo "Run 'make test-env-up' first"; \
+		exit 1; \
+	fi
+	@cd local-test-env && eval "$$(./testconfig env)" && ./test-all-scenarios.sh
+
+# Alias for backward compatibility
+test-scenarios: test-integration
 
 # Full E2E test: start env, test, stop
-test-env: test-env-up test-scenarios
+test-env: test-env-up test-integration
 	@echo ""
 	@echo "[OK] All E2E tests completed!"
 	@echo "Run 'make test-env-down' to stop the environment"
+
+# =============================================================================
+# FULL TEST SUITE
+# =============================================================================
+
+# Complete test cycle: unit tests + integration scenarios
+test-full:
+	@echo "================================================================================"
+	@echo "Full Test Suite"
+	@echo "================================================================================"
+	@echo ""
+	@echo "[1/3] Unit tests (without Docker)..."
+	@$(MAKE) test
+	@echo ""
+	@echo "[2/3] Starting Docker test environment..."
+	@$(MAKE) test-env-down 2>/dev/null || true
+	@$(MAKE) test-env-up
+	@echo ""
+	@echo "[3/3] Integration tests (binary + Docker)..."
+	@$(MAKE) test-integration
+	@echo ""
+	@echo "================================================================================"
+	@echo "[OK] All tests passed!"
+	@echo "================================================================================"
+	@echo ""
+	@echo "Note: Docker environment still running. Stop with 'make test-env-down'"

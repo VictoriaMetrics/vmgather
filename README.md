@@ -195,23 +195,23 @@ See [docs/user-guide.md](docs/user-guide.md) for UI screenshots and parameter de
 - Obfuscation settings apply to previews and exports; obfuscated mappings are included in archive metadata for support correlation.
 - No credentials or temporary archives persist to disk after the process ends.
 
-## Testing matrix
+## Testing
 
-| Layer | Command | Notes |
-| --- | --- | --- |
-| Unit tests | `make test` | 50+ packages cover domain, client, and obfuscation logic |
-| Coverage | `make test-coverage` | produces `coverage.out` |
-| Integration | `INTEGRATION_TEST=1 go test ./tests/integration/...` | runs against Dockerized VictoriaMetrics flavours |
-| E2E (Playwright) | `make test-e2e` | UI happy path + failure cases |
-| Scenario suite | `make test-scenarios` | executes the curated cases from `local-test-env/test-configs` |
+```bash
+make test        # Unit tests (fast)
+make test-full   # Complete suite: unit + integration scenarios
+```
 
-See [docs/development.md](docs/development.md) and [local-test-env/README.md](local-test-env/README.md) for detailed instructions.
+See [docs/development.md](docs/development.md) for detailed testing instructions.
 
 ## Build & release
 
-`make build` compiles both `./vmgather` and `./vmimporter`. `make build-all` produces the full cross-platform matrix for *each* binary in `dist/` and writes a combined `checksums.txt`. Update [CHANGELOG.md](CHANGELOG.md) before tagging and attach the generated artifacts to the GitHub release.
+```bash
+make build       # Local build
+make build-all   # Cross-platform binaries
+```
 
-Docker images follow the same release train. Use `make docker-build` (or the per-app targets) to create multi-architecture images via Buildx. Override `PLATFORMS`, `VERSION`, or `DOCKER_OUTPUT` when pushing to your own registry.
+See [docs/development.md](docs/development.md) and [docs/release-guide.md](docs/release-guide.md) for build and release instructions.
 
 ## Contributing
 

@@ -61,7 +61,13 @@ users:
     url_prefix: "http://vmselect:8481/select/multitenant/prometheus"
     
   # ============================================================================
-  # Bearer token: tenant 1011
+  # Bearer tokens
   # ============================================================================
+  - bearer_token: "bearer-tenant0-token"
+    url_prefix: "http://vmselect:8481/select/0/prometheus"
+    
   - bearer_token: "bearer-tenant1011-token"
+    url_prefix: "http://vmselect:8481/select/1011/prometheus"
+    
+  - bearer_token: "custom-header-token-1011"
     url_prefix: "http://vmselect:8481/select/1011/prometheus"

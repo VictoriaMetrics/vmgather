@@ -121,3 +121,30 @@ docker volume prune
 - Docker Compose 2.0+
 - 4GB RAM minimum
 - 10GB free disk space
+- Go 1.22+ (for testconfig utility)
+- make (for Makefile targets)
+
+## Configuration
+
+Test environment uses type-safe Go configuration (`local-test-env/config.go`) that automatically detects:
+- Local vs Docker environment
+- `localhost` vs `host.docker.internal` vs Docker network names
+- All URLs and credentials from environment variables with sensible defaults
+
+```bash
+# Validate configuration
+make test-config-validate
+
+# View configuration as JSON
+make test-config-json
+
+# View configuration as environment variables
+make test-config-env
+```
+
+Override any setting via environment variables:
+```bash
+export VM_SINGLE_NOAUTH_URL=http://custom-host:18428
+export VM_SINGLE_AUTH_USER=custom-user
+make test-scenarios
+```

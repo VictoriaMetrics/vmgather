@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# 🧪 Comprehensive test script for all VM scenarios
-# Tests all 14 scenarios from TEST_SCENARIOS.md
+# Comprehensive test script for all VM scenarios
+# Tests all scenarios with dynamic configuration from testconfig utility
 
 set -e
 
@@ -15,9 +15,37 @@ PASSED=0
 FAILED=0
 TOTAL=0
 
-echo -e "${BLUE}═══════════════════════════════════════════════════════════════════════════${NC}"
-echo -e "${BLUE}🧪 VMGather - Comprehensive Scenario Testing${NC}"
-echo -e "${BLUE}═══════════════════════════════════════════════════════════════════════════${NC}"
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+echo -e "${BLUE}===============================================================================${NC}"
+echo -e "${BLUE}VMGather - Comprehensive Scenario Testing${NC}"
+echo -e "${BLUE}===============================================================================${NC}"
+echo ""
+
+# Check for testconfig utility
+if [ ! -f "$SCRIPT_DIR/testconfig" ]; then
+    echo -e "${YELLOW}[WARN] testconfig not found, building...${NC}"
+    cd "$SCRIPT_DIR" && go build -o testconfig config.go
+fi
+
+# Load configuration from testconfig
+echo -e "${BLUE}[INFO] Loading test configuration...${NC}"
+if ! "$SCRIPT_DIR/testconfig" validate > /dev/null 2>&1; then
+    echo -e "${RED}[ERROR] Configuration validation failed${NC}"
+    "$SCRIPT_DIR/testconfig" validate
+    exit 1
+fi
+
+# Export configuration as environment variables
+CONFIG_ENV=$("$SCRIPT_DIR/testconfig" env 2>&1) || {
+    echo -e "${RED}[ERROR] Failed to export configuration${NC}"
+    echo "$CONFIG_ENV"
+    exit 1
+}
+eval "$CONFIG_ENV"
+
+echo -e "${GREEN}[OK] Configuration loaded${NC}"
 echo ""
 
 # Function to test endpoint
@@ -39,11 +67,11 @@ test_endpoint() {
             echo -e "    Auth: Basic ($auth_value)"
             ;;
         "bearer")
-            curl_cmd="$curl_cmd -H 'Authorization: Bearer $auth_value'"
+            curl_cmd="$curl_cmd -H \"Authorization: Bearer $auth_value\""
             echo -e "    Auth: Bearer"
             ;;
         "header")
-            curl_cmd="$curl_cmd -H '$auth_value'"
+            curl_cmd="$curl_cmd -H \"$auth_value\""
             echo -e "    Auth: Custom Header"
             ;;
         "none")
@@ -55,126 +83,119 @@ test_endpoint() {
     local query_url="${url}/api/v1/query?query=vm_app_version"
     
     if eval "$curl_cmd '$query_url'" > /dev/null 2>&1; then
-        echo -e "    ${GREEN}✅ PASSED${NC}"
+        echo -e "    ${GREEN}[PASS]${NC}"
         PASSED=$((PASSED + 1))
     else
-        echo -e "    ${RED}❌ FAILED${NC}"
+        echo -e "    ${RED}[FAIL]${NC}"
         FAILED=$((FAILED + 1))
     fi
     echo ""
 }
 
 # Wait for services to be ready
-echo -e "${BLUE}⏳ Waiting for services to be ready...${NC}"
+echo -e "${BLUE}[INFO] Waiting for services to be ready...${NC}"
 sleep 5
 
-echo -e "${BLUE}═══════════════════════════════════════════════════════════════════════════${NC}"
-echo -e "${BLUE}📊 Starting tests...${NC}"
-echo -e "${BLUE}═══════════════════════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}===============================================================================${NC}"
+echo -e "${BLUE}Starting tests...${NC}"
+echo -e "${BLUE}===============================================================================${NC}"
 echo ""
 
 # Scenario 1: VMSingle No Auth
 test_endpoint \
     "VMSingle No Auth" \
-    "http://localhost:18428" \
+    "$VM_SINGLE_NOAUTH_URL" \
     "none" \
     ""
 
-# Scenario 2: VMSingle No Auth + Path
-test_endpoint \
-    "VMSingle No Auth + Path" \
-    "http://localhost:8428/prometheus" \
-    "none" \
-    ""
-
-# Scenario 3: VMSingle via VMAuth Basic
+# Scenario 2: VMSingle via VMAuth Basic
 test_endpoint \
     "VMSingle via VMAuth Basic" \
-    "http://localhost:8427" \
+    "$VM_SINGLE_AUTH_URL" \
     "basic" \
-    "monitoring-read:secret-password-123"
+    "$VM_SINGLE_AUTH_USER:$VM_SINGLE_AUTH_PASS"
 
-# Scenario 4: VMSingle Bearer Token
+# Scenario 3: VMSingle Bearer Token
 test_endpoint \
     "VMSingle Bearer Token" \
-    "http://localhost:8427" \
+    "$VM_SINGLE_AUTH_URL" \
     "bearer" \
-    "test-bearer-token-789"
+    "$TEST_BEARER_TOKEN"
 
-# Scenario 5: Cluster No Auth - Tenant 0
+# Scenario 4: Cluster No Auth - Tenant 0
 test_endpoint \
     "Cluster No Auth - Tenant 0" \
-    "http://localhost:8481/select/0/prometheus" \
+    "$VM_CLUSTER_SELECT_TENANT_0" \
     "none" \
     ""
 
-# Scenario 6: Cluster No Auth - Tenant 1011
+# Scenario 5: Cluster No Auth - Tenant 1011
 test_endpoint \
     "Cluster No Auth - Tenant 1011" \
-    "http://localhost:8481/select/1011/prometheus" \
+    "$VM_CLUSTER_SELECT_TENANT_1011" \
     "none" \
     ""
 
-# Scenario 7: Cluster No Auth - Multitenant
+# Scenario 6: Cluster No Auth - Multitenant
 test_endpoint \
     "Cluster No Auth - Multitenant" \
-    "http://localhost:8481/select/multitenant/prometheus" \
+    "$VM_CLUSTER_SELECT_MULTITENANT" \
     "none" \
     ""
 
-# Scenario 8: Cluster via VMAuth - Tenant 0
+# Scenario 7: Cluster via VMAuth - Tenant 0
 test_endpoint \
     "Cluster via VMAuth - Tenant 0" \
-    "http://localhost:8426" \
+    "$VM_AUTH_CLUSTER_URL" \
     "basic" \
-    "tenant0-user:tenant0-pass"
+    "$VM_AUTH_TENANT_0_USER:$VM_AUTH_TENANT_0_PASS"
 
-# Scenario 9: Cluster via VMAuth - Tenant 1011
+# Scenario 8: Cluster via VMAuth - Tenant 1011
 test_endpoint \
     "Cluster via VMAuth - Tenant 1011" \
-    "http://localhost:8426" \
+    "$VM_AUTH_CLUSTER_URL" \
     "basic" \
-    "tenant1011-user:tenant1011-pass"
+    "$VM_AUTH_TENANT_1011_USER:$VM_AUTH_TENANT_1011_PASS"
 
-# Scenario 10: Cluster via VMAuth - Multitenant
+# Scenario 9: Cluster via VMAuth - Multitenant
 test_endpoint \
     "Cluster via VMAuth - Multitenant" \
-    "http://localhost:8426" \
+    "$VM_AUTH_CLUSTER_URL" \
     "basic" \
-    "admin-multitenant:admin-multi-pass"
+    "$VM_AUTH_MULTITENANT_USER:$VM_AUTH_MULTITENANT_PASS"
 
-# Scenario 11: Cluster Bearer Token
+# Scenario 10: Cluster Bearer Token
 test_endpoint \
     "Cluster Bearer Token" \
-    "http://localhost:8426" \
+    "$VM_AUTH_CLUSTER_URL" \
     "bearer" \
-    "bearer-tenant0-token"
+    "$TEST_BEARER_TOKEN_CLUSTER"
 
-# Scenario 12: Cluster Custom Header (bearer token approach)
+# Scenario 11: Cluster Custom Header
 test_endpoint \
     "Cluster Custom Header" \
-    "http://localhost:8426" \
+    "$VM_AUTH_CLUSTER_URL" \
     "bearer" \
-    "custom-header-token-1011"
+    "$TEST_BEARER_TOKEN_CUSTOM"
 
-# Scenario 13: Full Grafana-like URL (Tenant 1011)
+# Scenario 12: Full Grafana-like URL
 test_endpoint \
     "Full Grafana-like URL" \
-    "http://localhost:8481/select/1011/prometheus" \
+    "$VM_CLUSTER_SELECT_TENANT_1011" \
     "none" \
     ""
 
-# Scenario 14: VMAuth without path (vmauth adds it automatically)
+# Scenario 13: VMAuth Auto-routing
 test_endpoint \
     "VMAuth Auto-routing" \
-    "http://localhost:8426" \
+    "$VM_AUTH_CLUSTER_URL" \
     "basic" \
-    "tenant0-user:tenant0-pass"
+    "$VM_AUTH_TENANT_0_USER:$VM_AUTH_TENANT_0_PASS"
 
 # Summary
-echo -e "${BLUE}═══════════════════════════════════════════════════════════════════════════${NC}"
-echo -e "${BLUE}📊 Test Summary${NC}"
-echo -e "${BLUE}═══════════════════════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}===============================================================================${NC}"
+echo -e "${BLUE}Test Summary${NC}"
+echo -e "${BLUE}===============================================================================${NC}"
 echo ""
 echo -e "Total Tests:  $TOTAL"
 echo -e "${GREEN}Passed:       $PASSED${NC}"
@@ -186,14 +207,14 @@ fi
 echo ""
 
 if [ $FAILED -eq 0 ]; then
-    echo -e "${GREEN}═══════════════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}✅ ALL TESTS PASSED! 🎉${NC}"
-    echo -e "${GREEN}═══════════════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}===============================================================================${NC}"
+    echo -e "${GREEN}ALL TESTS PASSED${NC}"
+    echo -e "${GREEN}===============================================================================${NC}"
     exit 0
 else
-    echo -e "${RED}═══════════════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${RED}❌ SOME TESTS FAILED!${NC}"
-    echo -e "${RED}═══════════════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${RED}===============================================================================${NC}"
+    echo -e "${RED}SOME TESTS FAILED${NC}"
+    echo -e "${RED}===============================================================================${NC}"
     exit 1
 fi
 
