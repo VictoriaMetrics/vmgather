@@ -2,6 +2,10 @@
 
 All notable changes to vmgather are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and versions adhere to semantic versioning.
 
+
+### Fixed
+- Fix incorrect url format example to connect `vmselect`. See [#18](https://github.com/VictoriaMetrics/vmgather/issues/18).
+
 ## [v1.5.0] - 2025-12-12
 
 ### Added
