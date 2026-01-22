@@ -238,54 +238,62 @@ func parseCountValue(value interface{}) (int, bool) {
 func (s *vmServiceImpl) GetSample(ctx context.Context, config domain.ExportConfig, limit int) ([]domain.MetricSample, error) {
 	client := s.clientFactory(config.Connection)
 
-	// Build selector from jobs
-	selector := s.buildSelector(config.Jobs)
+	// Build candidate queries (avoid heavy selector when jobs aren't provided)
+	queries := s.buildSampleQueries(config.Jobs, limit)
+	var lastErr error
 
-	// OPTIMIZATION: Use instant query with topk() instead of export
-	// This is 10-100x faster as it only returns N series at current timestamp
-	// instead of reading all data points from storage
-	query := fmt.Sprintf("topk(%d, %s)", limit, selector)
-
-	// Execute instant query at current time
-	result, err := client.Query(ctx, query, time.Now())
-	if err != nil {
-		return nil, fmt.Errorf("sample query failed: %w", err)
-	}
-
-	if result.Status != "success" {
-		return nil, fmt.Errorf("query returned non-success status: %s", result.Status)
-	}
-
-	// Parse results into MetricSample format
-	samples := make([]domain.MetricSample, 0, len(result.Data.Result))
-
-	for _, r := range result.Data.Result {
-		sample := domain.MetricSample{
-			MetricName: r.Metric["__name__"],
-			Labels:     r.Metric,
+	for _, query := range queries {
+		// Execute instant query at current time
+		result, err := client.Query(ctx, query, time.Now())
+		if err != nil {
+			lastErr = err
+			continue
 		}
 
-		// Extract value from result
-		if len(r.Value) >= 2 {
-			// Value is [timestamp, value_string]
-			if valStr, ok := r.Value[1].(string); ok {
-				_, _ = fmt.Sscanf(valStr, "%f", &sample.Value)
-			} else if val, ok := r.Value[1].(float64); ok {
-				sample.Value = val
+		if result.Status != "success" {
+			lastErr = fmt.Errorf("query returned non-success status: %s", result.Status)
+			continue
+		}
+
+		// Parse results into MetricSample format
+		samples := make([]domain.MetricSample, 0, len(result.Data.Result))
+
+		for _, r := range result.Data.Result {
+			sample := domain.MetricSample{
+				MetricName: r.Metric["__name__"],
+				Labels:     r.Metric,
 			}
-		}
 
-		// Extract timestamp
-		if len(r.Value) >= 1 {
-			if ts, ok := r.Value[0].(float64); ok {
-				sample.Timestamp = int64(ts * 1000) // Convert to milliseconds
+			// Extract value from result
+			if len(r.Value) >= 2 {
+				// Value is [timestamp, value_string]
+				if valStr, ok := r.Value[1].(string); ok {
+					_, _ = fmt.Sscanf(valStr, "%f", &sample.Value)
+				} else if val, ok := r.Value[1].(float64); ok {
+					sample.Value = val
+				}
 			}
+
+			// Extract timestamp
+			if len(r.Value) >= 1 {
+				if ts, ok := r.Value[0].(float64); ok {
+					sample.Timestamp = int64(ts * 1000) // Convert to milliseconds
+				}
+			}
+
+			samples = append(samples, sample)
 		}
 
-		samples = append(samples, sample)
+		if len(samples) > 0 {
+			return samples, nil
+		}
+		lastErr = fmt.Errorf("no sample metrics found for query %q", query)
 	}
 
-	return samples, nil
+	if lastErr != nil {
+		return nil, fmt.Errorf("sample query failed: %w", lastErr)
+	}
+	return nil, fmt.Errorf("sample query failed: no queries executed")
 }
 
 // EstimateExportSize estimates total series count for export
@@ -302,6 +310,32 @@ func (s *vmServiceImpl) buildSelector(jobs []string) string {
 
 	jobRegex := strings.Join(jobs, "|")
 	return fmt.Sprintf(`{job=~"%s"}`, jobRegex)
+}
+
+func (s *vmServiceImpl) buildSampleQueries(jobs []string, limit int) []string {
+	if limit <= 0 {
+		limit = 10
+	}
+	if len(jobs) == 0 {
+		// Avoid heavy scan over all series; vm_app_version is guaranteed by discovery.
+		return []string{
+			fmt.Sprintf("topk(%d, vm_app_version)", limit),
+		}
+	}
+
+	selector := s.buildSampleSelector(jobs)
+	return []string{fmt.Sprintf("topk(%d, %s)", limit, selector)}
+}
+
+func (s *vmServiceImpl) buildSampleSelector(jobs []string) string {
+	if len(jobs) == 0 {
+		return "vm_app_version"
+	}
+	parts := make([]string, 0, len(jobs))
+	for _, job := range jobs {
+		parts = append(parts, fmt.Sprintf(`job=%q`, job))
+	}
+	return fmt.Sprintf("{%s}", strings.Join(parts, " or "))
 }
 
 // CheckExportAPI checks if /api/v1/export endpoint is available

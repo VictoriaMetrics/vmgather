@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 
 test.describe('Timezone Support', () => {
     test('should have timezone selector on Time Range step', async ({ page }) => {
-        await page.goto('http://localhost:8080');
+        await page.goto('/');
         
         // Navigate to Time Range step
         await page.click('button:has-text("Next")');
@@ -16,7 +16,7 @@ test.describe('Timezone Support', () => {
     });
 
     test('should have all major timezones available', async ({ page }) => {
-        await page.goto('http://localhost:8080');
+        await page.goto('/');
         await page.click('button:has-text("Next")');
         
         const timezoneSelect = page.locator('#timezone');
@@ -31,7 +31,7 @@ test.describe('Timezone Support', () => {
     });
 
     test('should update time inputs when timezone changes', async ({ page }) => {
-        await page.goto('http://localhost:8080');
+        await page.goto('/');
         await page.click('button:has-text("Next")');
         
         // Get initial time value
@@ -53,7 +53,7 @@ test.describe('Timezone Support', () => {
     });
 
     test('should apply timezone to preset buttons', async ({ page }) => {
-        await page.goto('http://localhost:8080');
+        await page.goto('/');
         await page.click('button:has-text("Next")');
         
         // Select UTC timezone
@@ -74,7 +74,7 @@ test.describe('Timezone Support', () => {
     });
 
     test('should preserve timezone selection when using presets', async ({ page }) => {
-        await page.goto('http://localhost:8080');
+        await page.goto('/');
         await page.click('button:has-text("Next")');
         
         // Select Europe/London
@@ -94,7 +94,7 @@ test.describe('Timezone Support', () => {
     });
 
     test('should format times correctly for different timezones', async ({ page }) => {
-        await page.goto('http://localhost:8080');
+        await page.goto('/');
         await page.click('button:has-text("Next")');
         
         const timezones = ['local', 'UTC', 'America/New_York', 'Asia/Tokyo'];

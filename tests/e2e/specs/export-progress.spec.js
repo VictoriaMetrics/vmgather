@@ -3,6 +3,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+const VM_SINGLE_NOAUTH_URL =
+  process.env.VM_SINGLE_NOAUTH_URL || 'http://localhost:18428';
 const STAGING_DIR = path.join(os.tmpdir(), 'vmgather-e2e');
 const UNWRITABLE_DIR = path.join(os.tmpdir(), 'vmgather-readonly');
 const CREATE_TARGET_DIR = path.join(STAGING_DIR, 'nested');
@@ -135,7 +137,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function goToObfuscationStep(page) {
-  await page.goto('http://localhost:8080');
+  await page.goto('/');
   await page.waitForLoadState('networkidle');
   await page.locator('button:has-text("Next")').first().click();
   await page.waitForTimeout(200);
@@ -145,7 +147,7 @@ async function goToObfuscationStep(page) {
   }
   await page.waitForSelector('.step[data-step="2"].active');
   await page.locator('.step.active button:has-text("Next")').first().click();
-  await page.locator('#vmUrl').fill('http://localhost:18428');
+  await page.locator('#vmUrl').fill(VM_SINGLE_NOAUTH_URL);
   await page.locator('#testConnectionBtn').click();
   await page.waitForSelector('#step3Next:enabled');
   await page.locator('#step3Next').click();

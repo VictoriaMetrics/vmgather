@@ -1,5 +1,7 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
+const VM_SINGLE_NOAUTH_URL =
+  process.env.VM_SINGLE_NOAUTH_URL || 'http://localhost:18428';
 
 test.describe('Complete E2E Flow Tests', () => {
   test.beforeEach(async ({ page }) => {
@@ -67,7 +69,7 @@ test.describe('Complete E2E Flow Tests', () => {
       });
     });
 
-    await page.goto('http://localhost:8080');
+    await page.goto('/');
     await page.waitForLoadState('networkidle');
   });
 
@@ -117,7 +119,7 @@ test.describe('Complete E2E Flow Tests', () => {
     await expect(urlExamples).toHaveCount(11);
 
     // Fill VM URL
-    await page.locator('#vmUrl').fill('http://localhost:18428');
+    await page.locator('#vmUrl').fill(VM_SINGLE_NOAUTH_URL);
 
     // Test authentication options
     await page.locator('#authType').selectOption('none');
@@ -307,7 +309,7 @@ test.describe('Complete E2E Flow Tests', () => {
     await page.waitForTimeout(200);
 
     // Provide valid URL so validation enables the button
-    await page.locator('#vmUrl').fill('http://localhost:18428');
+    await page.locator('#vmUrl').fill(VM_SINGLE_NOAUTH_URL);
     await expect(page.locator('#testConnectionBtn')).toBeEnabled();
 
     // Click Test Connection (mocked)
@@ -352,7 +354,7 @@ test.describe('Complete E2E Flow Tests', () => {
 
 test.describe('Visual Tests', () => {
   test('should have proper styling on welcome page', async ({ page }) => {
-    await page.goto('http://localhost:8080');
+    await page.goto('/');
     await page.waitForLoadState('networkidle');
 
     // Check header background (should be white/surface now, not gradient)

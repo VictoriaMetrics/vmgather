@@ -1,7 +1,7 @@
 const { test, expect } = require('@playwright/test');
 
 async function navigateToStep3(page) {
-  await page.goto('http://localhost:8080');
+  await page.goto('/');
   await page.waitForLoadState('networkidle');
 
   const step1 = page.locator('.step[data-step="1"]');

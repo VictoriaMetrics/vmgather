@@ -1,5 +1,7 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
+const VM_SINGLE_NOAUTH_URL =
+  process.env.VM_SINGLE_NOAUTH_URL || 'http://localhost:18428';
 
 /**
  * Bug Fix Verification Tests
@@ -58,7 +60,7 @@ test.describe('Bug Fix Verification', () => {
     });
   });
   test.beforeEach(async ({ page }) => {
-    await page.goto('http://localhost:8080');
+    await page.goto('/');
     await page.waitForLoadState('networkidle');
     // Wait for page to be fully loaded
     await page.waitForSelector('.step.active', { timeout: 10000 });
@@ -185,7 +187,7 @@ test.describe('Bug Fix Verification', () => {
       await page.waitForTimeout(500);
 
       // Step 3: Configure connection
-      await page.fill('#vmUrl', 'http://localhost:18428');
+      await page.fill('#vmUrl', VM_SINGLE_NOAUTH_URL);
       await page.locator('.step.active #testConnectionBtn').click();
       await page.waitForSelector('text=Connection successful', { timeout: 15000 });
       nextButton = page.locator('.step.active button.btn-primary:has-text("Next")');
@@ -311,7 +313,7 @@ test.describe('Bug Fix Verification', () => {
       await nextButton.click();
       await page.waitForTimeout(500);
 
-      await page.fill('#vmUrl', 'http://localhost:18428');
+      await page.fill('#vmUrl', VM_SINGLE_NOAUTH_URL);
       await page.locator('.step.active #testConnectionBtn').click();
       await page.waitForSelector('text=Connection successful', { timeout: 15000 });
       nextButton = page.locator('.step.active button.btn-primary:has-text("Next")');

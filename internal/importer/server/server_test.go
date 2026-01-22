@@ -17,6 +17,16 @@ import (
 	"time"
 )
 
+func recentTimestampMs() int64 {
+	return time.Now().Add(-time.Minute).UnixMilli()
+}
+
+func recentTimeRange() (string, string) {
+	start := time.Now().Add(-time.Minute).UTC()
+	end := start.Add(5 * time.Minute)
+	return start.Format(time.RFC3339), end.Format(time.RFC3339)
+}
+
 func TestHandleUploadSuccess(t *testing.T) {
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -51,7 +61,7 @@ func TestHandleUploadSuccess(t *testing.T) {
 	configBytes, _ := json.Marshal(config)
 	_ = writer.WriteField("config", string(configBytes))
 	fileWriter, _ := writer.CreateFormFile("bundle", "test.jsonl")
-	_, _ = fileWriter.Write([]byte(`{"metric":{"__name__":"test_metric","job":"demo"},"values":[1],"timestamps":[1763052540000]}`))
+	fmt.Fprintf(fileWriter, `{"metric":{"__name__":"test_metric","job":"demo"},"values":[1],"timestamps":[%d]}`, recentTimestampMs())
 	writer.Close()
 
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/upload", body)
@@ -112,11 +122,13 @@ func TestHandleUploadZipChunking(t *testing.T) {
 	var zipBuffer bytes.Buffer
 	zw := zip.NewWriter(&zipBuffer)
 	mw, _ := zw.Create("metrics.jsonl")
+	ts := recentTimestampMs()
+	start, end := recentTimeRange()
 	for i := 0; i < 5; i++ {
-		fmt.Fprintf(mw, `{"metric":{"__name__":"demo","job":"zip","idx":"%d"},"values":[%d],"timestamps":[1763052540000]}`+"\n", i, i)
+		fmt.Fprintf(mw, `{"metric":{"__name__":"demo","job":"zip","idx":"%d"},"values":[%d],"timestamps":[%d]}`+"\n", i, i, ts)
 	}
 	meta, _ := zw.Create("metadata.json")
-	meta.Write([]byte(`{"time_range":{"start":"2025-01-01T00:00:00Z","end":"2025-01-01T00:05:00Z"},"metrics_count":5}`))
+	meta.Write([]byte(fmt.Sprintf(`{"time_range":{"start":"%s","end":"%s"},"metrics_count":5}`, start, end)))
 	zw.Close()
 
 	body := &bytes.Buffer{}
@@ -160,9 +172,11 @@ func TestPrepareZipBundleAllowsCustomJsonl(t *testing.T) {
 	var zipBuffer bytes.Buffer
 	zw := zip.NewWriter(&zipBuffer)
 	mw, _ := zw.Create("custom-data.jsonl")
-	fmt.Fprintf(mw, `{"metric":{"__name__":"demo","job":"resume"},"values":[1],"timestamps":[1763052540000]}`+"\n")
+	ts := recentTimestampMs()
+	start, end := recentTimeRange()
+	fmt.Fprintf(mw, `{"metric":{"__name__":"demo","job":"resume"},"values":[1],"timestamps":[%d]}`+"\n", ts)
 	meta, _ := zw.Create("metadata.json")
-	meta.Write([]byte(`{"time_range":{"start":"2025-01-01T00:00:00Z","end":"2025-01-01T00:05:00Z"},"metrics_count":1}`))
+	meta.Write([]byte(fmt.Sprintf(`{"time_range":{"start":"%s","end":"%s"},"metrics_count":1}`, start, end)))
 	zw.Close()
 
 	tmpPath := ensureTestFile(t, "bundle-custom.zip", func(w io.Writer) error {
@@ -318,8 +332,9 @@ func TestNormalizeStringValuesDuringImport(t *testing.T) {
 	defer downstream.Close()
 
 	var buf bytes.Buffer
+	ts := recentTimestampMs()
 	for i := 0; i < 5; i++ {
-		fmt.Fprintf(&buf, `{"metric":{"__name__":"flag","job":"demo","idx":"%d"},"values":["%d"],"timestamps":[1763052540000]}`+"\n", i, i)
+		fmt.Fprintf(&buf, `{"metric":{"__name__":"flag","job":"demo","idx":"%d"},"values":["%d"],"timestamps":[%d]}`+"\n", i, i, ts)
 	}
 
 	body := &bytes.Buffer{}
@@ -390,8 +405,9 @@ func TestResumeImportAfterFailure(t *testing.T) {
 	defer downstream.Close()
 
 	var buf bytes.Buffer
+	ts := recentTimestampMs()
 	for i := 0; i < 3; i++ {
-		fmt.Fprintf(&buf, `{"metric":{"__name__":"demo","job":"resume","idx":"%d"},"values":[%d],"timestamps":[1763052540000]}`+"\n", i, i)
+		fmt.Fprintf(&buf, `{"metric":{"__name__":"demo","job":"resume","idx":"%d"},"values":[%d],"timestamps":[%d]}`+"\n", i, i, ts)
 	}
 
 	body := &bytes.Buffer{}
@@ -470,7 +486,7 @@ func TestTenantIsolationHeaders(t *testing.T) {
 		cfgBytes, _ := json.Marshal(cfg)
 		writer.WriteField("config", string(cfgBytes))
 		fw, _ := writer.CreateFormFile("bundle", "tenant.jsonl")
-		fw.Write([]byte(`{"metric":{"__name__":"demo"},"values":[1],"timestamps":[1763052540000]}`))
+		fw.Write([]byte(fmt.Sprintf(`{"metric":{"__name__":"demo"},"values":[1],"timestamps":[%d]}`, recentTimestampMs())))
 		writer.Close()
 
 		req := httptest.NewRequest(http.MethodPost, "/api/upload", body)
@@ -591,8 +607,9 @@ func TestSkipsNonNumericValues(t *testing.T) {
 	writer.WriteField("config", string(cfgBytes))
 	fw, _ := writer.CreateFormFile("bundle", "badvalue.jsonl")
 	// "foo" should be skipped; the valid row should pass
-	fmt.Fprintf(fw, `{"metric":{"__name__":"demo"},"values":["foo"],"timestamps":[1763052540000]}`+"\n")
-	fmt.Fprintf(fw, `{"metric":{"__name__":"demo"},"values":[1],"timestamps":[1763052600000]}`+"\n")
+	ts := recentTimestampMs()
+	fmt.Fprintf(fw, `{"metric":{"__name__":"demo"},"values":["foo"],"timestamps":[%d]}`+"\n", ts)
+	fmt.Fprintf(fw, `{"metric":{"__name__":"demo"},"values":[1],"timestamps":[%d]}`+"\n", ts+60000)
 	writer.Close()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/upload", body)

@@ -3,7 +3,7 @@ const { test, expect } = require('@playwright/test');
 
 test.describe('Navigation Tests', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('http://localhost:8080');
+  await page.goto('/');
     await page.waitForLoadState('networkidle');
   });
 

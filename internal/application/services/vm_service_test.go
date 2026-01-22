@@ -1,7 +1,12 @@
 package services
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
 	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/vm"
@@ -187,6 +192,154 @@ func TestVMService_GetSample_LimitsResults(t *testing.T) {
 	// Verify limit is respected
 	if len(samples) != limit {
 		t.Errorf("expected %d samples, got %d", limit, len(samples))
+	}
+}
+
+func TestVMService_BuildSampleQueries(t *testing.T) {
+	service := &vmServiceImpl{}
+
+	tests := []struct {
+		name     string
+		jobs     []string
+		limit    int
+		expected []string
+	}{
+		{
+			name:  "empty jobs uses vm_app_version",
+			jobs:  []string{},
+			limit: 10,
+			expected: []string{
+				"topk(10, vm_app_version)",
+			},
+		},
+		{
+			name:  "small job list uses or selector",
+			jobs:  []string{"vmstorage-prod", "vmselect-prod"},
+			limit: 5,
+			expected: []string{
+				`topk(5, {job="vmstorage-prod" or job="vmselect-prod"})`,
+			},
+		},
+		{
+			name:  "large job list uses or selector",
+			jobs:  []string{"a", "b", "c", "d", "e", "f"},
+			limit: 3,
+			expected: []string{
+				`topk(3, {job="a" or job="b" or job="c" or job="d" or job="e" or job="f"})`,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := service.buildSampleQueries(tt.jobs, tt.limit)
+			if len(result) != len(tt.expected) {
+				t.Fatalf("expected %d queries, got %d", len(tt.expected), len(result))
+			}
+			for i := range result {
+				if result[i] != tt.expected[i] {
+					t.Fatalf("query = %v, want %v", result[i], tt.expected[i])
+				}
+			}
+		})
+	}
+}
+
+func TestVMService_GetSample_UsesRegexAndReturnsResults(t *testing.T) {
+	jobs := []string{
+		"job-0", "job-1", "job-2", "job-3", "job-4",
+		"job-5", "job-6", "job-7", "job-8", "job-9",
+	}
+	expectedQuery := `topk(10, {job="job-0" or job="job-1" or job="job-2" or job="job-3" or job="job-4" or job="job-5" or job="job-6" or job="job-7" or job="job-8" or job="job-9"})`
+
+	var receivedQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/query" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		receivedQuery = r.URL.Query().Get("query")
+
+		type resultItem struct {
+			Metric map[string]string `json:"metric"`
+			Value  []interface{}     `json:"value"`
+		}
+
+		results := make([]resultItem, 0, len(jobs))
+		ts := float64(time.Now().Unix())
+		for _, job := range jobs {
+			results = append(results, resultItem{
+				Metric: map[string]string{
+					"__name__": "demo_metric",
+					"job":      job,
+				},
+				Value: []interface{}{ts, "1"},
+			})
+		}
+
+		payload := map[string]interface{}{
+			"status": "success",
+			"data": map[string]interface{}{
+				"resultType": "vector",
+				"result":     results,
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(payload)
+	}))
+	defer srv.Close()
+
+	service := &vmServiceImpl{
+		clientFactory: func(conn domain.VMConnection) *vm.Client {
+			return vm.NewClient(domain.VMConnection{URL: srv.URL})
+		},
+	}
+
+	config := domain.ExportConfig{
+		Connection: domain.VMConnection{URL: srv.URL},
+		Jobs:       jobs,
+	}
+	samples, err := service.GetSample(context.Background(), config, 10)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if receivedQuery != expectedQuery {
+		t.Fatalf("unexpected query: %s", receivedQuery)
+	}
+	if len(samples) != len(jobs) {
+		t.Fatalf("expected %d samples, got %d", len(jobs), len(samples))
+	}
+}
+
+func TestVMService_GetSample_EmptyResultsReturnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/query" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		payload := map[string]interface{}{
+			"status": "success",
+			"data": map[string]interface{}{
+				"resultType": "vector",
+				"result":     []interface{}{},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(payload)
+	}))
+	defer srv.Close()
+
+	service := &vmServiceImpl{
+		clientFactory: func(conn domain.VMConnection) *vm.Client {
+			return vm.NewClient(domain.VMConnection{URL: srv.URL})
+		},
+	}
+
+	config := domain.ExportConfig{
+		Connection: domain.VMConnection{URL: srv.URL},
+		Jobs:       []string{},
+	}
+	_, err := service.GetSample(context.Background(), config, 10)
+	if err == nil {
+		t.Fatal("expected error for empty sample result, got nil")
 	}
 }
 

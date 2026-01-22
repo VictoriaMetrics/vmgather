@@ -3,7 +3,21 @@
 All notable changes to vmgather are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and versions adhere to semantic versioning.
 
 
+### Added
+- Validation attempts and final endpoint details are now returned to the UI for connection checks.
+- VMSelect auto-enrichment tests in Playwright coverage for base URLs and error cases.
+- Local test env now includes a standalone `vmselect` scenario and dynamic ports via env file.
+- GetSample now validates empty results and has coverage for 10-job or-filter queries.
+
+### Changed
+- Connection validation now retries with `/select/0/prometheus` when the base path is empty or `/prometheus`.
+- Playwright e2e now loads `.env.dynamic` and uses env-driven URLs/baseURL for dynamic test ports.
+- Sample query selector now uses `or`-groups in `{}` for job filters.
+
 ### Fixed
+- Connection validation UI now surfaces final endpoint and per-attempt errors for clearer troubleshooting.
+- Importer tests now use recent timestamps to avoid retention-window flakiness.
+- GetSample no longer returns early with empty results; it now reports a clear error.
 - Fix incorrect url format example to connect `vmselect`. See [#18](https://github.com/VictoriaMetrics/vmgather/issues/18).
 
 ## [v1.5.0] - 2025-12-12

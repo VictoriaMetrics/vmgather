@@ -1,6 +1,9 @@
 const { test, expect } = require('@playwright/test');
 
-async function completeConnectionStep(page, url = 'http://localhost:18428') {
+const VM_SINGLE_NOAUTH_URL =
+    process.env.VM_SINGLE_NOAUTH_URL || 'http://localhost:18428';
+
+async function completeConnectionStep(page, url = VM_SINGLE_NOAUTH_URL) {
     const step3 = page.locator('.step[data-step="3"].active');
     await step3.locator('#vmUrl').fill(url);
     await step3.locator('#testConnectionBtn').click();
@@ -71,9 +74,9 @@ async function ensureDefaultNetworkMocks(page, { mockValidate = true, mockDiscov
     }
 }
 
-async function goToObfuscation(page, url = 'http://localhost:18428', options = {}) {
+async function goToObfuscation(page, url = VM_SINGLE_NOAUTH_URL, options = {}) {
     await ensureDefaultNetworkMocks(page, options);
-    await page.goto('http://localhost:8080');
+    await page.goto('/');
     await page.waitForLoadState('networkidle');
     await page.locator('button.btn-primary:has-text("Next")').click();
     await page.waitForTimeout(200);
@@ -214,7 +217,7 @@ test.describe('Obfuscation Functionality', () => {
                 body: JSON.stringify({ samples: [sample], count: 1 }),
             });
         });
-        await goToObfuscation(page, 'http://localhost:18428', { mockSample: false });
+        await goToObfuscation(page, VM_SINGLE_NOAUTH_URL, { mockSample: false });
         await page.check('#enableObfuscation');
         await page.waitForSelector('#obfuscationOptions', { state: 'visible' });
 

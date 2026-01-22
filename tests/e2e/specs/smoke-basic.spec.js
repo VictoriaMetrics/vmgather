@@ -3,7 +3,7 @@ const { test, expect } = require('@playwright/test');
 
 test.describe('Smoke - vmgather shell', () => {
   test('landing wizard renders primary CTA', async ({ page }) => {
-    await page.goto('http://localhost:8080');
+  await page.goto('/');
     await page.waitForLoadState('networkidle');
 
     const hero = page.locator('header h1');
@@ -15,7 +15,7 @@ test.describe('Smoke - vmgather shell', () => {
   });
 
   test('time range inputs accept manual values', async ({ page }) => {
-    await page.goto('http://localhost:8080');
+  await page.goto('/');
     await page.waitForLoadState('networkidle');
 
     const nextButton = page.locator('.step.active button.btn-primary');

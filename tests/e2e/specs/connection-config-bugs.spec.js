@@ -1,5 +1,9 @@
 import { test, expect } from '@playwright/test';
 
+const VMGATHER_URL = process.env.VMGATHER_URL || 'http://localhost:8080';
+const VM_SINGLE_NOAUTH_URL =
+  process.env.VM_SINGLE_NOAUTH_URL || 'http://localhost:18428';
+
 /**
  * CRITICAL BUG TESTS: Connection Config Not Passed
  * 
@@ -13,11 +17,11 @@ test.describe('Connection Config Bugs', () => {
 
   test('Bug #1: /api/sample MUST receive connection config', async ({ request }) => {
     // Test with LOCAL VMSingle (no auth)
-    const response = await request.post('http://localhost:8080/api/sample', {
+    const response = await request.post(`${VMGATHER_URL}/api/sample`, {
       data: {
         config: {
           connection: {
-            url: 'http://localhost:18428',
+            url: VM_SINGLE_NOAUTH_URL,
             api_base_path: '',
             auth: {
               type: 'none'
@@ -56,7 +60,7 @@ test.describe('Connection Config Bugs', () => {
 
   test('Bug #2: /rw/prometheus path fails for /api/export', async ({ request }) => {
     // Test direct API call with /rw/prometheus path
-    const response = await request.post('http://localhost:8080/api/export', {
+    const response = await request.post(`${VMGATHER_URL}/api/export`, {
       data: {
         connection: {
           url: 'https://vm.example.com',
@@ -98,7 +102,7 @@ test.describe('Connection Config Bugs', () => {
 
   test('Bug #2 alternative: Test if /ui/prometheus works for export', async ({ request }) => {
     // Test if /ui/prometheus has same issue
-    const response = await request.post('http://localhost:8080/api/export', {
+    const response = await request.post(`${VMGATHER_URL}/api/export`, {
       data: {
         connection: {
           url: 'https://vm.example.com',
@@ -133,7 +137,7 @@ test.describe('Connection Config Bugs', () => {
 
   test('Solution test: /prometheus (without /rw or /ui) should work', async ({ request }) => {
     // Test if standard /prometheus path works
-    const response = await request.post('http://localhost:8080/api/export', {
+    const response = await request.post(`${VMGATHER_URL}/api/export`, {
       data: {
         connection: {
           url: 'https://vm.example.com',
