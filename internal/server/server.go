@@ -122,6 +122,18 @@ func buildValidateCandidates(conn domain.VMConnection) []domain.VMConnection {
 	return candidates
 }
 
+func formatVMError(err error) (string, string) {
+	if err == nil {
+		return "", ""
+	}
+	hint := vm.HintForError(err)
+	message := err.Error()
+	if hint != "" && !strings.Contains(message, hint) {
+		message = fmt.Sprintf("%s. Hint: %s", message, hint)
+	}
+	return message, hint
+}
+
 // Router returns the HTTP router
 func (s *Server) Router() http.Handler {
 	mux := http.NewServeMux()
@@ -242,16 +254,16 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 
 	if result == nil {
-		hint := inferVMErrorHint(lastErr)
-		log.Printf("[ERROR] Connection validation failed: %v", lastErr)
+		errMsg, hint := formatVMError(lastErr)
+		log.Printf("[ERROR] Connection validation failed: %s", errMsg)
 		if hint != "" {
 			log.Printf("[HINT] %s", hint)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success":  false,
 			"valid":    false,
-			"message":  fmt.Sprintf("Connection failed: %v", lastErr),
-			"error":    lastErr.Error(),
+			"message":  fmt.Sprintf("Connection failed: %s", errMsg),
+			"error":    errMsg,
 			"hint":     hint,
 			"attempts": attempts,
 		})
@@ -398,15 +410,23 @@ func (s *Server) handleDiscoverComponents(w http.ResponseWriter, r *http.Request
 
 			components, err = s.vmService.DiscoverComponents(ctx, fallbackConn, request.TimeRange)
 			if err != nil {
-				log.Printf("[ERROR] Discovery retry without base path failed: %v", err)
-				respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("No VictoriaMetrics component metrics found at the provided URL: %v", err))
+				errMsg, hint := formatVMError(err)
+				log.Printf("[ERROR] Discovery retry without base path failed: %s", errMsg)
+				if hint != "" {
+					log.Printf("[HINT] %s", hint)
+				}
+				respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("No VictoriaMetrics component metrics found at the provided URL: %s", errMsg))
 				return
 			}
 			// Success on fallback
 			request.Connection = fallbackConn
 		} else {
-			log.Printf("[ERROR] Discovery failed: %v", err)
-			respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("No VictoriaMetrics component metrics found at the provided URL: %v", err))
+			errMsg, hint := formatVMError(err)
+			log.Printf("[ERROR] Discovery failed: %s", errMsg)
+			if hint != "" {
+				log.Printf("[HINT] %s", hint)
+			}
+			respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("No VictoriaMetrics component metrics found at the provided URL: %s", errMsg))
 			return
 		}
 	}

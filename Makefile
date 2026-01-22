@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-llm build build-safe build-all clean fmt lint help test-env test-env-up test-env-down test-env-logs test-scenarios docker-build docker-build-vmgather docker-build-vmimporter
+.PHONY: test test-fast test-llm build build-safe build-all clean fmt lint help test-env test-env-up test-env-down test-env-logs test-scenarios test-config-bootstrap docker-build docker-build-vmgather docker-build-vmimporter
 
 VERSION ?= $(shell git describe --tags --always --dirty)
 PKG_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "latest")
@@ -10,6 +10,7 @@ PLATFORMS ?= linux/amd64,linux/arm64,linux/arm
 GO_VERSION ?= 1.22
 DOCKER_OUTPUT ?= type=docker
 DOCKER_COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo "docker compose" || echo "docker-compose")
+TEST_ENV_FILE := local-test-env/.env.dynamic
 
 # Docker registries and namespace (standard across VictoriaMetrics)
 # GHCR is handled by CI; local `make release` targets public hubs only.
@@ -110,6 +111,7 @@ help:
 	@echo "  make test-full         - Everything: unit + Docker scenarios"
 	@echo ""
 	@echo "TEST CONFIGURATION:"
+	@echo "  make test-config-bootstrap - Generate dynamic env file"
 	@echo "  make test-config-validate - Validate test configuration"
 	@echo "  make test-config-env      - Show config as environment variables"
 	@echo "  make test-config-json     - Show config as JSON"
@@ -342,7 +344,7 @@ lint:
 
 # Build test config utility
 local-test-env/testconfig: local-test-env/config.go
-	@cd local-test-env && go build -o testconfig config.go
+	@cd local-test-env && go build -o testconfig .
 
 # Load and validate test configuration
 test-config-validate: local-test-env/testconfig
@@ -352,6 +354,10 @@ test-config-validate: local-test-env/testconfig
 # Export test configuration as environment variables
 test-config-env: local-test-env/testconfig
 	@cd local-test-env && ./testconfig env
+
+# Generate dynamic port environment file
+test-config-bootstrap: local-test-env/testconfig
+	@cd local-test-env && ./testconfig bootstrap
 
 # Show test configuration as JSON
 test-config-json: local-test-env/testconfig
@@ -374,8 +380,9 @@ test-env-up: local-test-env/testconfig
 		echo "This directory is gitignored. Please ensure you have it locally."; \
 		exit 1; \
 	fi
+	@cd local-test-env && ./testconfig bootstrap
 	@cd local-test-env && ./testconfig validate
-	@$(DOCKER_COMPOSE) -f local-test-env/docker-compose.test.yml up -d
+	@$(DOCKER_COMPOSE) --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml up -d
 	@echo ""
 	@echo "Waiting for services to be ready (30 seconds)..."
 	@sleep 30
@@ -385,7 +392,7 @@ test-env-up: local-test-env/testconfig
 	@echo ""
 	@echo "[OK] Test environment is ready!"
 	@echo ""
-	@cd local-test-env && ./testconfig json | jq -r '"Available instances:\n  - VMGather:             \(.vmgather_url)\n  - VMSingle No Auth:     \(.vm_single_noauth.url)\n  - VMSingle via VMAuth:  \(.vm_single_auth.url)\n  - VM Cluster:           \(.vm_cluster.base_url)\n  - VM Cluster via VMAuth: \(.vmauth_cluster.url)"'
+	@cd local-test-env && ./testconfig json | jq -r '"Available instances:\n  - VMGather:             \(.vmgather_url)\n  - VMSingle No Auth:     \(.vm_single_noauth.url)\n  - VMSingle via VMAuth:  \(.vm_single_auth.url)\n  - VM Cluster:           \(.vm_cluster.base_url)\n  - VMSelect standalone:  \(.vmselect_standalone.base_url)\n  - VM Cluster via VMAuth: \(.vmauth_cluster.url)"'
 	@echo ""
 	@echo "Run 'make test-scenarios' to test all scenarios"
 	@echo "Run 'make test-env-logs' to see logs"
@@ -394,18 +401,30 @@ test-env-up: local-test-env/testconfig
 # Stop test environment
 test-env-down:
 	@echo "Stopping Test Environment..."
-	@$(DOCKER_COMPOSE) -f local-test-env/docker-compose.test.yml down
+	@if [ -f "$(TEST_ENV_FILE)" ]; then \
+		$(DOCKER_COMPOSE) --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml down; \
+	else \
+		$(DOCKER_COMPOSE) -f local-test-env/docker-compose.test.yml down; \
+	fi
 	@echo "[OK] Test environment stopped"
 
 # Stop and remove all data
 test-env-clean:
 	@echo "Cleaning Test Environment (including data)..."
-	@$(DOCKER_COMPOSE) -f local-test-env/docker-compose.test.yml down -v
+	@if [ -f "$(TEST_ENV_FILE)" ]; then \
+		$(DOCKER_COMPOSE) --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml down -v; \
+	else \
+		$(DOCKER_COMPOSE) -f local-test-env/docker-compose.test.yml down -v; \
+	fi
 	@echo "[OK] Test environment cleaned"
 
 # Show logs from test environment
 test-env-logs:
-	@$(DOCKER_COMPOSE) -f local-test-env/docker-compose.test.yml logs -f
+	@if [ -f "$(TEST_ENV_FILE)" ]; then \
+		$(DOCKER_COMPOSE) --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml logs -f; \
+	else \
+		$(DOCKER_COMPOSE) -f local-test-env/docker-compose.test.yml logs -f; \
+	fi
 
 # Integration tests: binary tests Docker environment
 test-integration: local-test-env/testconfig

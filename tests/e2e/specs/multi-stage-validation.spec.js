@@ -49,6 +49,17 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
         });
       }
 
+      if (vmUrl.includes(':8481') && apiBasePath === '/prometheus') {
+        return route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: false,
+            error: 'cannot parse accountID from \"api\". Hint: vmselect requires /select/{tenant}/prometheus in the URL (example: http://localhost:8481/select/0/prometheus)',
+          }),
+        });
+      }
+
       return route.fulfill({
         status: 200,
         contentType: 'application/json',

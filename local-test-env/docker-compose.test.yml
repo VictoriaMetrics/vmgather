@@ -11,7 +11,7 @@ services:
     image: victoriametrics/victoria-metrics:v1.129.1
     container_name: vmsingle-noauth
     ports:
-      - "18428:8428" # use non-default host port to avoid conflicts with host/local VM
+      - "${VM_SINGLE_NOAUTH_PORT:-18428}:8428" # use non-default host port to avoid conflicts with host/local VM
     command:
       - "--storageDataPath=/storage"
       - "--httpListenAddr=:8428"
@@ -28,7 +28,7 @@ services:
     image: victoriametrics/victoria-metrics:v1.129.1
     container_name: vmsingle-auth
     ports:
-      - "18429:8428"
+      - "${VM_SINGLE_AUTH_PORT:-18429}:8428"
     command:
       - "--storageDataPath=/storage"
       - "--httpListenAddr=:8428"
@@ -41,7 +41,7 @@ services:
     image: victoriametrics/vmauth:latest
     container_name: vmauth-single
     ports:
-      - "8427:8427"
+      - "${VM_AUTH_SINGLE_PORT:-8427}:8427"
     volumes:
       - ./test-configs/vmauth-single.yml:/etc/vmauth.yml
     command:
@@ -59,9 +59,9 @@ services:
     image: victoriametrics/vmstorage:latest
     container_name: vmstorage-1
     ports:
-      - "8482:8482"
-      - "8400:8400"
-      - "8401:8401"
+      - "${VM_STORAGE1_HTTP_PORT:-8482}:8482"
+      - "${VM_STORAGE1_INSERT_PORT:-8400}:8400"
+      - "${VM_STORAGE1_SELECT_PORT:-8401}:8401"
     command:
       - "--storageDataPath=/storage"
       - "--httpListenAddr=:8482"
@@ -76,9 +76,9 @@ services:
     image: victoriametrics/vmstorage:latest
     container_name: vmstorage-2
     ports:
-      - "8483:8482"
-      - "8402:8400"
-      - "8403:8401"
+      - "${VM_STORAGE2_HTTP_PORT:-8483}:8482"
+      - "${VM_STORAGE2_INSERT_PORT:-8402}:8400"
+      - "${VM_STORAGE2_SELECT_PORT:-8403}:8401"
     command:
       - "--storageDataPath=/storage"
       - "--httpListenAddr=:8482"
@@ -93,7 +93,7 @@ services:
     image: victoriametrics/vminsert:latest
     container_name: vminsert
     ports:
-      - "8480:8480"
+      - "${VM_INSERT_PORT:-8480}:8480"
     command:
       - "--httpListenAddr=:8480"
       - "--storageNode=vmstorage-1:8400,vmstorage-2:8400"
@@ -107,7 +107,7 @@ services:
     image: victoriametrics/vmselect:latest
     container_name: vmselect
     ports:
-      - "8481:8481"
+      - "${VM_SELECT_PORT:-8481}:8481"
     command:
       - "--httpListenAddr=:8481"
       - "--storageNode=vmstorage-1:8401,vmstorage-2:8401"
@@ -118,13 +118,29 @@ services:
       - vmtest
 
   # ============================================================================
+  # Scenario 3b: Standalone vmselect (single storage node)
+  # ============================================================================
+  vmselect-standalone:
+    image: victoriametrics/vmselect:latest
+    container_name: vmselect-standalone
+    ports:
+      - "${VMSELECT_STANDALONE_PORT:-8491}:8481"
+    command:
+      - "--httpListenAddr=:8481"
+      - "--storageNode=vmstorage-1:8401"
+    depends_on:
+      - vmstorage-1
+    networks:
+      - vmtest
+
+  # ============================================================================
   # Scenario 4: VM Cluster with auth via vmauth (multitenant)
   # ============================================================================
   vmauth-cluster:
     image: victoriametrics/vmauth:latest
     container_name: vmauth-cluster
     ports:
-      - "8426:8426"
+      - "${VM_AUTH_CLUSTER_PORT:-8426}:8426"
     volumes:
       - ./test-configs/vmauth-cluster-rw.yml:/etc/vmauth.yml
     command:
@@ -146,7 +162,7 @@ services:
     image: victoriametrics/vmauth:latest
     container_name: vmauth-export-test
     ports:
-      - "8425:8425"
+      - "${VM_AUTH_EXPORT_PORT:-8425}:8425"
     volumes:
       - ./test-configs/vmauth-export-test.yml:/etc/vmauth.yml
     command:
@@ -165,7 +181,7 @@ services:
     image: victoriametrics/vmagent:latest
     container_name: vmagent
     ports:
-      - "8430:8430"
+      - "${VM_AGENT_PORT:-8430}:8430"
     command:
       - "--promscrape.config=/etc/prometheus/prometheus.yml"
       - "--remoteWrite.url=http://vminsert:8480/insert/0/prometheus/api/v1/write"
@@ -189,7 +205,7 @@ services:
     image: prom/prometheus:latest
     container_name: test-data-generator
     ports:
-      - "9090:9090"
+      - "${PROMETHEUS_PORT:-9090}:9090"
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -208,7 +224,7 @@ services:
     image: nginx:alpine
     container_name: nginx-proxy
     ports:
-      - "8888:80"
+      - "${NGINX_PORT:-8888}:80"
     volumes:
       - ./test-configs/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
