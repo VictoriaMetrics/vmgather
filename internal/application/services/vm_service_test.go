@@ -98,8 +98,8 @@ func TestVMService_DiscoverComponents_ParsesResults(t *testing.T) {
 	}
 }
 
-// TestVMService_BuildSelector tests selector building
-func TestVMService_BuildSelector(t *testing.T) {
+// TestVMService_BuildSampleSelector tests selector building for sample queries
+func TestVMService_BuildSampleSelector(t *testing.T) {
 	service := &vmServiceImpl{}
 
 	tests := []struct {
@@ -110,25 +110,25 @@ func TestVMService_BuildSelector(t *testing.T) {
 		{
 			name:     "empty jobs",
 			jobs:     []string{},
-			expected: `{__name__!=""}`,
+			expected: "vm_app_version",
 		},
 		{
 			name:     "single job",
 			jobs:     []string{"vmstorage-prod"},
-			expected: `{job=~"vmstorage-prod"}`,
+			expected: `{job="vmstorage-prod"}`,
 		},
 		{
 			name:     "multiple jobs",
 			jobs:     []string{"vmstorage-prod", "vmselect-prod"},
-			expected: `{job=~"vmstorage-prod|vmselect-prod"}`,
+			expected: `{job="vmstorage-prod" or job="vmselect-prod"}`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := service.buildSelector(tt.jobs)
+			result := service.buildSampleSelector(tt.jobs)
 			if result != tt.expected {
-				t.Errorf("buildSelector() = %v, want %v", result, tt.expected)
+				t.Errorf("buildSampleSelector() = %v, want %v", result, tt.expected)
 			}
 		})
 	}

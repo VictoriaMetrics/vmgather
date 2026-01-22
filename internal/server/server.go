@@ -79,22 +79,6 @@ func buildFullEndpoint(conn domain.VMConnection) string {
 	return conn.URL
 }
 
-func inferVMErrorHint(err error) string {
-	if err == nil {
-		return ""
-	}
-	msg := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(msg, "cannot parse accountid"),
-		strings.Contains(msg, "cannot parse authtoken"),
-		strings.Contains(msg, "unsupported url format"),
-		strings.Contains(msg, "unsupported path"):
-		return "VMSelect requires /select/{tenant}/prometheus in the URL (example: http://host:8481/select/0/prometheus)."
-	default:
-		return ""
-	}
-}
-
 func buildValidateCandidates(conn domain.VMConnection) []domain.VMConnection {
 	candidates := []domain.VMConnection{conn}
 	seen := map[string]bool{}

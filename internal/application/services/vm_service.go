@@ -302,16 +302,6 @@ func (s *vmServiceImpl) EstimateExportSize(ctx context.Context, conn domain.VMCo
 	return s.estimateComponentMetrics(ctx, client, jobs, tr)
 }
 
-// buildSelector builds PromQL selector from job list
-func (s *vmServiceImpl) buildSelector(jobs []string) string {
-	if len(jobs) == 0 {
-		return "{__name__!=\"\"}" // All metrics
-	}
-
-	jobRegex := strings.Join(jobs, "|")
-	return fmt.Sprintf(`{job=~"%s"}`, jobRegex)
-}
-
 func (s *vmServiceImpl) buildSampleQueries(jobs []string, limit int) []string {
 	if limit <= 0 {
 		limit = 10
