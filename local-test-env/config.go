@@ -150,12 +150,12 @@ func DefaultConfig() *TestConfig {
 			Legacy: AuthConfig{
 				Type:     "basic",
 				Username: getEnvOrDefault("VM_AUTH_EXPORT_LEGACY_USER", "tenant1011-legacy"),
-				Password: getEnvOrDefault("VM_AUTH_EXPORT_LEGACY_PASS", "password"),
+				Password: getEnvOrDefault("VM_AUTH_EXPORT_LEGACY_PASS", "legacy-pass-1011"),
 			},
 			Modern: AuthConfig{
 				Type:     "basic",
 				Username: getEnvOrDefault("VM_AUTH_EXPORT_MODERN_USER", "tenant2022-modern"),
-				Password: getEnvOrDefault("VM_AUTH_EXPORT_MODERN_PASS", "password"),
+				Password: getEnvOrDefault("VM_AUTH_EXPORT_MODERN_PASS", "modern-pass-2022"),
 			},
 		},
 

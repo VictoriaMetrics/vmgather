@@ -56,7 +56,8 @@ jobs:
           }
           trap cleanup EXIT
           make test-env-up
-          LIVE_VM_URL=http://localhost:18428 INTEGRATION_TEST=1 go test -tags "integration realdiscovery" ./tests/integration/...
+          eval "$(cd local-test-env && ./testconfig env)"
+          LIVE_VM_URL="${VM_SINGLE_NOAUTH_URL}" INTEGRATION_TEST=1 go test -tags "integration realdiscovery" ./tests/integration/...
 
   docker-images:
     name: Docker Images

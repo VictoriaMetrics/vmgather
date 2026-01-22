@@ -440,7 +440,11 @@ test-integration: local-test-env/testconfig
 		echo "Run 'make test-env-up' first"; \
 		exit 1; \
 	fi
-	@cd local-test-env && eval "$$(./testconfig env)" && ./test-all-scenarios.sh
+	@set -e; \
+		eval "$$(cd local-test-env && ./testconfig env)"; \
+		cd local-test-env && ./test-all-scenarios.sh; \
+		cd ..; \
+		INTEGRATION_TEST=1 LIVE_VM_URL="$$VM_SINGLE_NOAUTH_URL" go test -tags "integration realdiscovery" ./tests/integration/...
 
 # Alias for backward compatibility
 test-scenarios: test-integration

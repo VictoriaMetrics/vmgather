@@ -25,12 +25,8 @@ func TestExportFallback_LegacyTenant(t *testing.T) {
 
 	// Tenant 1011: NO export API (legacy paths)
 	conn := domain.VMConnection{
-		URL: "http://localhost:8425",
-		Auth: domain.AuthConfig{
-			Type:     "basic",
-			Username: "tenant1011-legacy",
-			Password: "legacy-pass-1011",
-		},
+		URL:  vmAuthExportURL(),
+		Auth: vmAuthExportLegacyAuth(),
 	}
 
 	vmService := services.NewVMService()
@@ -82,12 +78,8 @@ func TestExportDirect_ModernTenant(t *testing.T) {
 
 	// Tenant 2022: Export API AVAILABLE (modern paths)
 	conn := domain.VMConnection{
-		URL: "http://localhost:8425",
-		Auth: domain.AuthConfig{
-			Type:     "basic",
-			Username: "tenant2022-modern",
-			Password: "modern-pass-2022",
-		},
+		URL:  vmAuthExportURL(),
+		Auth: vmAuthExportModernAuth(),
 	}
 
 	vmService := services.NewVMService()
@@ -138,12 +130,8 @@ func TestExportFallback_ErrorMessages(t *testing.T) {
 
 	// Tenant 1011: NO export API
 	conn := domain.VMConnection{
-		URL: "http://localhost:8425",
-		Auth: domain.AuthConfig{
-			Type:     "basic",
-			Username: "tenant1011-legacy",
-			Password: "legacy-pass-1011",
-		},
+		URL:  vmAuthExportURL(),
+		Auth: vmAuthExportLegacyAuth(),
 	}
 
 	exportService := services.NewExportService(t.TempDir(), "integration-test")
@@ -192,12 +180,8 @@ func TestExportAPI_DirectCheck(t *testing.T) {
 		{
 			name: "Tenant1011_NoExport",
 			conn: domain.VMConnection{
-				URL: "http://localhost:8425",
-				Auth: domain.AuthConfig{
-					Type:     "basic",
-					Username: "tenant1011-legacy",
-					Password: "legacy-pass-1011",
-				},
+				URL:  vmAuthExportURL(),
+				Auth: vmAuthExportLegacyAuth(),
 			},
 			expectExport: false,
 			description:  "Legacy tenant without export API",
@@ -205,12 +189,8 @@ func TestExportAPI_DirectCheck(t *testing.T) {
 		{
 			name: "Tenant2022_WithExport",
 			conn: domain.VMConnection{
-				URL: "http://localhost:8425",
-				Auth: domain.AuthConfig{
-					Type:     "basic",
-					Username: "tenant2022-modern",
-					Password: "modern-pass-2022",
-				},
+				URL:  vmAuthExportURL(),
+				Auth: vmAuthExportModernAuth(),
 			},
 			expectExport: true,
 			description:  "Modern tenant with export API",
@@ -243,12 +223,8 @@ func TestExportFallback_CompareResults(t *testing.T) {
 
 	// Export from tenant 1011 (fallback)
 	conn1011 := domain.VMConnection{
-		URL: "http://localhost:8425",
-		Auth: domain.AuthConfig{
-			Type:     "basic",
-			Username: "tenant1011-legacy",
-			Password: "legacy-pass-1011",
-		},
+		URL:  vmAuthExportURL(),
+		Auth: vmAuthExportLegacyAuth(),
 	}
 
 	exportService1011 := services.NewExportService(t.TempDir(), "integration-test")
@@ -268,12 +244,8 @@ func TestExportFallback_CompareResults(t *testing.T) {
 
 	// Export from tenant 2022 (direct)
 	conn2022 := domain.VMConnection{
-		URL: "http://localhost:8425",
-		Auth: domain.AuthConfig{
-			Type:     "basic",
-			Username: "tenant2022-modern",
-			Password: "modern-pass-2022",
-		},
+		URL:  vmAuthExportURL(),
+		Auth: vmAuthExportModernAuth(),
 	}
 
 	exportService2022 := services.NewExportService(t.TempDir(), "integration-test")
@@ -321,12 +293,8 @@ func TestExportFallback_MissingRoute(t *testing.T) {
 	defer cancel()
 
 	conn := domain.VMConnection{
-		URL: "http://localhost:8425",
-		Auth: domain.AuthConfig{
-			Type:     "basic",
-			Username: "tenant1011-legacy",
-			Password: "legacy-pass-1011",
-		},
+		URL:  vmAuthExportURL(),
+		Auth: vmAuthExportLegacyAuth(),
 	}
 
 	exportService := services.NewExportService(t.TempDir(), "integration-test")

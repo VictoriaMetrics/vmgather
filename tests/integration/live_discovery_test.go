@@ -18,7 +18,7 @@ import (
 func TestLiveDiscovery(t *testing.T) {
 	url := os.Getenv("LIVE_VM_URL")
 	if url == "" {
-		url = "http://localhost:18428"
+		url = vmSingleNoAuthURL()
 	}
 	vmSvc := services.NewVMService()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
