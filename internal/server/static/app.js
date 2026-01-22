@@ -4,6 +4,11 @@ let currentStep = 1;
 const totalSteps = 6;
 let DEFAULT_STAGING_DIR = '/tmp/vmgather';
 let connectionValid = false;
+let resolvedConnection = null;
+let lastValidatedInput = '';
+let programmaticUrlUpdate = false;
+let lastValidationAttempts = [];
+let lastValidationFinalEndpoint = '';
 let discoveredComponents = [];
 let sampleMetrics = [];
 let exportResult = null;
@@ -207,7 +212,13 @@ function initializeUrlValidation() {
         }
     };
 
-    urlInput.addEventListener('input', applyState);
+    urlInput.addEventListener('input', () => {
+        if (!programmaticUrlUpdate) {
+            resolvedConnection = null;
+            lastValidatedInput = '';
+        }
+        applyState();
+    });
     applyState();
 }
 
@@ -494,6 +505,7 @@ async function testConnection() {
     const result = document.getElementById('connectionResult');
     const nextBtn = document.getElementById('step3Next');
     const buttonWrapper = document.getElementById('testConnectionBtn');
+    const rawUrl = document.getElementById('vmUrl')?.value || '';
 
     btn.innerHTML = '<span class="btn-spinner"></span> Testing...';
 
@@ -605,6 +617,8 @@ async function testConnection() {
 
         const data = await response.json();
         console.log('[BUILD] Response Data:', data);
+        lastValidationAttempts = Array.isArray(data.attempts) ? data.attempts : [];
+        lastValidationFinalEndpoint = data.final_endpoint || '';
 
         if (response.ok && data.success) {
             // Check if VictoriaMetrics was detected
@@ -641,6 +655,15 @@ async function testConnection() {
             console.log('[BUILD] VM Components:', data.vm_components);
             console.groupEnd();
 
+            if (data.resolved_connection) {
+                resolvedConnection = data.resolved_connection;
+            } else {
+                resolvedConnection = config;
+            }
+            lastValidatedInput = rawUrl;
+
+            const finalEndpoint = data.final_endpoint || resolvedConnection.full_api_url || (resolvedConnection.url + (resolvedConnection.api_base_path || ''));
+
             // Add final summary
             stepsContainer.insertAdjacentHTML('beforeend', `
                 <div style="margin-top: 15px; padding: 15px; background: #e8f5e9; border-radius: 4px; border-left: 4px solid #4CAF50;">
@@ -649,8 +672,10 @@ async function testConnection() {
                         <strong>Version:</strong> ${data.version || 'Unknown'}<br>
                         <strong>Components:</strong> ${data.components || 0} detected<br>
                         ${data.vm_components && data.vm_components.length > 0 ? `<strong>VM Components:</strong> ${data.vm_components.join(', ')}<br>` : ''}
+                        ${finalEndpoint ? `<strong>Final endpoint:</strong> ${finalEndpoint}<br>` : ''}
                         ${config.tenant_id ? `<strong>Tenant ID:</strong> ${config.tenant_id}<br>` : ''}
                         ${config.is_multitenant ? `<strong>Type:</strong> Multitenant endpoint<br>` : ''}
+                        ${Array.isArray(data.attempts) && data.attempts.length > 0 ? `<strong>Attempts:</strong><br>${data.attempts.map(a => `- ${a.endpoint} ${a.success ? '[OK]' : '[FAIL]'}`).join('<br>')}<br>` : ''}
                     </div>
                 </div>
             `);
@@ -665,7 +690,8 @@ async function testConnection() {
             }
         } else {
             updateStep(step4, '[FAIL]', `Connection failed: ${data.error || 'Unknown error'}`, 'error');
-            throw new Error(data.error || 'Connection failed');
+            const hint = data.hint ? `\nHint: ${data.hint}` : '';
+            throw new Error((data.error || 'Connection failed') + hint);
         }
     } catch (error) {
         console.error('[FAIL] Connection failed:', error);
@@ -693,10 +719,23 @@ async function testConnection() {
             errorDetails = 'Check the URL path - the endpoint may not exist';
         }
 
+        const attemptsHtml = Array.isArray(lastValidationAttempts) && lastValidationAttempts.length > 0
+            ? `<div style="margin-top: 8px; font-size: 12px; color: #555;">
+                <strong>Attempts:</strong><br>
+                ${lastValidationAttempts.map(a => `- ${a.endpoint} ${a.success ? '[OK]' : '[FAIL]'}${a.error ? `: ${a.error}` : ''}`).join('<br>')}
+              </div>`
+            : '';
+
+        const finalEndpointHtml = lastValidationFinalEndpoint
+            ? `<div style="margin-top: 8px; font-size: 12px; color: #555;"><strong>Final endpoint:</strong> ${lastValidationFinalEndpoint}</div>`
+            : '';
+
         result.innerHTML = `
             <div class="error-message">
                 [FAIL] ${errorMsg}
                 ${errorDetails ? `<div style="margin-top: 8px; font-size: 13px;">${errorDetails}</div>` : ''}
+                ${finalEndpointHtml}
+                ${attemptsHtml}
                 <div style="margin-top: 10px; font-size: 12px; opacity: 0.8; border-top: 1px solid #ffcccc; padding-top: 10px;">
                     <strong>Debug info:</strong><br>
                     Open browser console (F12) -> Console tab for detailed logs<br>
@@ -759,6 +798,10 @@ function parseVMUrl(rawUrl) {
 function getConnectionConfig() {
     const authType = document.getElementById('authType').value;
     const rawUrl = document.getElementById('vmUrl').value;
+
+    if (resolvedConnection && rawUrl === lastValidatedInput) {
+        return resolvedConnection;
+    }
 
     // [SEARCH] DEBUG: Log raw input
     console.log('[FIX] Building connection config:', { rawUrl, authType });

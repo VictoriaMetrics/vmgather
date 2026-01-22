@@ -7,6 +7,7 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
       const body = route.request().postDataJSON?.() || {};
       const conn = body.connection || body;
       const vmUrl = conn.url || conn.vm_url || '';
+      const apiBasePath = conn.api_base_path || '';
       const auth = conn.auth || {};
 
       if (vmUrl.includes('nonexistent-host')) {
@@ -31,6 +32,23 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
         });
       }
 
+      if (vmUrl.includes('broken-vmselect')) {
+        return route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: false,
+            error: 'unsupported path requested: "/prometheus/api/v1/query"',
+            hint: 'VMSelect requires /select/{tenant}/prometheus in the URL (example: http://host:8481/select/0/prometheus).',
+            final_endpoint: `${vmUrl}/select/0/prometheus`,
+            attempts: [
+              { endpoint: `${vmUrl}/prometheus`, success: false, error: 'unsupported path requested' },
+              { endpoint: `${vmUrl}/select/0/prometheus`, success: false, error: 'permission denied' },
+            ],
+          }),
+        });
+      }
+
       return route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -41,6 +59,20 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
           vm_components: ['vmsingle'],
           components: 1,
           version: 'v1.95.0',
+          final_endpoint: `${vmUrl}/select/0/prometheus`,
+          resolved_connection: {
+            url: vmUrl,
+            api_base_path: apiBasePath || '/select/0/prometheus',
+            tenant_id: '0',
+            is_multitenant: false,
+            full_api_url: `${vmUrl}${apiBasePath || '/select/0/prometheus'}`,
+            auth: auth,
+            skip_tls_verify: false,
+          },
+          attempts: [
+            { endpoint: `${vmUrl}/prometheus`, success: false, error: 'unsupported path' },
+            { endpoint: `${vmUrl}/select/0/prometheus`, success: true },
+          ],
         }),
       });
     });
@@ -127,6 +159,9 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
       log.includes('URL parsed') || log.includes('localhost:18428')
     );
     expect(hasUrlParsed).toBeTruthy();
+
+    // Final endpoint should be visible
+    await expect(stepsContainer).toContainText('Final endpoint');
   });
 
   test('VMSingle via VMAuth Basic - should validate and detect VM', async ({ page }) => {
@@ -220,6 +255,38 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
       log.includes('/select/0/prometheus') || log.includes('localhost:8481')
     );
     expect(hasPathLog).toBeTruthy();
+  });
+
+  test('Base VMSelect URL - should show final endpoint and attempts', async ({ page }) => {
+    const step3 = page.locator('.step.active[data-step="3"]');
+
+    await step3.locator('#vmUrl').fill('http://localhost:8481');
+    await step3.locator('#authType').selectOption('none');
+
+    await step3.locator('#testConnectionBtn').click();
+    await page.waitForTimeout(4000);
+
+    const stepsContainer = page.locator('#validationSteps');
+    const successBox = stepsContainer.locator('text=/Connection Successful/');
+    await expect(successBox).toBeVisible({ timeout: 10000 });
+    await expect(stepsContainer).toContainText('Final endpoint');
+    await expect(stepsContainer).toContainText('Attempts');
+  });
+
+  test('Broken VMSelect URL - should enrich error with attempts and hint', async ({ page }) => {
+    const step3 = page.locator('.step.active[data-step="3"]');
+
+    await step3.locator('#vmUrl').fill('http://broken-vmselect');
+    await step3.locator('#authType').selectOption('none');
+
+    await step3.locator('#testConnectionBtn').click();
+    await page.waitForTimeout(4000);
+
+    const result = page.locator('#connectionResult');
+    await expect(result).toBeVisible({ timeout: 10000 });
+    await expect(result).toContainText('Attempts');
+    await expect(result).toContainText('Final endpoint');
+    await expect(result).toContainText('VMSelect requires /select/{tenant}/prometheus');
   });
 
   test('VM Cluster via VMAuth - should validate with basic auth', async ({ page }) => {

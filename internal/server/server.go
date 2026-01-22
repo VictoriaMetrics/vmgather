@@ -62,6 +62,66 @@ func respondWithError(w http.ResponseWriter, statusCode int, message string) {
 	})
 }
 
+type validateAttempt struct {
+	Endpoint    string `json:"endpoint"`
+	ApiBasePath string `json:"api_base_path,omitempty"`
+	Success     bool   `json:"success"`
+	Error       string `json:"error,omitempty"`
+}
+
+func buildFullEndpoint(conn domain.VMConnection) string {
+	if conn.FullApiUrl != "" {
+		return conn.FullApiUrl
+	}
+	if conn.ApiBasePath != "" {
+		return conn.URL + conn.ApiBasePath
+	}
+	return conn.URL
+}
+
+func inferVMErrorHint(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "cannot parse accountid"),
+		strings.Contains(msg, "cannot parse authtoken"),
+		strings.Contains(msg, "unsupported url format"),
+		strings.Contains(msg, "unsupported path"):
+		return "VMSelect requires /select/{tenant}/prometheus in the URL (example: http://host:8481/select/0/prometheus)."
+	default:
+		return ""
+	}
+}
+
+func buildValidateCandidates(conn domain.VMConnection) []domain.VMConnection {
+	candidates := []domain.VMConnection{conn}
+	seen := map[string]bool{}
+
+	addCandidate := func(apiBasePath string) {
+		if apiBasePath == "" {
+			return
+		}
+		c := conn
+		c.ApiBasePath = apiBasePath
+		c.FullApiUrl = conn.URL + apiBasePath
+		key := c.FullApiUrl + "|" + c.ApiBasePath
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		candidates = append(candidates, c)
+	}
+
+	// If user provided no path (or default /prometheus), try vmselect default tenant.
+	if conn.ApiBasePath == "" || conn.ApiBasePath == "/prometheus" {
+		addCandidate("/select/0/prometheus")
+	}
+
+	return candidates
+}
+
 // Router returns the HTTP router
 func (s *Server) Router() http.Handler {
 	mux := http.NewServeMux()
@@ -146,9 +206,6 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 	log.Printf("  Has Token: %v", req.Connection.Auth.Token != "")
 	log.Printf("  Has Header: %v", req.Connection.Auth.HeaderName != "")
 
-	// Create VM client
-	client := vm.NewClient(req.Connection)
-
 	// Try a simple query to validate connection
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
@@ -156,20 +213,53 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 	query := "vm_app_version"
 	log.Printf("Executing query: %s", query)
 
-	result, err := client.Query(ctx, query, time.Now())
+	candidates := buildValidateCandidates(req.Connection)
+	attempts := make([]validateAttempt, 0, len(candidates))
+	var result *vm.QueryResult
+	var resolvedConn domain.VMConnection
+	var lastErr error
+
+	for _, candidate := range candidates {
+		client := vm.NewClient(candidate)
+		res, err := client.Query(ctx, query, time.Now())
+		attempt := validateAttempt{
+			Endpoint:    buildFullEndpoint(candidate),
+			ApiBasePath: candidate.ApiBasePath,
+			Success:     err == nil,
+		}
+		if err != nil {
+			attempt.Error = err.Error()
+			lastErr = err
+			attempts = append(attempts, attempt)
+			continue
+		}
+		attempts = append(attempts, attempt)
+		result = res
+		resolvedConn = candidate
+		break
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 
-	if err != nil {
-		log.Printf("[ERROR] Connection validation failed: %v", err)
+	if result == nil {
+		hint := inferVMErrorHint(lastErr)
+		log.Printf("[ERROR] Connection validation failed: %v", lastErr)
+		if hint != "" {
+			log.Printf("[HINT] %s", hint)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"valid":   false,
-			"message": fmt.Sprintf("Connection failed: %v", err),
-			"error":   err.Error(),
+			"success":  false,
+			"valid":    false,
+			"message":  fmt.Sprintf("Connection failed: %v", lastErr),
+			"error":    lastErr.Error(),
+			"hint":     hint,
+			"attempts": attempts,
 		})
 		return
 	}
+
+	client := vm.NewClient(resolvedConn)
+	var err error
 
 	// If vm_app_version returns no results, try alternative queries
 	if result != nil && result.Status == "success" && len(result.Data.Result) == 0 {
@@ -257,6 +347,9 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 		"components":          components,
 		"is_victoria_metrics": isVictoriaMetrics,
 		"vm_components":       vmComponents,
+		"final_endpoint":      buildFullEndpoint(resolvedConn),
+		"resolved_connection": resolvedConn,
+		"attempts":            attempts,
 	})
 }
 
