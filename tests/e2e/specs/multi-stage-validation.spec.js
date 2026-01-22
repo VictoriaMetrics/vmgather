@@ -179,6 +179,31 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
     await expect(stepsContainer).toContainText('Final endpoint');
   });
 
+  test('Auth changes should invalidate cached connection', async ({ page }) => {
+    const step3 = page.locator('.step.active[data-step="3"]');
+
+    await step3.locator('#vmUrl').fill(VM_SINGLE_NOAUTH_URL);
+    await step3.locator('#authType').selectOption('none');
+    const firstConfig = await page.evaluate(() => getConnectionConfig());
+    expect(firstConfig.auth.type).toBe('none');
+
+    await page.evaluate(() => {
+      const select = document.getElementById('authType');
+      if (select) {
+        select.value = 'basic';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    await expect(step3.locator('#authType')).toHaveValue('basic');
+    await step3.locator('#username').waitFor({ timeout: 5000 });
+    await step3.locator('#username').fill('new-user');
+    await step3.locator('#password').fill('new-pass');
+    const secondConfig = await page.evaluate(() => getConnectionConfig());
+    expect(secondConfig.auth.type).toBe('basic');
+    expect(secondConfig.auth.username).toBe('new-user');
+    expect(secondConfig.auth.password).toBe('new-pass');
+  });
+
   test('VMSingle via VMAuth Basic - should validate and detect VM', async ({ page }) => {
     const step3 = page.locator('.step.active[data-step="3"]');
 

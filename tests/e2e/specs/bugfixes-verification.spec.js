@@ -297,9 +297,19 @@ test.describe('Bug Fix Verification', () => {
       // Intercept sample API call
       await page.route('**/api/sample', async route => {
         apiCalled = true;
-        const response = await route.fetch();
-        sampleResponse = await response.json();
-        await route.fulfill({ response, json: sampleResponse });
+        sampleResponse = {
+          samples: [
+            {
+              name: 'up',
+              labels: { __name__: 'up', job: 'vmjob', instance: '127.0.0.1:8428' },
+            },
+          ],
+        };
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(sampleResponse),
+        });
       });
 
       // Navigate to Step 5 to trigger sample loading

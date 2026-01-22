@@ -6,6 +6,7 @@ let DEFAULT_STAGING_DIR = '/tmp/vmgather';
 let connectionValid = false;
 let resolvedConnection = null;
 let lastValidatedInput = '';
+let lastValidatedConfigKey = '';
 let programmaticUrlUpdate = false;
 let lastValidationAttempts = [];
 let lastValidationFinalEndpoint = '';
@@ -68,6 +69,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     markHelpAutoOpenFlag(false);
 
     initializeUrlValidation();
+    initializeAuthCacheInvalidation();
     updateSelectionSummary();
     updateNextButtons();
     initializeObfuscationOptions();
@@ -96,6 +98,59 @@ document.addEventListener('DOMContentLoaded', async () => {
     wireAdvancedSummaries();
     initializeHelpSection();
 });
+
+function resetResolvedConnectionCache() {
+    resolvedConnection = null;
+    lastValidatedInput = '';
+    lastValidatedConfigKey = '';
+}
+
+function buildConnectionCacheKey(rawUrl) {
+    const authType = document.getElementById('authType')?.value || 'none';
+    const username = document.getElementById('username')?.value || '';
+    const password = document.getElementById('password')?.value || '';
+    const token = document.getElementById('token')?.value || '';
+    const headerName = document.getElementById('headerName')?.value || '';
+    const headerValue = document.getElementById('headerValue')?.value || '';
+
+    return [
+        rawUrl || '',
+        authType,
+        username,
+        password,
+        token,
+        headerName,
+        headerValue
+    ].join('|');
+}
+
+function initializeAuthCacheInvalidation() {
+    const authType = document.getElementById('authType');
+    if (!authType) {
+        return;
+    }
+
+    authType.addEventListener('change', () => {
+        resetResolvedConnectionCache();
+        toggleAuthFields();
+        wireAuthFieldListeners();
+    });
+
+    toggleAuthFields();
+    wireAuthFieldListeners();
+}
+
+function wireAuthFieldListeners() {
+    const fields = ['username', 'password', 'token', 'headerName', 'headerValue'];
+    fields.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) {
+            return;
+        }
+        el.addEventListener('input', resetResolvedConnectionCache);
+        el.addEventListener('change', resetResolvedConnectionCache);
+    });
+}
 
 // Initialize timezone selector with user's default timezone
 function initializeTimezone() {
@@ -214,8 +269,7 @@ function initializeUrlValidation() {
 
     urlInput.addEventListener('input', () => {
         if (!programmaticUrlUpdate) {
-            resolvedConnection = null;
-            lastValidatedInput = '';
+            resetResolvedConnectionCache();
         }
         applyState();
     });
@@ -661,6 +715,7 @@ async function testConnection() {
                 resolvedConnection = config;
             }
             lastValidatedInput = rawUrl;
+            lastValidatedConfigKey = buildConnectionCacheKey(rawUrl);
 
             const finalEndpoint = data.final_endpoint || resolvedConnection.full_api_url || (resolvedConnection.url + (resolvedConnection.api_base_path || ''));
 
@@ -798,8 +853,9 @@ function parseVMUrl(rawUrl) {
 function getConnectionConfig() {
     const authType = document.getElementById('authType').value;
     const rawUrl = document.getElementById('vmUrl').value;
+    const cacheKey = buildConnectionCacheKey(rawUrl);
 
-    if (resolvedConnection && rawUrl === lastValidatedInput) {
+    if (resolvedConnection && cacheKey === lastValidatedConfigKey) {
         return resolvedConnection;
     }
 
