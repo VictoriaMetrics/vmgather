@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -39,6 +40,17 @@ type Result struct {
 	Metric map[string]string `json:"metric"`
 	Value  []interface{}     `json:"value,omitempty"`  // [timestamp, value]
 	Values [][]interface{}   `json:"values,omitempty"` // [[timestamp, value], ...]
+}
+
+// ErrMissingTenantPath indicates vmselect URL is missing /select/<tenant>/prometheus
+var ErrMissingTenantPath = errors.New("vmselect requires /select/<tenant>/prometheus")
+
+// HintForError returns a human-friendly hint for common VM connection errors
+func HintForError(err error) string {
+	if errors.Is(err, ErrMissingTenantPath) {
+		return "vmselect requires /select/<tenant>/prometheus in the URL (example: http://host:8481/select/0/prometheus)"
+	}
+	return ""
 }
 
 // ExportedMetric represents a metric in export format (JSONL)
@@ -93,7 +105,7 @@ func (c *Client) Query(ctx context.Context, query string, ts time.Time) (*QueryR
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+		return nil, classifyResponseError(resp.StatusCode, string(body))
 	}
 
 	// Parse response
@@ -135,7 +147,7 @@ func (c *Client) QueryRange(ctx context.Context, query string, start, end time.T
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+		return nil, classifyResponseError(resp.StatusCode, string(body))
 	}
 
 	// Parse response
@@ -180,7 +192,7 @@ func (c *Client) Export(ctx context.Context, selector string, start, end time.Ti
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+		return nil, classifyResponseError(resp.StatusCode, string(body))
 	}
 
 	// Return response body for streaming
@@ -248,6 +260,18 @@ func (c *Client) buildRequest(ctx context.Context, method, path string, params u
 	}
 
 	return req, nil
+}
+
+func classifyResponseError(statusCode int, body string) error {
+	trimmed := strings.TrimSpace(body)
+	lowered := strings.ToLower(trimmed)
+	if strings.Contains(lowered, "cannot parse accountid") || strings.Contains(lowered, "missing accountid") {
+		return fmt.Errorf("%w: %s", ErrMissingTenantPath, trimmed)
+	}
+	if strings.Contains(lowered, "unsupported url format") && strings.Contains(lowered, "/prometheus/api") {
+		return fmt.Errorf("%w: %s", ErrMissingTenantPath, trimmed)
+	}
+	return fmt.Errorf("unexpected status code %d: %s", statusCode, trimmed)
 }
 
 // redactURL removes sensitive information from URL for logging

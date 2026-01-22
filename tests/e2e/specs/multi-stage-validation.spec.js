@@ -7,6 +7,7 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
       const body = route.request().postDataJSON?.() || {};
       const conn = body.connection || body;
       const vmUrl = conn.url || conn.vm_url || '';
+      const apiBasePath = conn.api_base_path || '';
       const auth = conn.auth || {};
 
       if (vmUrl.includes('nonexistent-host')) {
@@ -27,6 +28,17 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
           body: JSON.stringify({
             success: false,
             error: 'Unauthorized',
+          }),
+        });
+      }
+
+      if (vmUrl.includes(':8481') && apiBasePath === '/prometheus') {
+        return route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: false,
+            error: 'cannot parse accountID from \"api\". Hint: vmselect requires /select/<tenant>/prometheus in the URL (example: http://localhost:8481/select/0/prometheus)',
           }),
         });
       }
@@ -220,6 +232,20 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
       log.includes('/select/0/prometheus') || log.includes('localhost:8481')
     );
     expect(hasPathLog).toBeTruthy();
+  });
+
+  test('VMSelect base URL - should show hint about /select/<tenant>/prometheus', async ({ page }) => {
+    const step3 = page.locator('.step.active[data-step=\"3\"]');
+
+    await step3.locator('#vmUrl').fill('http://localhost:8481');
+    await step3.locator('#authType').selectOption('none');
+
+    await step3.locator('#testConnectionBtn').click();
+    await page.waitForTimeout(4000);
+
+    const stepsContainer = page.locator('#validationSteps');
+    await expect(stepsContainer).toBeVisible();
+    await expect(stepsContainer).toContainText('select/0/prometheus');
   });
 
   test('VM Cluster via VMAuth - should validate with basic auth', async ({ page }) => {

@@ -5,6 +5,18 @@ const { defineConfig, devices } = require('@playwright/test');
  * vmgather E2E Test Configuration
  * @see https://playwright.dev/docs/test-configuration
  */
+const defaultBaseUrl = 'http://localhost:8080';
+let baseURL = process.env.VMGATHER_URL || defaultBaseUrl;
+let webAddr = process.env.VMGATHER_ADDR || '';
+try {
+  const parsed = new URL(baseURL);
+  if (!webAddr) {
+    webAddr = parsed.host;
+  }
+} catch (err) {
+  baseURL = defaultBaseUrl;
+  webAddr = 'localhost:8080';
+}
 module.exports = defineConfig({
   testDir: './specs',
   fullyParallel: true,
@@ -18,7 +30,7 @@ module.exports = defineConfig({
   ],
   
   use: {
-    baseURL: 'http://localhost:8080',
+    baseURL,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -33,8 +45,8 @@ module.exports = defineConfig({
 
   // Start local dev server before tests
   webServer: {
-    command: '../../vmgather -no-browser',
-    url: 'http://localhost:8080',
+    command: `../../vmgather -no-browser -addr ${webAddr || 'localhost:8080'}`,
+    url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
   },
