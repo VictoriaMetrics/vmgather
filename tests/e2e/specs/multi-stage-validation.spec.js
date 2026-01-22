@@ -1,5 +1,26 @@
 const { test, expect } = require('@playwright/test');
 
+const VM_SINGLE_NOAUTH_URL =
+  process.env.VM_SINGLE_NOAUTH_URL || 'http://localhost:18428';
+const VM_SINGLE_AUTH_URL =
+  process.env.VM_SINGLE_AUTH_URL || 'http://localhost:8427';
+const VM_CLUSTER_URL = process.env.VM_CLUSTER_URL || 'http://localhost:8481';
+const VM_CLUSTER_SELECT_TENANT_0 =
+  process.env.VM_CLUSTER_SELECT_TENANT_0 ||
+  `${VM_CLUSTER_URL}/select/0/prometheus`;
+const VM_AUTH_CLUSTER_URL =
+  process.env.VM_AUTH_CLUSTER_URL || 'http://localhost:8426';
+const VM_AUTH_CLUSTER_TENANT_1011_URL =
+  process.env.VM_AUTH_CLUSTER_TENANT_1011_URL ||
+  `${VM_AUTH_CLUSTER_URL}/1011/rw/prometheus`;
+const VM_CLUSTER_HOST = (() => {
+  try {
+    return new URL(VM_CLUSTER_URL).host;
+  } catch (err) {
+    return '';
+  }
+})();
+
 test.describe('Multi-Stage Connection Validation - Real Environment', () => {
   test.beforeEach(async ({ page }) => {
     // Mock VM endpoints to keep tests hermetic
@@ -7,6 +28,7 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
       const body = route.request().postDataJSON?.() || {};
       const conn = body.connection || body;
       const vmUrl = conn.url || conn.vm_url || '';
+      const apiBasePath = conn.api_base_path || '';
       const auth = conn.auth || {};
 
       if (vmUrl.includes('nonexistent-host')) {
@@ -31,6 +53,34 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
         });
       }
 
+      if (vmUrl.includes('broken-vmselect')) {
+        return route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: false,
+            error: 'unsupported path requested: "/prometheus/api/v1/query"',
+            hint: 'VMSelect requires /select/{tenant}/prometheus in the URL (example: http://host:8481/select/0/prometheus).',
+            final_endpoint: `${vmUrl}/select/0/prometheus`,
+            attempts: [
+              { endpoint: `${vmUrl}/prometheus`, success: false, error: 'unsupported path requested' },
+              { endpoint: `${vmUrl}/select/0/prometheus`, success: false, error: 'permission denied' },
+            ],
+          }),
+        });
+      }
+
+      if (VM_CLUSTER_HOST && vmUrl.includes(VM_CLUSTER_HOST) && apiBasePath === '/prometheus') {
+        return route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: false,
+            error: `cannot parse accountID from "api". Hint: vmselect requires /select/{tenant}/prometheus in the URL (example: ${VM_CLUSTER_SELECT_TENANT_0})`,
+          }),
+        });
+      }
+
       return route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -41,6 +91,20 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
           vm_components: ['vmsingle'],
           components: 1,
           version: 'v1.95.0',
+          final_endpoint: `${vmUrl}/select/0/prometheus`,
+          resolved_connection: {
+            url: vmUrl,
+            api_base_path: apiBasePath || '/select/0/prometheus',
+            tenant_id: '0',
+            is_multitenant: false,
+            full_api_url: `${vmUrl}${apiBasePath || '/select/0/prometheus'}`,
+            auth: auth,
+            skip_tls_verify: false,
+          },
+          attempts: [
+            { endpoint: `${vmUrl}/prometheus`, success: false, error: 'unsupported path' },
+            { endpoint: `${vmUrl}/select/0/prometheus`, success: true },
+          ],
         }),
       });
     });
@@ -77,7 +141,7 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
       });
     });
 
-    await page.goto('http://localhost:8080');
+    await page.goto('/');
     await page.waitForLoadState('networkidle');
 
     // Navigate to Step 3 (Connection)
@@ -91,15 +155,10 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
   });
 
   test('VMSingle No Auth - should show all validation steps', async ({ page }) => {
-    const consoleLogs = [];
-    page.on('console', msg => {
-      consoleLogs.push(msg.text());
-    });
-
     const step3 = page.locator('.step.active[data-step="3"]');
 
     // Fill connection details
-    await step3.locator('#vmUrl').fill('http://localhost:18428');
+    await step3.locator('#vmUrl').fill(VM_SINGLE_NOAUTH_URL);
     await step3.locator('#authType').selectOption('none');
 
     // Click test connection
@@ -116,23 +175,39 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
     const successBox = stepsContainer.locator('text=/Connection Successful/');
     await expect(successBox).toBeVisible({ timeout: 10000 });
 
-    // Verify console logs
-    const hasMultiStageLog = consoleLogs.some(log =>
-      log.includes('Multi-Stage Connection Test')
-    );
-    expect(hasMultiStageLog).toBeTruthy();
+    // Final endpoint should be visible
+    await expect(stepsContainer).toContainText('Final endpoint');
+  });
 
-    // Verify URL was parsed
-    const hasUrlParsed = consoleLogs.some(log =>
-      log.includes('URL parsed') || log.includes('localhost:18428')
-    );
-    expect(hasUrlParsed).toBeTruthy();
+  test('Auth changes should invalidate cached connection', async ({ page }) => {
+    const step3 = page.locator('.step.active[data-step="3"]');
+
+    await step3.locator('#vmUrl').fill(VM_SINGLE_NOAUTH_URL);
+    await step3.locator('#authType').selectOption('none');
+    const firstConfig = await page.evaluate(() => getConnectionConfig());
+    expect(firstConfig.auth.type).toBe('none');
+
+    await page.evaluate(() => {
+      const select = document.getElementById('authType');
+      if (select) {
+        select.value = 'basic';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    await expect(step3.locator('#authType')).toHaveValue('basic');
+    await step3.locator('#username').waitFor({ timeout: 5000 });
+    await step3.locator('#username').fill('new-user');
+    await step3.locator('#password').fill('new-pass');
+    const secondConfig = await page.evaluate(() => getConnectionConfig());
+    expect(secondConfig.auth.type).toBe('basic');
+    expect(secondConfig.auth.username).toBe('new-user');
+    expect(secondConfig.auth.password).toBe('new-pass');
   });
 
   test('VMSingle via VMAuth Basic - should validate and detect VM', async ({ page }) => {
     const step3 = page.locator('.step.active[data-step="3"]');
 
-    await step3.locator('#vmUrl').fill('http://localhost:8427');
+    await step3.locator('#vmUrl').fill(VM_SINGLE_AUTH_URL);
     await step3.locator('#authType').selectOption('basic');
     await page.waitForTimeout(200);
     await step3.locator('#username').fill('monitoring-read');
@@ -156,7 +231,7 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
   test('VMSingle via VMAuth Bearer - should validate with token', async ({ page }) => {
     const step3 = page.locator('.step.active[data-step="3"]');
 
-    await step3.locator('#vmUrl').fill('http://localhost:8427');
+    await step3.locator('#vmUrl').fill(VM_SINGLE_AUTH_URL);
     await step3.locator('#authType').selectOption('bearer');
     await page.waitForTimeout(200);
     await step3.locator('#token').fill('test-bearer-token-789');
@@ -178,7 +253,7 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
     const step3 = page.locator('.step.active[data-step="3"]');
 
     // VM Cluster requires tenant ID in URL
-    await step3.locator('#vmUrl').fill('http://localhost:8481/select/0/prometheus');
+    await step3.locator('#vmUrl').fill(VM_CLUSTER_SELECT_TENANT_0);
     await step3.locator('#authType').selectOption('none');
 
     await step3.locator('#testConnectionBtn').click();
@@ -188,11 +263,8 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
     const successBox = stepsContainer.locator('text=/Connection Successful/');
     await expect(successBox).toBeVisible({ timeout: 10000 });
 
-    // Verify URL parsing in logs
-    const hasUrlLog = consoleLogs.some(log =>
-      log.includes('localhost:8481')
-    );
-    expect(hasUrlLog).toBeTruthy();
+    // Verify parsed path appears in UI
+    await expect(stepsContainer).toContainText('/select/0/prometheus');
   });
 
   test('VM Cluster with Tenant ID - should parse tenant and validate', async ({ page }) => {
@@ -204,7 +276,7 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
     const step3 = page.locator('.step.active[data-step="3"]');
 
     // URL with tenant ID
-    await step3.locator('#vmUrl').fill('http://localhost:8481/select/0/prometheus');
+    await step3.locator('#vmUrl').fill(VM_CLUSTER_SELECT_TENANT_0);
     await step3.locator('#authType').selectOption('none');
 
     await step3.locator('#testConnectionBtn').click();
@@ -216,16 +288,48 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
     await expect(successBox).toBeVisible({ timeout: 10000 });
 
     // Verify API base path in URL (tenant path is part of URL)
-    const hasPathLog = consoleLogs.some(log =>
-      log.includes('/select/0/prometheus') || log.includes('localhost:8481')
+    const hasPathLog = consoleLogs.some(
+      log => log.includes('/select/0/prometheus') || (VM_CLUSTER_HOST && log.includes(VM_CLUSTER_HOST))
     );
     expect(hasPathLog).toBeTruthy();
+  });
+
+  test('Base VMSelect URL - should show final endpoint and attempts', async ({ page }) => {
+    const step3 = page.locator('.step.active[data-step="3"]');
+
+    await step3.locator('#vmUrl').fill(VM_CLUSTER_URL);
+    await step3.locator('#authType').selectOption('none');
+
+    await step3.locator('#testConnectionBtn').click();
+    await page.waitForTimeout(4000);
+
+    const stepsContainer = page.locator('#validationSteps');
+    const successBox = stepsContainer.locator('text=/Connection Successful/');
+    await expect(successBox).toBeVisible({ timeout: 10000 });
+    await expect(stepsContainer).toContainText('Final endpoint');
+    await expect(stepsContainer).toContainText('Attempts');
+  });
+
+  test('Broken VMSelect URL - should enrich error with attempts and hint', async ({ page }) => {
+    const step3 = page.locator('.step.active[data-step="3"]');
+
+    await step3.locator('#vmUrl').fill('http://broken-vmselect');
+    await step3.locator('#authType').selectOption('none');
+
+    await step3.locator('#testConnectionBtn').click();
+    await page.waitForTimeout(4000);
+
+    const result = page.locator('#connectionResult');
+    await expect(result).toBeVisible({ timeout: 10000 });
+    await expect(result).toContainText('Attempts');
+    await expect(result).toContainText('Final endpoint');
+    await expect(result).toContainText('VMSelect requires /select/{tenant}/prometheus');
   });
 
   test('VM Cluster via VMAuth - should validate with basic auth', async ({ page }) => {
     const step3 = page.locator('.step.active[data-step="3"]');
 
-    await step3.locator('#vmUrl').fill('http://localhost:8426/1011/rw/prometheus');
+    await step3.locator('#vmUrl').fill(VM_AUTH_CLUSTER_TENANT_1011_URL);
     await step3.locator('#authType').selectOption('basic');
     await step3.locator('#username').fill('monitoring-rw');
     await step3.locator('#password').fill('secret-password-123');
@@ -259,7 +363,7 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
   test('Wrong credentials - should show auth error', async ({ page }) => {
     const step3 = page.locator('.step.active[data-step="3"]');
 
-    await step3.locator('#vmUrl').fill('http://localhost:8427');
+    await step3.locator('#vmUrl').fill(VM_SINGLE_AUTH_URL);
     await step3.locator('#authType').selectOption('basic');
     await page.waitForTimeout(200);
     await step3.locator('#username').fill('wrong-user');
@@ -280,7 +384,7 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
   test('All steps should appear progressively', async ({ page }) => {
     const step3 = page.locator('.step.active[data-step="3"]');
 
-    await step3.locator('#vmUrl').fill('http://localhost:18428');
+    await step3.locator('#vmUrl').fill(VM_SINGLE_NOAUTH_URL);
     await step3.locator('#authType').selectOption('none');
 
     await step3.locator('#testConnectionBtn').click();
@@ -309,7 +413,7 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
   test('Success should show VM components info', async ({ page }) => {
     const step3 = page.locator('.step.active[data-step="3"]');
 
-    await step3.locator('#vmUrl').fill('http://localhost:18428');
+    await step3.locator('#vmUrl').fill(VM_SINGLE_NOAUTH_URL);
     await step3.locator('#authType').selectOption('none');
 
     await step3.locator('#testConnectionBtn').click();

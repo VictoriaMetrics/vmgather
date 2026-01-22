@@ -1,5 +1,9 @@
 import { test, expect } from '@playwright/test';
 
+const VMGATHER_URL = process.env.VMGATHER_URL || 'http://localhost:8080';
+const VM_SINGLE_NOAUTH_URL =
+  process.env.VM_SINGLE_NOAUTH_URL || 'http://localhost:18428';
+
 /**
  * CRITICAL BUG: /rw/prometheus works for /query but NOT for /export
  * 
@@ -14,7 +18,7 @@ test.describe('Export Path Fix', () => {
 
   test('Bug: /rw/prometheus fails for /api/export', async ({ request }) => {
     // This reproduces the EXACT error from production logs
-    const response = await request.post('http://localhost:8080/api/export', {
+    const response = await request.post(`${VMGATHER_URL}/api/export`, {
       data: {
         connection: {
           url: 'https://vm.example.com',
@@ -56,7 +60,7 @@ test.describe('Export Path Fix', () => {
 
   test('Solution: /prometheus (without /rw) should work for export', async ({ request }) => {
     // Test if standard /prometheus path works
-    const response = await request.post('http://localhost:8080/api/export', {
+    const response = await request.post(`${VMGATHER_URL}/api/export`, {
       data: {
         connection: {
           url: 'https://vm.example.com',
@@ -97,11 +101,11 @@ test.describe('Export Path Fix', () => {
 
   test('Verify: /rw should be stripped only for /export, not for /query', async ({ request }) => {
     // /query with /rw/prometheus should work as-is
-    const queryResponse = await request.post('http://localhost:8080/api/sample', {
+    const queryResponse = await request.post(`${VMGATHER_URL}/api/sample`, {
       data: {
         config: {
           connection: {
-            url: 'http://localhost:18428',
+            url: VM_SINGLE_NOAUTH_URL,
             api_base_path: '',
             auth: { type: 'none' }
           },

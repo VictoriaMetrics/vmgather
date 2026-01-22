@@ -2,9 +2,15 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
 )
 
 // TestConfig holds all test environment URLs and credentials
@@ -18,6 +24,8 @@ type TestConfig struct {
 
 	// VMCluster instances
 	VMCluster VMClusterConfig `json:"vm_cluster"`
+	// Standalone vmselect scenario (single storage node)
+	VMSelectStandalone VMSelectStandaloneConfig `json:"vmselect_standalone"`
 
 	// VMAuth proxies
 	VMAuthCluster VMAuthConfig `json:"vmauth_cluster"`
@@ -50,6 +58,12 @@ type VMClusterConfig struct {
 	SelectMultitenant string `json:"select_multitenant"`
 }
 
+// VMSelectStandaloneConfig holds standalone vmselect configuration
+type VMSelectStandaloneConfig struct {
+	BaseURL       string `json:"base_url"`
+	SelectTenant0 string `json:"select_tenant_0"`
+}
+
 // VMAuthConfig holds VMAuth proxy configuration
 type VMAuthConfig struct {
 	URL         string     `json:"url"`
@@ -75,17 +89,25 @@ type AuthConfig struct {
 
 // DefaultConfig returns default test configuration
 func DefaultConfig() *TestConfig {
+	loadEnvFileIfExists(getEnvOrDefault("VMGATHER_ENV_FILE", ".env.dynamic"))
 	// Use localhost by default, can be overridden via env vars
-	host := "localhost"
+	host := getEnvOrDefault("VM_TEST_HOST", "localhost")
+	vmGatherPort := getEnvIntOrDefault("VMGATHER_PORT", 8080)
+	vmSingleNoAuthPort := getEnvIntOrDefault("VM_SINGLE_NOAUTH_PORT", 18428)
+	vmAuthSinglePort := getEnvIntOrDefault("VM_AUTH_SINGLE_PORT", 8427)
+	vmSelectPort := getEnvIntOrDefault("VM_SELECT_PORT", 8481)
+	vmAuthClusterPort := getEnvIntOrDefault("VM_AUTH_CLUSTER_PORT", 8426)
+	vmAuthExportPort := getEnvIntOrDefault("VM_AUTH_EXPORT_PORT", 8425)
+	vmSelectStandalonePort := getEnvIntOrDefault("VMSELECT_STANDALONE_PORT", 8491)
 
 	return &TestConfig{
-		VMGatherURL: getEnvOrDefault("VMGATHER_URL", fmt.Sprintf("http://%s:8080", host)),
+		VMGatherURL: getEnvOrDefault("VMGATHER_URL", fmt.Sprintf("http://%s:%d", host, vmGatherPort)),
 
 		VMSingleNoAuth: VMEndpoint{
-			URL: getEnvOrDefault("VM_SINGLE_NOAUTH_URL", fmt.Sprintf("http://%s:18428", host)),
+			URL: getEnvOrDefault("VM_SINGLE_NOAUTH_URL", fmt.Sprintf("http://%s:%d", host, vmSingleNoAuthPort)),
 		},
 		VMSingleAuth: VMEndpoint{
-			URL: getEnvOrDefault("VM_SINGLE_AUTH_URL", fmt.Sprintf("http://%s:8427", host)),
+			URL: getEnvOrDefault("VM_SINGLE_AUTH_URL", fmt.Sprintf("http://%s:%d", host, vmAuthSinglePort)),
 			Auth: &AuthConfig{
 				Type:     "basic",
 				Username: getEnvOrDefault("VM_SINGLE_AUTH_USER", "monitoring-read"),
@@ -94,14 +116,18 @@ func DefaultConfig() *TestConfig {
 		},
 
 		VMCluster: VMClusterConfig{
-			BaseURL:           getEnvOrDefault("VM_CLUSTER_URL", fmt.Sprintf("http://%s:8481", host)),
-			SelectTenant0:     getEnvOrDefault("VM_CLUSTER_SELECT_TENANT_0", fmt.Sprintf("%s/select/0/prometheus", getEnvOrDefault("VM_CLUSTER_URL", fmt.Sprintf("http://%s:8481", host)))),
-			SelectTenant1011:  getEnvOrDefault("VM_CLUSTER_SELECT_TENANT_1011", fmt.Sprintf("%s/select/1011/prometheus", getEnvOrDefault("VM_CLUSTER_URL", fmt.Sprintf("http://%s:8481", host)))),
-			SelectMultitenant: getEnvOrDefault("VM_CLUSTER_SELECT_MULTITENANT", fmt.Sprintf("%s/select/multitenant/prometheus", getEnvOrDefault("VM_CLUSTER_URL", fmt.Sprintf("http://%s:8481", host)))),
+			BaseURL:           getEnvOrDefault("VM_CLUSTER_URL", fmt.Sprintf("http://%s:%d", host, vmSelectPort)),
+			SelectTenant0:     getEnvOrDefault("VM_CLUSTER_SELECT_TENANT_0", fmt.Sprintf("%s/select/0/prometheus", getEnvOrDefault("VM_CLUSTER_URL", fmt.Sprintf("http://%s:%d", host, vmSelectPort)))),
+			SelectTenant1011:  getEnvOrDefault("VM_CLUSTER_SELECT_TENANT_1011", fmt.Sprintf("%s/select/1011/prometheus", getEnvOrDefault("VM_CLUSTER_URL", fmt.Sprintf("http://%s:%d", host, vmSelectPort)))),
+			SelectMultitenant: getEnvOrDefault("VM_CLUSTER_SELECT_MULTITENANT", fmt.Sprintf("%s/select/multitenant/prometheus", getEnvOrDefault("VM_CLUSTER_URL", fmt.Sprintf("http://%s:%d", host, vmSelectPort)))),
+		},
+		VMSelectStandalone: VMSelectStandaloneConfig{
+			BaseURL:       getEnvOrDefault("VMSELECT_STANDALONE_URL", fmt.Sprintf("http://%s:%d", host, vmSelectStandalonePort)),
+			SelectTenant0: getEnvOrDefault("VMSELECT_STANDALONE_SELECT_TENANT_0", fmt.Sprintf("%s/select/0/prometheus", getEnvOrDefault("VMSELECT_STANDALONE_URL", fmt.Sprintf("http://%s:%d", host, vmSelectStandalonePort)))),
 		},
 
 		VMAuthCluster: VMAuthConfig{
-			URL: getEnvOrDefault("VM_AUTH_CLUSTER_URL", fmt.Sprintf("http://%s:8426", host)),
+			URL: getEnvOrDefault("VM_AUTH_CLUSTER_URL", fmt.Sprintf("http://%s:%d", host, vmAuthClusterPort)),
 			Tenant0: AuthConfig{
 				Type:     "basic",
 				Username: getEnvOrDefault("VM_AUTH_TENANT_0_USER", "tenant0-user"),
@@ -120,16 +146,16 @@ func DefaultConfig() *TestConfig {
 		},
 
 		VMAuthExport: VMAuthExportConfig{
-			URL: getEnvOrDefault("VM_AUTH_EXPORT_URL", fmt.Sprintf("http://%s:8425", host)),
+			URL: getEnvOrDefault("VM_AUTH_EXPORT_URL", fmt.Sprintf("http://%s:%d", host, vmAuthExportPort)),
 			Legacy: AuthConfig{
 				Type:     "basic",
 				Username: getEnvOrDefault("VM_AUTH_EXPORT_LEGACY_USER", "tenant1011-legacy"),
-				Password: getEnvOrDefault("VM_AUTH_EXPORT_LEGACY_PASS", "password"),
+				Password: getEnvOrDefault("VM_AUTH_EXPORT_LEGACY_PASS", "legacy-pass-1011"),
 			},
 			Modern: AuthConfig{
 				Type:     "basic",
 				Username: getEnvOrDefault("VM_AUTH_EXPORT_MODERN_USER", "tenant2022-modern"),
-				Password: getEnvOrDefault("VM_AUTH_EXPORT_MODERN_PASS", "password"),
+				Password: getEnvOrDefault("VM_AUTH_EXPORT_MODERN_PASS", "modern-pass-2022"),
 			},
 		},
 
@@ -159,7 +185,23 @@ func (c *TestConfig) ToJSON() (string, error) {
 
 // ToEnv exports configuration as environment variables (shell format)
 func (c *TestConfig) ToEnv() string {
+	vmGatherPort := getEnvIntOrDefault("VMGATHER_PORT", 8080)
+	vmGatherAddr := getEnvOrDefault("VMGATHER_ADDR", fmt.Sprintf("localhost:%d", vmGatherPort))
+	if parsed, err := url.Parse(c.VMGatherURL); err == nil && parsed.Host != "" {
+		vmGatherAddr = parsed.Host
+	}
+
 	return fmt.Sprintf(`# Generated test configuration
+export VMGATHER_PORT=%d
+export VMGATHER_ADDR=%q
+export VM_SINGLE_NOAUTH_PORT=%d
+export VM_SINGLE_AUTH_PORT=%d
+export VM_AUTH_SINGLE_PORT=%d
+export VM_SELECT_PORT=%d
+export VM_AUTH_CLUSTER_PORT=%d
+export VM_AUTH_EXPORT_PORT=%d
+export NGINX_PORT=%d
+export VMSELECT_STANDALONE_PORT=%d
 export VMGATHER_URL=%q
 export VM_SINGLE_NOAUTH_URL=%q
 export VM_SINGLE_AUTH_URL=%q
@@ -169,6 +211,8 @@ export VM_CLUSTER_URL=%q
 export VM_CLUSTER_SELECT_TENANT_0=%q
 export VM_CLUSTER_SELECT_TENANT_1011=%q
 export VM_CLUSTER_SELECT_MULTITENANT=%q
+export VMSELECT_STANDALONE_URL=%q
+export VMSELECT_STANDALONE_SELECT_TENANT_0=%q
 export VM_AUTH_CLUSTER_URL=%q
 export VM_AUTH_TENANT_0_USER=%q
 export VM_AUTH_TENANT_0_PASS=%q
@@ -188,6 +232,16 @@ export TEST_TIMEOUT=%d
 export HEALTHCHECK_TIMEOUT=%d
 export HEALTHCHECK_INTERVAL=%d
 `,
+		vmGatherPort,
+		vmGatherAddr,
+		getEnvIntOrDefault("VM_SINGLE_NOAUTH_PORT", 18428),
+		getEnvIntOrDefault("VM_SINGLE_AUTH_PORT", 18429),
+		getEnvIntOrDefault("VM_AUTH_SINGLE_PORT", 8427),
+		getEnvIntOrDefault("VM_SELECT_PORT", 8481),
+		getEnvIntOrDefault("VM_AUTH_CLUSTER_PORT", 8426),
+		getEnvIntOrDefault("VM_AUTH_EXPORT_PORT", 8425),
+		getEnvIntOrDefault("NGINX_PORT", 8888),
+		getEnvIntOrDefault("VMSELECT_STANDALONE_PORT", 8491),
 		c.VMGatherURL,
 		c.VMSingleNoAuth.URL,
 		c.VMSingleAuth.URL,
@@ -197,6 +251,8 @@ export HEALTHCHECK_INTERVAL=%d
 		c.VMCluster.SelectTenant0,
 		c.VMCluster.SelectTenant1011,
 		c.VMCluster.SelectMultitenant,
+		c.VMSelectStandalone.BaseURL,
+		c.VMSelectStandalone.SelectTenant0,
 		c.VMAuthCluster.URL,
 		c.VMAuthCluster.Tenant0.Username,
 		c.VMAuthCluster.Tenant0.Password,
@@ -246,6 +302,13 @@ func main() {
 	}
 
 	switch format {
+	case "bootstrap":
+		envFile := getEnvOrDefault("VMGATHER_ENV_FILE", ".env.dynamic")
+		if err := bootstrapEnvFile(envFile); err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] Failed to bootstrap env file: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("[OK] Wrote %s\n", envFile)
 	case "json":
 		jsonStr, err := config.ToJSON()
 		if err != nil {
@@ -263,7 +326,7 @@ func main() {
 		}
 		fmt.Println("[OK] Configuration is valid")
 	default:
-		fmt.Fprintf(os.Stderr, "Usage: %s [json|env|validate]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [json|env|validate|bootstrap]\n", os.Args[0])
 		os.Exit(1)
 	}
 }
@@ -276,4 +339,124 @@ func validateConfig(c *TestConfig) error {
 		return fmt.Errorf("VM_SINGLE_NOAUTH_URL is required")
 	}
 	return nil
+}
+
+func bootstrapEnvFile(path string) error {
+	if path == "" {
+		return errors.New("env file path is empty")
+	}
+
+	host := getEnvOrDefault("VM_TEST_HOST", "localhost")
+	env := make(map[string]string)
+
+	portKeys := []struct {
+		key         string
+		defaultPort int
+	}{
+		{"VMGATHER_PORT", 8080},
+		{"VM_SINGLE_NOAUTH_PORT", 18428},
+		{"VM_SINGLE_AUTH_PORT", 18429},
+		{"VM_AUTH_SINGLE_PORT", 8427},
+		{"VM_STORAGE1_HTTP_PORT", 8482},
+		{"VM_STORAGE1_INSERT_PORT", 8400},
+		{"VM_STORAGE1_SELECT_PORT", 8401},
+		{"VM_STORAGE2_HTTP_PORT", 8483},
+		{"VM_STORAGE2_INSERT_PORT", 8402},
+		{"VM_STORAGE2_SELECT_PORT", 8403},
+		{"VM_INSERT_PORT", 8480},
+		{"VM_SELECT_PORT", 8481},
+		{"VMSELECT_STANDALONE_PORT", 8491},
+		{"VM_AUTH_CLUSTER_PORT", 8426},
+		{"VM_AUTH_EXPORT_PORT", 8425},
+		{"VM_AGENT_PORT", 8430},
+		{"PROMETHEUS_PORT", 9090},
+		{"NGINX_PORT", 8888},
+	}
+
+	used := map[int]bool{}
+	for _, item := range portKeys {
+		if val := os.Getenv(item.key); val != "" {
+			port, err := strconv.Atoi(val)
+			if err == nil {
+				if portAvailable(host, port) {
+					env[item.key] = strconv.Itoa(port)
+					used[port] = true
+					continue
+				}
+			}
+		}
+
+		port, err := pickFreePort(host, used)
+		if err != nil {
+			return fmt.Errorf("failed to pick free port for %s: %w", item.key, err)
+		}
+		env[item.key] = strconv.Itoa(port)
+	}
+
+	vmGatherAddr := fmt.Sprintf("%s:%s", host, env["VMGATHER_PORT"])
+	env["VMGATHER_ADDR"] = vmGatherAddr
+	env["VMGATHER_URL"] = fmt.Sprintf("http://%s", vmGatherAddr)
+
+	env["VM_SINGLE_NOAUTH_URL"] = fmt.Sprintf("http://%s:%s", host, env["VM_SINGLE_NOAUTH_PORT"])
+	env["VM_CLUSTER_SELECT_TENANT_0"] = fmt.Sprintf("http://%s:%s/select/0/prometheus", host, env["VM_SELECT_PORT"])
+	env["VMSELECT_STANDALONE_URL"] = fmt.Sprintf("http://%s:%s", host, env["VMSELECT_STANDALONE_PORT"])
+	env["VMSELECT_STANDALONE_SELECT_TENANT_0"] = fmt.Sprintf("%s/select/0/prometheus", env["VMSELECT_STANDALONE_URL"])
+
+	return writeEnvFile(path, env)
+}
+
+func portAvailable(host string, port int) bool {
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return false
+	}
+	_ = listener.Close()
+	return true
+}
+
+func pickFreePort(host string, used map[int]bool) (int, error) {
+	for i := 0; i < 50; i++ {
+		listener, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
+		if err != nil {
+			return 0, err
+		}
+		_, portStr, err := net.SplitHostPort(listener.Addr().String())
+		_ = listener.Close()
+		if err != nil {
+			continue
+		}
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			continue
+		}
+		if used[port] {
+			continue
+		}
+		used[port] = true
+		return port, nil
+	}
+	return 0, fmt.Errorf("unable to find free port after multiple attempts")
+}
+
+func writeEnvFile(path string, env map[string]string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var b strings.Builder
+	b.WriteString("# Auto-generated by local-test-env/testconfig bootstrap\n")
+	for _, key := range keys {
+		b.WriteString(key)
+		b.WriteString("=")
+		b.WriteString(env[key])
+		b.WriteString("\n")
+	}
+
+	return os.WriteFile(path, []byte(b.String()), 0o644)
 }

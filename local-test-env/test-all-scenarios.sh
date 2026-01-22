@@ -26,7 +26,7 @@ echo ""
 # Check for testconfig utility
 if [ ! -f "$SCRIPT_DIR/testconfig" ]; then
     echo -e "${YELLOW}[WARN] testconfig not found, building...${NC}"
-    cd "$SCRIPT_DIR" && go build -o testconfig config.go
+    cd "$SCRIPT_DIR" && go build -o testconfig .
 fi
 
 # Load configuration from testconfig

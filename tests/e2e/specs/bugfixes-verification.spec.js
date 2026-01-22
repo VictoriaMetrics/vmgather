@@ -1,5 +1,7 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
+const VM_SINGLE_NOAUTH_URL =
+  process.env.VM_SINGLE_NOAUTH_URL || 'http://localhost:18428';
 
 /**
  * Bug Fix Verification Tests
@@ -58,7 +60,7 @@ test.describe('Bug Fix Verification', () => {
     });
   });
   test.beforeEach(async ({ page }) => {
-    await page.goto('http://localhost:8080');
+    await page.goto('/');
     await page.waitForLoadState('networkidle');
     // Wait for page to be fully loaded
     await page.waitForSelector('.step.active', { timeout: 10000 });
@@ -185,7 +187,7 @@ test.describe('Bug Fix Verification', () => {
       await page.waitForTimeout(500);
 
       // Step 3: Configure connection
-      await page.fill('#vmUrl', 'http://localhost:18428');
+      await page.fill('#vmUrl', VM_SINGLE_NOAUTH_URL);
       await page.locator('.step.active #testConnectionBtn').click();
       await page.waitForSelector('text=Connection successful', { timeout: 15000 });
       nextButton = page.locator('.step.active button.btn-primary:has-text("Next")');
@@ -295,9 +297,19 @@ test.describe('Bug Fix Verification', () => {
       // Intercept sample API call
       await page.route('**/api/sample', async route => {
         apiCalled = true;
-        const response = await route.fetch();
-        sampleResponse = await response.json();
-        await route.fulfill({ response, json: sampleResponse });
+        sampleResponse = {
+          samples: [
+            {
+              name: 'up',
+              labels: { __name__: 'up', job: 'vmjob', instance: '127.0.0.1:8428' },
+            },
+          ],
+        };
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(sampleResponse),
+        });
       });
 
       // Navigate to Step 5 to trigger sample loading
@@ -311,7 +323,7 @@ test.describe('Bug Fix Verification', () => {
       await nextButton.click();
       await page.waitForTimeout(500);
 
-      await page.fill('#vmUrl', 'http://localhost:18428');
+      await page.fill('#vmUrl', VM_SINGLE_NOAUTH_URL);
       await page.locator('.step.active #testConnectionBtn').click();
       await page.waitForSelector('text=Connection successful', { timeout: 15000 });
       nextButton = page.locator('.step.active button.btn-primary:has-text("Next")');

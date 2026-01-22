@@ -1,8 +1,10 @@
 const { test, expect } = require('@playwright/test');
+const VM_SINGLE_NOAUTH_URL =
+  process.env.VM_SINGLE_NOAUTH_URL || 'http://localhost:18428';
 
 test.describe('Multitenant URL Support', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('http://localhost:8080');
+  await page.goto('/');
 
     // Navigate to Step 3 (Connection)
     await page.locator('.step.active button.btn-primary').click();
@@ -108,7 +110,7 @@ test.describe('Multitenant URL Support', () => {
     });
 
     // Fill connection details
-    await page.locator('#vmUrl').fill('http://localhost:18428');
+    await page.locator('#vmUrl').fill(VM_SINGLE_NOAUTH_URL);
     await page.locator('#authType').selectOption('basic');
     await page.locator('#username').fill('secret-user');
     await page.locator('#password').fill('secret-password');
@@ -179,7 +181,7 @@ test.describe('Multitenant URL Support', () => {
     });
 
     // Fill connection
-    await page.locator('#vmUrl').fill('http://localhost:18428');
+    await page.locator('#vmUrl').fill(VM_SINGLE_NOAUTH_URL);
     await page.locator('#authType').selectOption('none');
 
     // Test connection

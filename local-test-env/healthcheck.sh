@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VM_SINGLE_URL="${VM_SINGLE_URL:-http://localhost:18428}"
-VM_CLUSTER_URL="${VM_CLUSTER_URL:-http://localhost:8481/select/0/prometheus}"
+ENV_FILE="${VMGATHER_ENV_FILE:-.env.dynamic}"
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  . "$ENV_FILE"
+  set +a
+fi
+
+VM_SINGLE_URL="${VM_SINGLE_URL:-${VM_SINGLE_NOAUTH_URL:-http://localhost:18428}}"
+VM_CLUSTER_URL="${VM_CLUSTER_URL:-${VM_CLUSTER_SELECT_TENANT_0:-http://localhost:8481/select/0/prometheus}}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-60}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-3}"
 

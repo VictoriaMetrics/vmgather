@@ -19,6 +19,7 @@ Docker Compose stack that mirrors common VictoriaMetrics deployments for integra
 | VMSingle (no auth) | Baseline VictoriaMetrics single-node | `http://localhost:18428` |
 | VMSingle + VMAuth | Tests Basic Auth and VMAuth headers | `http://localhost:8427`, user `monitoring-read`, pass `secret-password-123` |
 | VMCluster | vmselect/vmstorage/vminsert trio | vmselect `:8481`, vminsert `:8480`, vmstorage `:8482/:8483` |
+| VMSelect standalone | vmselect backed by a single vmstorage | `http://localhost:8491` |
 | VMCluster + VMAuth | Emulates VictoriaMetrics Managed (`/rw/prometheus` and `/r/prometheus`) | `http://localhost:8426/<tenant>/rw/prometheus` |
 | Export API tenants | Validates `/api/v1/export` vs fallback | `http://localhost:8425`, tenant `1011` (legacy), `2022` (modern) |
 | NGINX proxy | Domain routing + tenant prefix stripping | `http://localhost:8888` |
@@ -27,8 +28,8 @@ Docker Compose stack that mirrors common VictoriaMetrics deployments for integra
 ## Quick start
 
 ```bash
-# Start the stack
-docker-compose -f docker-compose.test.yml up -d
+# From repo root, start the stack (auto-picks free ports)
+make test-env-up
 # Allow vmagent to collect some metrics
 sleep 30
 
@@ -42,8 +43,7 @@ npm install
 npm test
 
 # Stop everything when done
-cd ../../local-test-env
-docker-compose -f docker-compose.test.yml down
+make test-env-down
 ```
 
 ## Scenarios
@@ -62,6 +62,11 @@ curl -u monitoring-read:secret-password-123 \
 ### Scenario 3 – VMCluster tenant 0
 ```bash
 curl http://localhost:8481/select/0/prometheus/api/v1/query?query=up
+```
+
+### Scenario 3b – Standalone vmselect (single storage)
+```bash
+curl http://localhost:8491/select/0/prometheus/api/v1/query?query=up
 ```
 
 ### Scenario 4 – VMCluster + VMAuth (Managed-style)
@@ -88,7 +93,8 @@ curl -u tenant2022-modern:password \
 - `test-configs/prometheus.yml` – vmagent scrape definitions.
 - `test-configs/nginx.conf` – reverse proxy for domain-based routing.
 
-Adjust ports or credentials there if they conflict with local services.
+Ports are auto-assigned by `testconfig bootstrap`, which writes `local-test-env/.env.dynamic`.
+You can override any port or URL by setting env vars before running `make test-env-up`.
 
 ## Using with vmgather
 
@@ -98,6 +104,7 @@ Adjust ports or credentials there if they conflict with local services.
    - `http://localhost:18428` (no auth).
    - `http://localhost:8427` with Basic Auth.
    - `http://localhost:8481/select/0/prometheus`.
+   - `http://localhost:8491/select/0/prometheus` (standalone vmselect).
    - `http://localhost:8426/1011/rw/prometheus` for Managed-style paths.
 4. Validate obfuscation by exporting small windows and inspecting the bundle.
 
@@ -132,6 +139,9 @@ Test environment uses type-safe Go configuration (`local-test-env/config.go`) th
 - All URLs and credentials from environment variables with sensible defaults
 
 ```bash
+# Generate dynamic ports and env file (auto-called by make test-env-up)
+make test-config-bootstrap
+
 # Validate configuration
 make test-config-validate
 

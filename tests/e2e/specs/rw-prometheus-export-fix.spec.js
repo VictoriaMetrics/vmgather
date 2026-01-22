@@ -15,6 +15,8 @@
 
 const { test, expect } = require('@playwright/test');
 
+const VMGATHER_URL = process.env.VMGATHER_URL || 'http://localhost:8080';
+
 test.describe('Bug Fix: /rw/prometheus path for export', () => {
     
     test('REPRODUCE BUG: /rw/prometheus fails for /api/export', async ({ request }) => {
@@ -49,7 +51,7 @@ test.describe('Bug Fix: /rw/prometheus path for export', () => {
             }
         };
         
-        const response = await request.post('http://localhost:8080/api/export', {
+        const response = await request.post(`${VMGATHER_URL}/api/export`, {
             data: buggyConfig
         });
         
@@ -104,7 +106,7 @@ test.describe('Bug Fix: /rw/prometheus path for export', () => {
             }
         };
         
-        const response = await request.post('http://localhost:8080/api/export', {
+        const response = await request.post(`${VMGATHER_URL}/api/export`, {
             data: config
         });
         
@@ -145,7 +147,7 @@ test.describe('Bug Fix: /rw/prometheus path for export', () => {
             time: Math.floor(Date.now() / 1000)
         };
         
-        const response = await request.post('http://localhost:8080/api/sample', {
+        const response = await request.post(`${VMGATHER_URL}/api/sample`, {
             data: {
                 config: {
                     connection: config.connection,
@@ -198,7 +200,7 @@ test.describe('Bug Fix: /rw/prometheus path for export', () => {
             }
         };
         
-        const response = await request.post('http://localhost:8080/api/export', {
+        const response = await request.post(`${VMGATHER_URL}/api/export`, {
             data: config
         });
         

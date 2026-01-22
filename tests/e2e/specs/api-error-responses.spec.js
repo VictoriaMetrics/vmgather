@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 
+const VMGATHER_URL = process.env.VMGATHER_URL || 'http://localhost:8080';
+
 /**
  * CRITICAL TESTS: API Error Response Format
  * 
@@ -15,7 +17,7 @@ test.describe('API Error Responses - MUST Return JSON', () => {
   
   test('POST /api/sample - should return JSON on error', async ({ request }) => {
     // Send invalid request to /api/sample
-    const response = await request.post('http://localhost:8080/api/sample', {
+    const response = await request.post(`${VMGATHER_URL}/api/sample`, {
       data: {
         config: {
           connection: {
@@ -52,7 +54,7 @@ test.describe('API Error Responses - MUST Return JSON', () => {
   
   test('POST /api/export - should return JSON on error', async ({ request }) => {
     // Send invalid request to /api/export
-    const response = await request.post('http://localhost:8080/api/export', {
+    const response = await request.post(`${VMGATHER_URL}/api/export`, {
       data: {
         connection: {
           url: 'http://invalid-host:9999',
@@ -88,7 +90,7 @@ test.describe('API Error Responses - MUST Return JSON', () => {
   });
   
   test('POST /api/discover - should return JSON on error', async ({ request }) => {
-    const response = await request.post('http://localhost:8080/api/discover', {
+    const response = await request.post(`${VMGATHER_URL}/api/discover`, {
       data: {
         connection: {
           url: 'http://invalid:9999',
@@ -113,7 +115,7 @@ test.describe('API Error Responses - MUST Return JSON', () => {
   });
   
   test('POST /api/validate - should return JSON on error', async ({ request }) => {
-    const response = await request.post('http://localhost:8080/api/validate', {
+    const response = await request.post(`${VMGATHER_URL}/api/validate`, {
       data: {
         url: 'http://invalid:9999',
         auth: { type: 'none' }
@@ -133,7 +135,7 @@ test.describe('API Error Responses - MUST Return JSON', () => {
   
   test('GET /api/download with missing path param - should return JSON error', async ({ request }) => {
     // Test without path parameter (should return JSON error from our code)
-    const response = await request.get('http://localhost:8080/api/download');
+    const response = await request.get(`${VMGATHER_URL}/api/download`);
     
     const contentType = response.headers()['content-type'] || '';
     console.log('GET /api/download (no path) - Status:', response.status());

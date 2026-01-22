@@ -59,3 +59,4 @@ temp/
 # Reports (internal analysis)
 reports/
 local-test-env/testconfig
+local-test-env/.env.dynamic

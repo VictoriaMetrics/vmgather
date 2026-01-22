@@ -1,5 +1,8 @@
 import { test, expect } from '@playwright/test';
 
+const VM_SINGLE_NOAUTH_URL =
+  process.env.VM_SINGLE_NOAUTH_URL || 'http://localhost:18428';
+
 test.describe('Obfuscation - Default Settings', () => {
 
   test.beforeEach(async ({ page }) => {
@@ -45,7 +48,7 @@ test.describe('Obfuscation - Default Settings', () => {
     await page.locator('.step.active button:has-text("Next")').click();
 
     // Step 3: Connection
-    await page.locator('.step.active #vmUrl').fill('http://localhost:18428');
+    await page.locator('.step.active #vmUrl').fill(VM_SINGLE_NOAUTH_URL);
     await page.locator('.step.active #testConnectionBtn').click();
     await page.waitForSelector('.step.active #step3Next:not([disabled])', { timeout: 10000 });
     await page.locator('.step.active #step3Next').click();
@@ -73,7 +76,7 @@ test.describe('Obfuscation - Default Settings', () => {
     await page.goto('/');
     await page.locator('.step.active button:has-text("Next")').click();
     await page.locator('.step.active button:has-text("Next")').click();
-    await page.locator('.step.active #vmUrl').fill('http://localhost:18428');
+    await page.locator('.step.active #vmUrl').fill(VM_SINGLE_NOAUTH_URL);
     await page.locator('.step.active #testConnectionBtn').click();
     await page.waitForSelector('.step.active #step3Next:not([disabled])', { timeout: 10000 });
     await page.locator('.step.active #step3Next').click();
@@ -100,7 +103,7 @@ test.describe('Obfuscation - Default Settings', () => {
     await page.goto('/');
     await page.locator('.step.active button:has-text("Next")').click();
     await page.locator('.step.active button:has-text("Next")').click();
-    await page.locator('.step.active #vmUrl').fill('http://localhost:18428');
+    await page.locator('.step.active #vmUrl').fill(VM_SINGLE_NOAUTH_URL);
     await page.locator('.step.active #testConnectionBtn').click();
     await page.waitForSelector('.step.active #step3Next:not([disabled])', { timeout: 10000 });
     await page.locator('.step.active #step3Next').click();
@@ -126,7 +129,7 @@ test.describe('Obfuscation - Default Settings', () => {
     await page.goto('/');
     await page.locator('.step.active button:has-text("Next")').click();
     await page.locator('.step.active button:has-text("Next")').click();
-    await page.locator('.step.active #vmUrl').fill('http://localhost:18428');
+    await page.locator('.step.active #vmUrl').fill(VM_SINGLE_NOAUTH_URL);
     await page.locator('.step.active #testConnectionBtn').click();
     await page.waitForSelector('.step.active #step3Next:not([disabled])', { timeout: 10000 });
     await page.locator('.step.active #step3Next').click();
