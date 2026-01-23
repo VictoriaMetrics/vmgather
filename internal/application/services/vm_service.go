@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,6 +19,9 @@ type VMService interface {
 
 	// DiscoverComponents discovers VM components in the cluster
 	DiscoverComponents(ctx context.Context, conn domain.VMConnection, tr domain.TimeRange) ([]domain.VMComponent, error)
+
+	// DiscoverSelectorJobs discovers jobs/instances for a selector
+	DiscoverSelectorJobs(ctx context.Context, conn domain.VMConnection, selector string, tr domain.TimeRange) ([]domain.SelectorJob, error)
 
 	// GetSample retrieves sample metrics for preview
 	GetSample(ctx context.Context, config domain.ExportConfig, limit int) ([]domain.MetricSample, error)
@@ -125,6 +130,82 @@ func (s *vmServiceImpl) DiscoverComponents(ctx context.Context, conn domain.VMCo
 	}
 
 	return components, nil
+}
+
+// DiscoverSelectorJobs discovers jobs/instances using a selector query
+func (s *vmServiceImpl) DiscoverSelectorJobs(ctx context.Context, conn domain.VMConnection, selector string, tr domain.TimeRange) ([]domain.SelectorJob, error) {
+	if !isSelectorQuery(selector) {
+		return nil, fmt.Errorf("selector must be a series selector (e.g. {job=\"...\"} or metric{...})")
+	}
+
+	client := s.clientFactory(conn)
+	groupQuery := fmt.Sprintf("group by (job, instance) (%s)", selector)
+	result, err := client.Query(ctx, groupQuery, tr.End)
+	if err != nil {
+		return nil, fmt.Errorf("selector discovery failed: %w", err)
+	}
+	if len(result.Data.Result) == 0 {
+		countQuery := fmt.Sprintf("count(%s)", selector)
+		if countResult, countErr := client.Query(ctx, countQuery, tr.End); countErr == nil && len(countResult.Data.Result) > 0 {
+			if len(countResult.Data.Result[0].Value) >= 2 {
+				if count, ok := parseCountValue(countResult.Data.Result[0].Value[1]); ok && count > 0 {
+					return nil, fmt.Errorf("selector matched series without job labels; use MetricsQL or add a job label")
+				}
+			}
+		}
+		return nil, fmt.Errorf("no series found for selector")
+	}
+
+	jobInstances := make(map[string]map[string]struct{})
+	for _, r := range result.Data.Result {
+		job := r.Metric["job"]
+		if job == "" {
+			continue
+		}
+		instance := r.Metric["instance"]
+		if _, exists := jobInstances[job]; !exists {
+			jobInstances[job] = make(map[string]struct{})
+		}
+		if instance != "" {
+			jobInstances[job][instance] = struct{}{}
+		}
+	}
+
+	jobCounts := make(map[string]int)
+	countQuery := fmt.Sprintf("count by (job) (%s)", selector)
+	if countResult, countErr := client.Query(ctx, countQuery, tr.End); countErr == nil {
+		for _, series := range countResult.Data.Result {
+			job := series.Metric["job"]
+			if job == "" || len(series.Value) < 2 {
+				continue
+			}
+			if count, ok := parseCountValue(series.Value[1]); ok {
+				jobCounts[job] = count
+			}
+		}
+	}
+
+	jobs := make([]domain.SelectorJob, 0, len(jobInstances))
+	for job, instances := range jobInstances {
+		estimate := -1
+		if count, ok := jobCounts[job]; ok {
+			estimate = count
+		}
+		jobs = append(jobs, domain.SelectorJob{
+			Job:                  job,
+			InstanceCount:        len(instances),
+			MetricsCountEstimate: estimate,
+		})
+	}
+	if len(jobs) == 0 {
+		return nil, fmt.Errorf("selector matched series without job labels; use MetricsQL or add a job label")
+	}
+
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].Job < jobs[j].Job
+	})
+
+	return jobs, nil
 }
 
 // estimateComponentMetrics estimates the number of metrics for given jobs
@@ -239,7 +320,7 @@ func (s *vmServiceImpl) GetSample(ctx context.Context, config domain.ExportConfi
 	client := s.clientFactory(config.Connection)
 
 	// Build candidate queries (avoid heavy selector when jobs aren't provided)
-	queries := s.buildSampleQueries(config.Jobs, limit)
+	queries := s.buildSampleQueriesForConfig(config, limit)
 	var lastErr error
 
 	for _, query := range queries {
@@ -317,6 +398,51 @@ func (s *vmServiceImpl) buildSampleQueries(jobs []string, limit int) []string {
 	return []string{fmt.Sprintf("topk(%d, %s)", limit, selector)}
 }
 
+func (s *vmServiceImpl) buildSampleQueriesForConfig(config domain.ExportConfig, limit int) []string {
+	if config.Mode == domain.ExportModeCustom && config.Query != "" {
+		return s.buildCustomSampleQueries(config, limit)
+	}
+	return s.buildSampleQueries(config.Jobs, limit)
+}
+
+func (s *vmServiceImpl) buildCustomSampleQueries(config domain.ExportConfig, limit int) []string {
+	if limit <= 0 {
+		limit = 10
+	}
+	query := strings.TrimSpace(config.Query)
+	if query == "" {
+		return []string{fmt.Sprintf("topk(%d, vm_app_version)", limit)}
+	}
+
+	switch config.QueryType {
+	case domain.QueryModeSelector:
+		selector := query
+		if len(config.Jobs) > 0 {
+			selector = s.applyJobFilterToSelector(selector, config.Jobs)
+		}
+		return []string{
+			fmt.Sprintf("topk(%d, %s)", limit, selector),
+		}
+	case domain.QueryModeMetricsQL:
+		return []string{
+			fmt.Sprintf("topk(%d, %s)", limit, query),
+			fmt.Sprintf("any(%s)", query),
+		}
+	default:
+		return []string{
+			fmt.Sprintf("topk(%d, %s)", limit, query),
+		}
+	}
+}
+
+func (s *vmServiceImpl) applyJobFilterToSelector(selector string, jobs []string) string {
+	if len(jobs) == 0 {
+		return selector
+	}
+	filter := buildJobFilterSelector(jobs)
+	return fmt.Sprintf("(%s) and on(job) %s", selector, filter)
+}
+
 func (s *vmServiceImpl) buildSampleSelector(jobs []string) string {
 	if len(jobs) == 0 {
 		return "vm_app_version"
@@ -326,6 +452,35 @@ func (s *vmServiceImpl) buildSampleSelector(jobs []string) string {
 		parts = append(parts, fmt.Sprintf(`job=%q`, job))
 	}
 	return fmt.Sprintf("{%s}", strings.Join(parts, " or "))
+}
+
+var selectorPattern = regexp.MustCompile(`^\s*([a-zA-Z_:][a-zA-Z0-9_:]*)?\s*(\{.*\})?\s*$`)
+
+func isSelectorQuery(query string) bool {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return false
+	}
+	if strings.Contains(trimmed, "(") || strings.Contains(trimmed, ")") {
+		return false
+	}
+	return selectorPattern.MatchString(trimmed)
+}
+
+// IsSelectorQuery reports whether the query looks like a series selector.
+func IsSelectorQuery(query string) bool {
+	return isSelectorQuery(query)
+}
+
+func buildJobFilterSelector(jobs []string) string {
+	if len(jobs) == 0 {
+		return `{job!=""}`
+	}
+	escaped := make([]string, 0, len(jobs))
+	for _, job := range jobs {
+		escaped = append(escaped, regexp.QuoteMeta(job))
+	}
+	return fmt.Sprintf(`{job=~"%s"}`, strings.Join(escaped, "|"))
 }
 
 // CheckExportAPI checks if /api/v1/export endpoint is available

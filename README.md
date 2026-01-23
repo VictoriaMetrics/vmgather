@@ -21,6 +21,7 @@ vmgather collects VictoriaMetrics internal metrics, obfuscates sensitive data, a
 
 - **Single binary UI** – embedded web interfaces for both exporter and importer with VictoriaMetrics-style wizards.
 - **Automatic discovery** – exporter detects vmagent, vmstorage, vminsert, vmselect, vmalert, and vmsingle instances.
+- **Custom query mode** – collect any selector or MetricsQL query, with optional per-job target selection for selectors.
 - **Deterministic obfuscation** – configurable anonymisation for IPs, jobs, tenants, and custom labels, applied to samples and exports.
 - **Disk-safe staging** – exporter streams batches to a chosen directory so partial files survive crashes or manual interrupts.
 - **Adjustable metric cadence** – choose 30s/1m/5m dedup steps per export or override explicitly.
@@ -172,11 +173,40 @@ The UI exposes the same health endpoint (`/api/health`) as vmgather for containe
 
 Exporter
 1. Start the binary – the UI auto-detects an open port.
-2. **Connect** to VictoriaMetrics single, cluster, or managed endpoints (`vmselect`, `vmagent`, VMAuth, MaaS paths).
-3. **Validate** credentials and detect components.
-4. **Preview** metrics via sampling API calls.
-5. **Configure obfuscation** for IPs, jobs, or extra labels and review the estimated number of series that will be exported per component/job.
-6. **Export** – pick a staging directory + metric step, watch the live progress/ETA (with the current partial file path), and let the backend stream batches to disk before archiving/obfuscating into a final bundle.
+2. **Select mode** – cluster metrics (default) or selector/query collection.
+3. **Connect** to VictoriaMetrics single, cluster, or managed endpoints (`vmselect`, `vmagent`, VMAuth, MaaS paths).
+4. **Define selector/query** in custom mode (auto-detected selector vs MetricsQL).
+5. **Preview** metrics via sampling API calls (selector mode adds per-job target selection).
+6. **Configure obfuscation** and remove labels for custom mode; review estimated series counts.
+7. **Export** – pick a staging directory + metric step, watch progress/ETA, and let the backend stream batches to disk before archiving into a final bundle.
+
+### Experimental CLI oneshot export
+
+You can run a single export without the UI. This mode is experimental and intended for testing and automation.
+
+Flags:
+- `-oneshot` – run a single export and exit
+- `-oneshot-config` – JSON file path (or `-` for stdin)
+- `-export-stdout` – stream JSONL export to stdout (only with `-oneshot`)
+
+Example:
+```bash
+./vmgather -oneshot -oneshot-config ./export.json -export-stdout
+```
+
+Sample `export.json`:
+```json
+{
+  "connection": { "url": "http://localhost:52104", "auth": { "type": "none" } },
+  "time_range": { "start": "2026-01-23T12:00:00Z", "end": "2026-01-23T13:00:00Z" },
+  "mode": "custom",
+  "query_type": "selector",
+  "query": "{job=~\"test.*\"}",
+  "jobs": ["test1"],
+  "obfuscation": { "enabled": false, "drop_labels": ["env"] },
+  "batching": { "enabled": false }
+}
+```
 
 Importer
 1. Start `./vmimporter` (or Docker) – UI runs at `:8081` by default.

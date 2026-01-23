@@ -25,6 +25,8 @@ Docker Compose stack that mirrors common VictoriaMetrics deployments for integra
 | NGINX proxy | Domain routing + tenant prefix stripping | `http://localhost:8888` |
 | vmagent | Scrapes all the above, writes to tenants `0/1011/2022` | `:8430` |
 
+Custom test jobs (`test1`, `test2`) are also scraped from `test-data-generator:9090` to simulate non-VM workloads. These should appear in selector/query mode but not in cluster component discovery.
+
 ## Quick start
 
 ```bash

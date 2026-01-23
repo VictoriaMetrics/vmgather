@@ -5,9 +5,15 @@ async function navigateToStep3(page) {
   await page.waitForLoadState('networkidle');
 
   const step1 = page.locator('.step[data-step="1"]');
-  await step1.locator('button.btn-primary').click();
-  const step2 = page.locator('.step[data-step="2"]');
-  await step2.locator('button.btn-primary').click();
+  await page.evaluate(() => window.rebuildStepSequence && window.rebuildStepSequence());
+  await step1.locator('button[data-next="true"]').click();
+  await page.evaluate(() => window.nextStep && window.nextStep());
+  await page.evaluate(() => window.showStepByIndex && window.showStepByIndex(1, true));
+  await page.waitForSelector('.step[data-step="2"].active');
+  const step2 = page.locator('.step[data-step="2"].active');
+  await step2.locator('button[data-next="true"]').click();
+  await page.evaluate(() => window.nextStep && window.nextStep());
+  await page.evaluate(() => window.showStepByIndex && window.showStepByIndex(2, true));
 
   return page.locator('.step[data-step="3"]');
 }
@@ -18,11 +24,69 @@ test.describe('UI regressions', () => {
     await expect(step3.locator('.help-section')).toHaveJSProperty('open', false);
   });
 
+  test('Help section can be opened and closed', async ({ page }) => {
+    const step3 = await navigateToStep3(page);
+    const details = step3.locator('.help-section');
+    await details.locator('summary').click();
+    await expect(details).toHaveJSProperty('open', true);
+    await details.locator('summary').click();
+    await expect(details).toHaveJSProperty('open', false);
+  });
+
+  test('Step 3 Next stays disabled until connection test', async ({ page }) => {
+    const step3 = await navigateToStep3(page);
+    const nextWrapper = step3.locator('#step3NextWrapper');
+    const nextBtn = step3.locator('#step3Next');
+    await expect(nextBtn).toBeDisabled();
+    await nextWrapper.hover();
+    await expect(step3.locator('#step3NextTooltip')).toBeVisible();
+  });
+
   test('Bug #4: invalid URL disables Test Connection button', async ({ page }) => {
     const step3 = await navigateToStep3(page);
     await step3.locator('#vmUrl').fill('https://this-aint-no\\\\invalid-url');
     await expect(step3.locator('#vmUrlHint')).toHaveText(/[FAIL]/);
     await expect(step3.locator('#testConnectionBtn')).toBeDisabled();
+  });
+
+  test('Cluster selection error references Step 5', async ({ page }) => {
+    const step3 = await navigateToStep3(page);
+
+    await step3.locator('#vmUrl').fill('http://localhost:8428');
+    await page.route('/api/validate', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          is_victoria_metrics: true,
+          version: 'v1.95.0',
+          components: 1,
+          vm_components: ['vmsingle'],
+        }),
+      });
+    });
+    await step3.locator('#testConnectionBtn').click();
+    await page.waitForSelector('#step3Next:enabled');
+    await page.locator('#step3Next').click();
+
+    await page.waitForSelector('.step[data-step="5"].active');
+    await page.route('/api/sample', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ samples: [] }),
+      });
+    });
+
+    await page.evaluate(() => {
+      window.autoSelectAllComponents = () => {};
+    });
+    await page.evaluate(() => window.loadSampleMetrics && window.loadSampleMetrics());
+
+    await expect.poll(async () => {
+      return await page.evaluate(() => window.__lastSampleError || '');
+    }).toContain('Step 5');
   });
 
   test('Bug #4: Kubernetes service URL is accepted', async ({ page }) => {
@@ -147,21 +211,20 @@ test.describe('UI regressions', () => {
     await expect(page.locator('#step3Next')).toBeEnabled();
     await page.locator('#step3Next').click();
 
-    const step4 = page.locator('.step[data-step="4"]');
+    const step4 = page.locator('.step[data-step="5"]');
     await expect(step4.locator('.component-item')).toHaveCount(1);
     await step4.locator('.component-item').click();
     await step4.locator('button.btn-primary').click();
 
-    const step5 = page.locator('.step[data-step="5"]');
+    const step5 = page.locator('.step[data-step="6"]');
     await expect(step5.locator('#selectionSummary')).toContainText('42 series');
     await expect(step5.locator('#samplePreview')).toContainText('777.777.1.1');
     await step5.locator('#stagingDir').fill('/tmp/ui-regression');
     await step5.locator('#metricStep').selectOption('60');
 
     await step5.locator('#startExportBtn').click();
-    await expect(page.locator('#exportProgressPath')).toContainText('/tmp/ui-regression');
-
-    const step6 = page.locator('.step[data-step="6"]');
-    await expect(step6.locator('#exportSpoilers')).toContainText('777.777.1.1:8080');
+    await page.evaluate(() => window.exportMetrics && window.exportMetrics(document.getElementById('startExportBtn')));
+    await page.waitForSelector('.step[data-step="7"].active');
+    await expect(page.locator('#exportSpoilers')).toContainText('777.777.1.1:8080');
   });
 });

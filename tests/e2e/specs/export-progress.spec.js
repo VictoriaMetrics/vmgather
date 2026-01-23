@@ -151,9 +151,11 @@ async function goToObfuscationStep(page) {
   await page.locator('#testConnectionBtn').click();
   await page.waitForSelector('#step3Next:enabled');
   await page.locator('#step3Next').click();
+  await page.waitForSelector('.step[data-step="5"].active');
   await page.waitForSelector('.component-item input[type="checkbox"]');
   await page.locator('.component-item input[type="checkbox"]').first().check();
   await page.locator('.step.active button:has-text("Next")').first().click();
+  await page.waitForSelector('.step[data-step="6"].active');
   await page.waitForSelector('#enableObfuscation');
   await page.fill('#stagingDir', STAGING_DIR);
   await page.locator('#stagingDir').blur();
@@ -231,18 +233,21 @@ test.describe('Export progress UI', () => {
     const progressPanel = page.locator('#exportProgressPanel');
     await expect(progressPanel).toHaveClass(/hidden/);
 
-    await page.waitForSelector('.step[data-step="5"].active .button-group button.btn-primary');
+    await page.waitForSelector('.step[data-step="6"].active #startExportBtn:enabled');
     await page.evaluate(() => {
-      const btn = document.querySelector('.step[data-step=\"5\"].active .button-group button.btn-primary');
+      const btn = document.getElementById('startExportBtn');
       if (btn && window.exportMetrics) {
         window.exportMetrics(btn);
       }
     });
+    await page.waitForFunction(() => window.__lastExportStartPayload || window.__lastExportError);
+    const exportError = await page.evaluate(() => window.__lastExportError);
+    expect(exportError).toBeFalsy();
     await expect(page.locator('#exportProgressPath')).toContainText(STAGING_DIR);
     await expect(page.locator('#exportProgressPercent')).toContainText('0%');
     await expect(page.locator('#exportBatchWindow')).toContainText('≈ 60s');
 
-    await page.waitForSelector('.step[data-step="6"]');
+    await page.waitForSelector('.step[data-step="7"]');
     await expect(page.locator('#exportProgressPercent')).toContainText('100%');
     await expect(page.locator('#exportSpoilers')).toContainText('777.777.1.1:8428');
   });
@@ -323,13 +328,16 @@ test('allows canceling an export job', async ({ page }) => {
   });
 
   await goToObfuscationStep(page);
-  await page.waitForSelector('.step[data-step="5"].active .button-group button.btn-primary');
+  await page.waitForSelector('.step[data-step="6"].active #startExportBtn:enabled');
   await page.evaluate(() => {
-    const btn = document.querySelector('.step[data-step="5"].active .button-group button.btn-primary');
+    const btn = document.getElementById('startExportBtn');
     if (btn && window.exportMetrics) {
       window.exportMetrics(btn);
     }
   });
+  await page.waitForFunction(() => window.__lastExportStartPayload || window.__lastExportError);
+  const exportError = await page.evaluate(() => window.__lastExportError);
+  expect(exportError).toBeFalsy();
 
   await page.waitForSelector('#exportProgressPanel:not(.hidden)');
   const cancelButton = page.locator('#cancelExportBtn');
@@ -339,7 +347,7 @@ test('allows canceling an export job', async ({ page }) => {
 
   await expect.poll(() => cancelCalled).toBeTruthy();
   await expect(page.locator('#exportCancelNotice')).toContainText('Export canceled', { timeout: 10000 });
-  const startButton = page.locator('.step[data-step="5"].active .button-group button.btn-primary');
+  const startButton = page.locator('.step[data-step="6"].active #startExportBtn');
   await expect(startButton).toBeEnabled();
 });
 
@@ -405,13 +413,16 @@ test('resumes export using same staging file', async ({ page }) => {
   });
 
   await goToObfuscationStep(page);
-  await page.waitForSelector('.step[data-step="5"].active .button-group button.btn-primary');
+  await page.waitForSelector('.step[data-step="6"].active #startExportBtn:enabled');
   await page.evaluate(() => {
-    const btn = document.querySelector('.step[data-step="5"].active .button-group button.btn-primary');
+    const btn = document.getElementById('startExportBtn');
     if (btn && window.exportMetrics) {
       window.exportMetrics(btn);
     }
   });
+  await page.waitForFunction(() => window.__lastExportStartPayload || window.__lastExportError);
+  const exportError = await page.evaluate(() => window.__lastExportError);
+  expect(exportError).toBeFalsy();
 
   // Wait until cancel state shown
   await page.waitForSelector('#exportCancelNotice');
@@ -427,7 +438,7 @@ test('resumes export using same staging file', async ({ page }) => {
 
   await expect.poll(() => resumeCalled, { timeout: 10000 }).toBeTruthy();
   await expect(page.locator('#exportProgressPath')).toContainText(stagingFile);
-  await page.waitForSelector('.step[data-step="6"]', { timeout: 10000 });
+  await page.waitForSelector('.step[data-step="7"]', { timeout: 10000 });
   await expect(page.locator('#exportProgressPercent')).toContainText('100%');
 });
 

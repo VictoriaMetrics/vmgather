@@ -18,6 +18,22 @@ const (
 	AuthTypeHeader AuthType = "header"
 )
 
+// ExportMode defines the high-level collection mode
+type ExportMode string
+
+const (
+	ExportModeCluster ExportMode = "cluster"
+	ExportModeCustom  ExportMode = "custom"
+)
+
+// QueryMode defines the query style for custom mode
+type QueryMode string
+
+const (
+	QueryModeSelector  QueryMode = "selector"
+	QueryModeMetricsQL QueryMode = "metricsql"
+)
+
 // AuthConfig contains authentication settings
 type AuthConfig struct {
 	Type        AuthType `json:"type"`
@@ -49,6 +65,13 @@ type VMComponent struct {
 	JobMetrics           map[string]int `json:"job_metrics,omitempty"`
 }
 
+// SelectorJob represents a job discovered by selector-based discovery
+type SelectorJob struct {
+	Job                  string `json:"job"`
+	InstanceCount        int    `json:"instance_count"`
+	MetricsCountEstimate int    `json:"metrics_count_estimate,omitempty"`
+}
+
 // BatchSettings controls batching for long-running exports
 type BatchSettings struct {
 	Enabled            bool   `json:"enabled"`
@@ -71,6 +94,7 @@ type ObfuscationConfig struct {
 	ObfuscateJob      bool     `json:"obfuscate_job"`
 	PreserveStructure bool     `json:"preserve_structure"`
 	CustomLabels      []string `json:"custom_labels,omitempty"` // Additional labels to obfuscate (pod, namespace, etc.)
+	DropLabels        []string `json:"drop_labels,omitempty"`   // Labels removed from export
 }
 
 // OutputSettings defines export output configuration
@@ -86,6 +110,9 @@ type ExportConfig struct {
 	TimeRange         TimeRange         `json:"time_range"`
 	Components        []string          `json:"components"`
 	Jobs              []string          `json:"jobs"`
+	Mode              ExportMode        `json:"mode,omitempty"`
+	QueryType         QueryMode         `json:"query_type,omitempty"`
+	Query             string            `json:"query,omitempty"`
 	Obfuscation       ObfuscationConfig `json:"obfuscation"`
 	Batching          BatchSettings     `json:"batching"`
 	StagingDir        string            `json:"staging_dir,omitempty"`

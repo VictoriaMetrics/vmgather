@@ -459,6 +459,56 @@ func TestServer_GetSampleDataFromResult_ObfuscatesWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestServer_GetSampleDataFromResult_DropsLabelsWithoutObfuscation(t *testing.T) {
+	tmpDir := t.TempDir()
+	server := NewServer(tmpDir, "test-version", false)
+
+	server.vmService = &mockVMService{
+		samples: []domain.MetricSample{
+			{
+				MetricName: "go_mem",
+				Labels: map[string]string{
+					"instance": "10.0.0.1:8428",
+					"job":      "vmagent",
+					"env":      "test",
+				},
+			},
+		},
+	}
+
+	config := domain.ExportConfig{
+		Connection: domain.VMConnection{
+			URL: "http://example.com",
+		},
+		Obfuscation: domain.ObfuscationConfig{
+			Enabled:    false,
+			DropLabels: []string{"env", "job"},
+		},
+	}
+
+	data, err := server.getSampleDataFromResult(context.Background(), config)
+	if err != nil {
+		t.Fatalf("getSampleDataFromResult failed: %v", err)
+	}
+	if len(data) != 1 {
+		t.Fatalf("expected 1 sample, got %d", len(data))
+	}
+
+	labels, ok := data[0]["labels"].(map[string]string)
+	if !ok {
+		t.Fatalf("labels type mismatch: %T", data[0]["labels"])
+	}
+	if _, exists := labels["env"]; exists {
+		t.Fatalf("expected env label to be dropped")
+	}
+	if _, exists := labels["job"]; exists {
+		t.Fatalf("expected job label to be dropped")
+	}
+	if labels["instance"] != "10.0.0.1:8428" {
+		t.Fatalf("expected instance label to remain, got %q", labels["instance"])
+	}
+}
+
 func TestServer_GetSampleDataFromResult_NoSamplesMock(t *testing.T) {
 	tmpDir := t.TempDir()
 	server := NewServer(tmpDir, "test-version", false)
@@ -495,6 +545,10 @@ func (m *mockVMService) ValidateConnection(ctx context.Context, conn domain.VMCo
 }
 
 func (m *mockVMService) DiscoverComponents(ctx context.Context, conn domain.VMConnection, tr domain.TimeRange) ([]domain.VMComponent, error) {
+	return nil, nil
+}
+
+func (m *mockVMService) DiscoverSelectorJobs(ctx context.Context, conn domain.VMConnection, selector string, tr domain.TimeRange) ([]domain.SelectorJob, error) {
 	return nil, nil
 }
 

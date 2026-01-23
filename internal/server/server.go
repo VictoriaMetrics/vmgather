@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -124,7 +125,9 @@ func (s *Server) Router() http.Handler {
 
 	// API endpoints
 	mux.HandleFunc("/api/validate", s.handleValidateConnection)
+	mux.HandleFunc("/api/validate-query", s.handleValidateQuery)
 	mux.HandleFunc("/api/discover", s.handleDiscoverComponents)
+	mux.HandleFunc("/api/discover-selector", s.handleDiscoverSelectorJobs)
 	mux.HandleFunc("/api/sample", s.handleGetSample)
 	mux.HandleFunc("/api/export", s.handleExport)
 	mux.HandleFunc("/api/export/start", s.handleExportStart)
@@ -430,6 +433,112 @@ func (s *Server) handleDiscoverComponents(w http.ResponseWriter, r *http.Request
 	})
 }
 
+func (s *Server) handleValidateQuery(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req struct {
+		Connection domain.VMConnection `json:"connection"`
+		Query      string              `json:"query"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err))
+		return
+	}
+
+	query := strings.TrimSpace(req.Query)
+	if query == "" {
+		respondWithError(w, http.StatusBadRequest, "Query is required")
+		return
+	}
+
+	queryType := domain.QueryModeMetricsQL
+	if services.IsSelectorQuery(query) {
+		queryType = domain.QueryModeSelector
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	client := vm.NewClient(req.Connection)
+	validateQuery := fmt.Sprintf("any(%s)", query)
+	result, err := client.Query(ctx, validateQuery, time.Now())
+	if err != nil {
+		errMsg, hint := formatVMError(err)
+		if hint != "" {
+			errMsg = fmt.Sprintf("%s. Hint: %s", errMsg, hint)
+		}
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Query validation failed: %s", errMsg))
+		return
+	}
+
+	labelsPresent := map[string]bool{}
+	if result != nil && len(result.Data.Result) > 0 {
+		for label := range result.Data.Result[0].Metric {
+			labelsPresent[label] = true
+		}
+	}
+
+	response := map[string]interface{}{
+		"success":       true,
+		"valid":         true,
+		"result_count":  len(result.Data.Result),
+		"has_job":       labelsPresent["job"],
+		"has_instance":  labelsPresent["instance"],
+		"sample_labels": keysFromLabelMap(labelsPresent),
+		"query_type":    queryType,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+func (s *Server) handleDiscoverSelectorJobs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var request struct {
+		Connection domain.VMConnection `json:"connection"`
+		TimeRange  domain.TimeRange    `json:"time_range"`
+		Selector   string              `json:"selector"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err))
+		return
+	}
+	if strings.TrimSpace(request.Selector) == "" {
+		respondWithError(w, http.StatusBadRequest, "Selector is required")
+		return
+	}
+
+	if s.debug {
+		request.Connection.Debug = true
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	jobs, err := s.vmService.DiscoverSelectorJobs(ctx, request.Connection, request.Selector, request.TimeRange)
+	if err != nil {
+		errMsg, hint := formatVMError(err)
+		log.Printf("[ERROR] Selector discovery failed: %s", errMsg)
+		if hint != "" {
+			log.Printf("[HINT] %s", hint)
+		}
+		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("Selector discovery failed: %s", errMsg))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"jobs": jobs,
+	})
+}
+
 // handleGetSample returns sample metrics
 func (s *Server) handleGetSample(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -462,6 +571,8 @@ func (s *Server) handleGetSample(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Sample Metrics Request:")
 	log.Printf("  Components: %v", req.Config.Components)
 	log.Printf("  Jobs: %v", req.Config.Jobs)
+	log.Printf("  Mode: %s", req.Config.Mode)
+	log.Printf("  QueryType: %s", req.Config.QueryType)
 	log.Printf("  Limit: %d", req.Limit)
 
 	// Get sample metrics using VM service
@@ -481,12 +592,14 @@ func (s *Server) handleGetSample(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Apply obfuscation to samples if enabled
-	if req.Config.Obfuscation.Enabled {
-		log.Printf("🔒 Applying obfuscation to samples (instance: %v, job: %v, custom labels: %v)",
-			req.Config.Obfuscation.ObfuscateInstance,
-			req.Config.Obfuscation.ObfuscateJob,
-			req.Config.Obfuscation.CustomLabels)
+	// Apply label dropping (always) + obfuscation (when enabled)
+	if req.Config.Obfuscation.Enabled || len(req.Config.Obfuscation.DropLabels) > 0 {
+		if req.Config.Obfuscation.Enabled {
+			log.Printf("🔒 Applying obfuscation to samples (instance: %v, job: %v, custom labels: %v)",
+				req.Config.Obfuscation.ObfuscateInstance,
+				req.Config.Obfuscation.ObfuscateJob,
+				req.Config.Obfuscation.CustomLabels)
+		}
 		samples = s.obfuscateSamples(samples, req.Config.Obfuscation)
 	}
 
@@ -812,30 +925,7 @@ func (s *Server) handleExportCancel(w http.ResponseWriter, r *http.Request) {
 }
 
 func ensureBatchDefaults(config *domain.ExportConfig) {
-	settings := &config.Batching
-	if !settings.Enabled && settings.Strategy == "" && settings.CustomIntervalSecs == 0 {
-		settings.Enabled = true
-	}
-	if settings.Strategy == "" {
-		settings.Strategy = "auto"
-	}
-	if settings.CustomIntervalSecs < 0 {
-		settings.CustomIntervalSecs = 0
-	}
-	minSeconds := services.MinBatchIntervalSeconds
-	maxSeconds := services.MaxBatchIntervalSeconds
-	if settings.CustomIntervalSecs > 0 && settings.CustomIntervalSecs < minSeconds {
-		settings.CustomIntervalSecs = minSeconds
-	}
-	if settings.CustomIntervalSecs > maxSeconds {
-		settings.CustomIntervalSecs = maxSeconds
-	}
-	if config.MetricStepSeconds <= 0 {
-		config.MetricStepSeconds = services.RecommendedMetricStepSeconds(config.TimeRange)
-	}
-	if !config.Obfuscation.Enabled {
-		config.Obfuscation = domain.ObfuscationConfig{}
-	}
+	services.ApplyExportDefaults(config)
 }
 
 func recommendedStagingDir() string {
@@ -1065,7 +1155,7 @@ func (s *Server) getSampleDataFromResult(ctx context.Context, config domain.Expo
 		return nil, err
 	}
 
-	if config.Obfuscation.Enabled {
+	if config.Obfuscation.Enabled || len(config.Obfuscation.DropLabels) > 0 {
 		samples = s.obfuscateSamples(samples, config.Obfuscation)
 	}
 
@@ -1178,16 +1268,23 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 // obfuscateSamples applies obfuscation to sample metrics
 func (s *Server) obfuscateSamples(samples []domain.MetricSample, config domain.ObfuscationConfig) []domain.MetricSample {
-	if !config.Enabled {
-		return samples
-	}
-
 	// Create obfuscator
 	obfuscator := obfuscation.NewObfuscator()
 
 	// Apply obfuscation to each sample
 	for i := range samples {
 		if samples[i].Labels == nil {
+			continue
+		}
+
+		// Drop labels before obfuscation
+		if len(config.DropLabels) > 0 {
+			for _, label := range config.DropLabels {
+				delete(samples[i].Labels, label)
+			}
+		}
+
+		if !config.Enabled {
 			continue
 		}
 
@@ -1281,4 +1378,16 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		log.Printf("%s %s %s", r.RemoteAddr, r.Method, r.URL.Path)
 		next.ServeHTTP(w, r)
 	})
+}
+
+func keysFromLabelMap(labels map[string]bool) []string {
+	if len(labels) == 0 {
+		return []string{}
+	}
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }

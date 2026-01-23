@@ -22,7 +22,7 @@ Official walkthrough for the VictoriaMetrics metrics export wizard.
 
 1. Run the binary for your platform (`./vmgather-vX.Y.Z-linux-amd64`, `vmgather-vX.Y.Z-windows-amd64.exe`, etc.).
 2. The application opens a browser window at `http://localhost:8080` (auto-switches to a free port if 8080 is taken).
-3. The landing page shows the 6-step wizard with the current step highlighted.
+3. The landing page shows the wizard with the current step highlighted (6 steps for cluster mode, 6/7 for custom mode depending on selector vs MetricsQL).
 
 ### Supported target URLs
 
@@ -40,17 +40,51 @@ Official walkthrough for the VictoriaMetrics metrics export wizard.
 
 ## Wizard steps
 
+### Step 1 – Welcome & mode
+- Choose **Cluster metrics** (default) or **Selector / Query** mode. Mode can only be switched on Step 1.
+
+### Cluster metrics flow (6 steps)
 | Step | Description |
 | --- | --- |
-| 1. **Time range** | Choose presets (15m, 1h, 6h, 24h) or define custom start/end timestamps. |
-| 2. **Connection** | Enter URL + auth method. Invalid URLs disable the **Test Connection** button instantly. |
-| 3. **Validation** | Click **Test connection**. vmgather checks reachability, detects product flavour, and confirms `/api/v1/export` availability. |
+| 2. **Time range** | Choose presets (15m, 1h, 6h, 24h) or define custom start/end timestamps. |
+| 3. **Connection** | Enter URL + auth method. Invalid URLs disable the **Test Connection** button instantly. |
 | 4. **Component discovery** | Select which VictoriaMetrics components, tenants, and jobs to include. UI lists everything found via `vm_app_version` metrics. |
-| 5. **Obfuscation** | Enable anonymisation for IPs, job labels, or add custom label keys. An estimated series count per component/job is displayed based on discovery data. |
-| 6. **Summary** | Review time range, target, authentication, selected components, and pre-obfuscated sample data before exporting. |
+| 5. **Obfuscation** | Enable anonymisation for IPs, job labels, or add custom label keys. Estimated series count per component/job is displayed. |
+| 6. **Complete** | Review export details and download the archive. |
+
+### Selector / Query flow (6 or 7 steps)
+| Step | Description |
+| --- | --- |
+| 2. **Time range** | Choose presets or custom timestamps. |
+| 3. **Connection** | Enter URL + auth method. Test connection to proceed. |
+| 4. **Selector / Query** | Enter a series selector or MetricsQL. vmgather auto-detects the type. |
+| 5. **Select targets** | **Selector only** – choose jobs/instances discovered from the selector (skipped for MetricsQL). |
+| 6. **Obfuscation + label removal** | Obfuscation defaults off; you can remove labels from export in this mode. |
+| 7. **Complete** | Review export details and download the archive. |
 
 Each card contains hints and sample values matching VictoriaMetrics defaults.
 
+## Experimental CLI oneshot export
+
+The exporter also supports an experimental oneshot mode for automation and test flows.
+
+Run a single export and stream JSONL to stdout:
+```bash
+./vmgather -oneshot -oneshot-config ./export.json -export-stdout
+```
+
+Minimal `export.json` example:
+```json
+{
+  "connection": { "url": "http://localhost:52104", "auth": { "type": "none" } },
+  "time_range": { "start": "2026-01-23T12:00:00Z", "end": "2026-01-23T13:00:00Z" },
+  "mode": "custom",
+  "query_type": "metricsql",
+  "query": "rate(vm_rows_inserted_total[5m])",
+  "obfuscation": { "enabled": false },
+  "batching": { "enabled": false }
+}
+```
 ## Export bundle
 
 Click **Start export** to execute the workflow:

@@ -195,13 +195,14 @@ test.describe('Bug Fix Verification', () => {
       await page.waitForTimeout(500);
 
       // Step 4: Select components
+      await page.waitForSelector('.step.active[data-step="5"]', { timeout: 15000 });
       await page.waitForSelector('.component-item', { timeout: 15000 });
       nextButton = page.locator('.step.active button.btn-primary:has-text("Next")');
       await nextButton.click();
       await page.waitForTimeout(2000); // Wait for samples to load
 
       // Step 5: Verify obfuscation preview
-      const step5 = page.locator('.step.active[data-step="5"]');
+      const step5 = page.locator('.step.active[data-step="6"]');
       await expect(step5.locator('h2.step-title')).toContainText('Obfuscation', { timeout: 5000 });
 
       // Enable obfuscation if not enabled
