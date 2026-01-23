@@ -47,6 +47,17 @@ func NewExportService(outputDir, version string) ExportService {
 	}
 }
 
+// ExportToWriter streams exported metrics into the provided writer.
+// Intended for CLI oneshot mode; writes JSONL metrics without creating an archive.
+func ExportToWriter(ctx context.Context, config domain.ExportConfig, writer io.Writer) (int, error) {
+	service := &exportServiceImpl{
+		clientFactory:   vm.NewClient,
+		archiveWriter:   archive.NewWriter(os.TempDir()),
+		vmGatherVersion: "dev",
+	}
+	return service.exportToWriter(ctx, config, writer)
+}
+
 // ExecuteExport performs full metrics export with optional obfuscation
 func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.ExportConfig) (*domain.ExportResult, error) {
 	// Generate export ID
@@ -82,7 +93,7 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 
 	// Step 2: Export metrics from VictoriaMetrics in batches
 	client := s.clientFactory(config.Connection)
-	selector := s.buildSelector(config.Jobs)
+	selector, useQueryRange := s.buildExportQuery(config)
 	batchWindows := CalculateBatchWindows(config.TimeRange, config.Batching)
 	metricsCount := 0
 	var obfuscator *obfuscation.Obfuscator
@@ -108,7 +119,7 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 		batchStart := time.Now()
 
 		batchCtx, cancelBatch := context.WithTimeout(ctx, defaultBatchTimeout)
-		exportReader, err := s.fetchBatch(batchCtx, client, selector, window, config.MetricStepSeconds)
+		exportReader, err := s.fetchBatch(batchCtx, client, selector, window, config.MetricStepSeconds, useQueryRange)
 		if err != nil {
 			cancelBatch()
 			return nil, err
@@ -193,6 +204,42 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 	return result, nil
 }
 
+func (s *exportServiceImpl) exportToWriter(ctx context.Context, config domain.ExportConfig, writer io.Writer) (int, error) {
+	client := s.clientFactory(config.Connection)
+	selector, useQueryRange := s.buildExportQuery(config)
+	batchWindows := CalculateBatchWindows(config.TimeRange, config.Batching)
+	metricsCount := 0
+	var obfuscator *obfuscation.Obfuscator
+	if config.Obfuscation.Enabled {
+		obfuscator = obfuscation.NewObfuscator()
+	}
+
+	buffered := bufio.NewWriter(writer)
+	for _, window := range batchWindows {
+		batchCtx, cancelBatch := context.WithTimeout(ctx, defaultBatchTimeout)
+		exportReader, err := s.fetchBatch(batchCtx, client, selector, window, config.MetricStepSeconds, useQueryRange)
+		if err != nil {
+			cancelBatch()
+			return 0, err
+		}
+
+		count, err := s.processMetricsIntoWriter(exportReader, config.Obfuscation, obfuscator, buffered)
+		cancelBatch()
+		if closeErr := exportReader.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			return 0, err
+		}
+		metricsCount += count
+	}
+
+	if err := buffered.Flush(); err != nil {
+		return 0, fmt.Errorf("flush error: %w", err)
+	}
+	return metricsCount, nil
+}
+
 // processMetrics processes exported metrics with optional obfuscation
 // Returns processed reader, metrics count, and obfuscation maps
 // nolint:unused // kept for advanced tests that need direct access to the processor
@@ -238,6 +285,12 @@ func (s *exportServiceImpl) processMetricsIntoWriter(
 		}
 		if err != nil {
 			return 0, fmt.Errorf("decode error: %w", err)
+		}
+
+		if len(obfConfig.DropLabels) > 0 {
+			for _, label := range obfConfig.DropLabels {
+				delete(metric.Metric, label)
+			}
 		}
 
 		if obfConfig.Enabled {
@@ -349,16 +402,28 @@ func (s *exportServiceImpl) buildSelector(jobs []string) string {
 		return "{__name__!=\"\"}" // All metrics
 	}
 
-	// Build job selector: {job=~"job1|job2|job3"}
-	jobRegex := ""
-	for i, job := range jobs {
-		if i > 0 {
-			jobRegex += "|"
+	return buildJobFilterSelector(jobs)
+}
+
+func (s *exportServiceImpl) buildExportQuery(config domain.ExportConfig) (string, bool) {
+	if config.Mode == domain.ExportModeCustom && config.Query != "" {
+		switch config.QueryType {
+		case domain.QueryModeSelector:
+			selector := config.Query
+			if len(config.Jobs) > 0 {
+				filter := buildJobFilterSelector(config.Jobs)
+				selector = fmt.Sprintf("(%s) and on(job) %s", selector, filter)
+				return selector, true
+			}
+			return selector, false
+		case domain.QueryModeMetricsQL:
+			return config.Query, true
+		default:
+			return config.Query, false
 		}
-		jobRegex += job
 	}
 
-	return fmt.Sprintf(`{job=~"%s"}`, jobRegex)
+	return s.buildSelector(config.Jobs), false
 }
 
 // buildArchiveMetadata builds archive metadata from export config
@@ -557,8 +622,12 @@ func (s *exportServiceImpl) exportViaQueryRange(ctx context.Context, client *vm.
 	return pr, nil
 }
 
-func (s *exportServiceImpl) fetchBatch(ctx context.Context, client *vm.Client, selector string, tr domain.TimeRange, metricStepSeconds int) (io.ReadCloser, error) {
+func (s *exportServiceImpl) fetchBatch(ctx context.Context, client *vm.Client, selector string, tr domain.TimeRange, metricStepSeconds int, forceQueryRange bool) (io.ReadCloser, error) {
 	fmt.Printf("Attempting export for batch: %s -> %s\n", tr.Start.Format(time.RFC3339), tr.End.Format(time.RFC3339))
+	if forceQueryRange {
+		fmt.Printf("[INFO] Using query_range export for custom query\n")
+		return s.exportViaQueryRange(ctx, client, selector, tr, metricStepSeconds)
+	}
 	reader, err := client.Export(ctx, selector, tr.Start, tr.End)
 	if err != nil && s.isMissingRouteError(err) {
 		fmt.Printf("[WARN] Export API not available for current batch, falling back to query_range\n")

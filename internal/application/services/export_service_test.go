@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
+	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/archive"
 	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/vm"
 )
 
@@ -99,6 +101,124 @@ func TestExportService_BuildSelector(t *testing.T) {
 				t.Errorf("buildSelector() = %v, want %v", result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestExportService_BuildExportQuery(t *testing.T) {
+	service := &exportServiceImpl{}
+
+	tests := []struct {
+		name        string
+		config      domain.ExportConfig
+		expected    string
+		useQueryRng bool
+	}{
+		{
+			name: "cluster mode uses job selector",
+			config: domain.ExportConfig{
+				Mode: domain.ExportModeCluster,
+				Jobs: []string{"vmstorage-prod", "vmselect-prod"},
+			},
+			expected:    `{job=~"vmstorage-prod|vmselect-prod"}`,
+			useQueryRng: false,
+		},
+		{
+			name: "custom selector without job filter",
+			config: domain.ExportConfig{
+				Mode:      domain.ExportModeCustom,
+				QueryType: domain.QueryModeSelector,
+				Query:     `{job="vmstorage-prod"}`,
+			},
+			expected:    `{job="vmstorage-prod"}`,
+			useQueryRng: false,
+		},
+		{
+			name: "custom selector with job filter",
+			config: domain.ExportConfig{
+				Mode:      domain.ExportModeCustom,
+				QueryType: domain.QueryModeSelector,
+				Query:     `{__name__=~"vm_.*"}`,
+				Jobs:      []string{"vmstorage-prod", "vmselect-prod"},
+			},
+			expected:    `({__name__=~"vm_.*"}) and on(job) {job=~"vmstorage-prod|vmselect-prod"}`,
+			useQueryRng: true,
+		},
+		{
+			name: "custom metricsql forces query_range",
+			config: domain.ExportConfig{
+				Mode:      domain.ExportModeCustom,
+				QueryType: domain.QueryModeMetricsQL,
+				Query:     `rate(vm_rows_inserted_total[5m])`,
+			},
+			expected:    `rate(vm_rows_inserted_total[5m])`,
+			useQueryRng: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			query, useQueryRange := service.buildExportQuery(tt.config)
+			if query != tt.expected {
+				t.Fatalf("buildExportQuery() = %v, want %v", query, tt.expected)
+			}
+			if useQueryRange != tt.useQueryRng {
+				t.Fatalf("useQueryRange = %v, want %v", useQueryRange, tt.useQueryRng)
+			}
+		})
+	}
+}
+
+func TestExportToWriter_DropsLabels(t *testing.T) {
+	exportBody := `{"metric":{"__name__":"vm_app_version","job":"test1","env":"dev","instance":"host:1234"},"values":[1],"timestamps":[1]}` + "\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/export" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, exportBody)
+	}))
+	defer srv.Close()
+
+	config := domain.ExportConfig{
+		Connection: domain.VMConnection{URL: srv.URL},
+		TimeRange: domain.TimeRange{
+			Start: time.Now().Add(-time.Minute),
+			End:   time.Now(),
+		},
+		Batching: domain.BatchSettings{
+			Enabled: false,
+		},
+		MetricStepSeconds: 30,
+		Obfuscation: domain.ObfuscationConfig{
+			Enabled:    false,
+			DropLabels: []string{"env", "job"},
+		},
+	}
+
+	var buf bytes.Buffer
+	service := &exportServiceImpl{
+		clientFactory: func(conn domain.VMConnection) *vm.Client {
+			return vm.NewClient(domain.VMConnection{URL: srv.URL})
+		},
+		archiveWriter:   archive.NewWriter(t.TempDir()),
+		vmGatherVersion: "test",
+	}
+	count, err := service.exportToWriter(context.Background(), config, &buf)
+	if err != nil {
+		t.Fatalf("exportToWriter failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 metric, got %d", count)
+	}
+	output := buf.String()
+	if strings.Contains(output, "\"env\"") || strings.Contains(output, "\"job\"") {
+		t.Fatalf("expected drop labels to be removed from output: %s", output)
+	}
+	if !strings.Contains(output, "\"instance\"") {
+		t.Fatalf("expected instance label to remain in output")
 	}
 }
 

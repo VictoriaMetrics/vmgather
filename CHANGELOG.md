@@ -2,6 +2,25 @@
 
 All notable changes to vmgather are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and versions adhere to semantic versioning.
 
+## [v1.7.0] - 2026-01-23
+
+### Added
+- New collection mode toggle with card flip and dynamic background theme.
+- Custom collection step with auto-detected selector vs MetricsQL queries.
+- Selector discovery endpoint for job/instance grouping and series estimates.
+- Custom-mode E2E coverage for selector and MetricsQL flows.
+- Custom-mode label removal controls for export payloads.
+- Local test data jobs (`test1`, `test2`) for selector/query validation.
+- Experimental oneshot CLI export with optional stdout streaming.
+
+### Changed
+- Wizard now adapts steps per mode (cluster vs. custom query).
+- Export pipeline supports MetricsQL via forced query_range fallback.
+- Step copy updates for selector/query UX and Step 1 mode context.
+- Connection step now surfaces a tooltip on the disabled Next button.
+
+## [v1.6.0] - 2026-01-23
+
 
 ### Added
 - Validation attempts and final endpoint details are now returned to the UI for connection checks.

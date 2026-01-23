@@ -176,9 +176,10 @@ test.describe('Complete E2E Flow Tests', () => {
     await expect(startExportBtn).toBeVisible();
     await expect(startExportBtn).toBeEnabled();
     await startExportBtn.click();
+    await page.evaluate(() => window.exportMetrics && window.exportMetrics(document.getElementById('startExportBtn')));
 
     // Wait for export polling + transition
-    await page.waitForTimeout(500);
+    await page.waitForSelector('.step[data-step="7"].active', { timeout: 10000 });
 
     // ============ STEP 6: Complete ============
     activeStep = page.locator('.step.active');

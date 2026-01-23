@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>vmgather - VictoriaMetrics Metrics Exporter</title>
+    <title>vmgather - VictoriaMetrics Metrics Export</title>
     <style>
         :root {
             --primary: #2563eb;
@@ -21,6 +21,8 @@
             --radius: 12px;
             --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
             --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+            --page-bg: #5c5bd6;
+            --page-bg-custom: #5b2b3a;
         }
 
         * {
@@ -31,7 +33,7 @@
 
         body {
             font-family: var(--font-sans);
-            background: var(--background);
+            background: var(--page-bg);
             color: var(--text-main);
             min-height: 100vh;
             display: flex;
@@ -39,6 +41,45 @@
             align-items: center;
             padding: 20px;
             line-height: 1.5;
+            transition: background-color 0.6s ease;
+        }
+
+        body.mode-custom {
+            --page-bg: var(--page-bg-custom);
+        }
+
+        .card-stage {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            perspective: 1400px;
+        }
+
+        .card-flip {
+            width: 100%;
+            max-width: 960px;
+            display: grid;
+            transform-style: preserve-3d;
+        }
+
+        .card-face {
+            grid-area: 1 / 1;
+            backface-visibility: hidden;
+            transform-style: preserve-3d;
+        }
+
+        .card-front {
+            backface-visibility: visible;
+        }
+
+        .card-back {
+            background: var(--surface);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border);
+            transform: rotateY(180deg);
+            backface-visibility: hidden;
         }
 
         .container {
@@ -46,9 +87,12 @@
             border-radius: var(--radius);
             box-shadow: var(--shadow);
             border: 1px solid var(--border);
-            max-width: 960px;
             width: 100%;
             overflow: hidden;
+        }
+
+        .card-flip.flip {
+            animation: flipCard 0.68s cubic-bezier(0.2, 0.8, 0.2, 1);
         }
 
         header {
@@ -300,6 +344,195 @@
                 opacity: 1;
                 transform: translateY(0);
             }
+        }
+
+        @keyframes flipCard {
+            0% {
+                transform: rotateY(0);
+            }
+            100% {
+                transform: rotateY(180deg);
+            }
+        }
+
+        .next-tooltip-wrapper {
+            position: relative;
+            display: inline-flex;
+        }
+
+        .next-tooltip {
+            position: absolute;
+            top: -42px;
+            right: 0;
+            background: #1f2937;
+            color: #fff;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(4px);
+            transition: opacity 0.2s ease, transform 0.2s ease;
+        }
+
+        .next-tooltip-wrapper.show-tooltip .next-tooltip {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .query-detection {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: var(--background);
+            border: 1px solid var(--border);
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .query-badge {
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(79, 70, 229, 0.12);
+            color: #4338ca;
+        }
+
+        .query-examples {
+            margin-top: 12px;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px dashed var(--border);
+            background: #fafafa;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .query-examples code {
+            background: rgba(15, 23, 42, 0.06);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .mode-toggle-wrapper {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            padding: 16px;
+            margin-bottom: 20px;
+            background: var(--background);
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            position: relative;
+        }
+
+        .mode-toggle-wrapper.locked {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        .mode-toggle-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        .mode-toggle-label.active {
+            color: var(--text-main);
+        }
+
+        .mode-switch {
+            position: relative;
+            width: 52px;
+            height: 28px;
+            display: inline-block;
+        }
+
+        .mode-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .mode-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #cbd5f5;
+            transition: 0.3s;
+            border-radius: 999px;
+        }
+
+        .mode-slider::before {
+            position: absolute;
+            content: "";
+            height: 22px;
+            width: 22px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+        }
+
+        .mode-switch input:checked + .mode-slider {
+            background-color: #7c3aed;
+        }
+
+        .mode-switch input:checked + .mode-slider::before {
+            transform: translateX(24px);
+        }
+
+        .mode-lock-tooltip {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: #111827;
+            color: #f9fafb;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+            z-index: 10;
+        }
+
+        .mode-toggle-wrapper.show-tooltip .mode-lock-tooltip {
+            opacity: 1;
+        }
+
+        .selector-job-item {
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            background: var(--surface);
+        }
+
+        .selector-job-item label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 0;
+        }
+
+        .selector-job-meta {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-left: auto;
         }
 
         .preset-buttons {
@@ -687,6 +920,12 @@
             font-weight: 600;
         }
 
+        .metric-note {
+            color: #94a3b8;
+            font-size: 11px;
+            margin-bottom: 4px;
+        }
+
         .metric-labels {
             color: var(--text-muted);
             margin-top: 4px;
@@ -762,6 +1001,11 @@
         }
 
         @media (max-width: 768px) {
+            .card-back {
+                border-radius: 0;
+                border: none;
+            }
+
             .container {
                 margin: 0;
                 border-radius: 0;
@@ -785,7 +1029,9 @@
 </head>
 
 <body>
-    <div class="container">
+    <div class="card-stage">
+        <div class="card-flip" id="cardFlip">
+            <div class="container card-face card-front">
         <header>
             <h1>
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
@@ -799,10 +1045,19 @@
                 </svg>
                 vmgather
             </h1>
-            <p>VictoriaMetrics Metrics Exporter</p>
+            <p>VictoriaMetrics Metrics Export</p>
         </header>
 
         <div class="wizard">
+            <div class="mode-toggle-wrapper" id="modeToggleWrapper">
+                <span class="mode-toggle-label active" id="modeLabelCluster">Cluster metrics</span>
+                <label class="mode-switch">
+                    <input type="checkbox" id="modeToggleInput" aria-label="Toggle collection mode">
+                    <span class="mode-slider"></span>
+                </label>
+                <span class="mode-toggle-label" id="modeLabelCustom">Selector / Query</span>
+                <div class="mode-lock-tooltip">Switching modes is available only on Step 1.</div>
+            </div>
             <div class="progress-container">
                 <div class="progress-bar">
                     <div class="progress-fill" id="progress" style="width: 0%"></div>
@@ -814,23 +1069,23 @@
             <div class="step active" data-step="1">
                 <h2 class="step-title">Welcome to vmgather</h2>
                 <div class="step-content">
-                    <div class="info-box">
+                    <div class="info-box" id="welcomePurpose">
                         <strong>Purpose:</strong> Export VictoriaMetrics internal metrics for VictoriaMetrics team
                         analysis
                     </div>
 
-                    <p style="margin-bottom: 20px; color: var(--text-muted); line-height: 1.6;">
+                    <p id="welcomeIntro" style="margin-bottom: 20px; color: var(--text-muted); line-height: 1.6;">
                         This wizard will guide you through exporting metrics from your VictoriaMetrics installation.
                         You'll be able to:
                     </p>
 
-                    <ul
+                    <ul id="welcomeSteps"
                         style="margin-left: 20px; margin-bottom: 24px; color: var(--text-muted); line-height: 1.8; list-style-type: disc;">
-                        <li>Select time range for export</li>
-                        <li>Connect to your VM instance (vmselect/vmsingle)</li>
-                        <li>Choose which components to export</li>
-                        <li>Obfuscate sensitive information (IPs, job names)</li>
-                        <li>Download ready-to-send archive</li>
+                        <li data-welcome-step="time">Select time range for export</li>
+                        <li data-welcome-step="connect">Connect to your VM instance (vmselect/vmsingle)</li>
+                        <li data-welcome-step="select">Choose which components to export</li>
+                        <li data-welcome-step="obfuscate">Obfuscate sensitive information (IPs, job names)</li>
+                        <li data-welcome-step="download">Download ready-to-send archive</li>
                     </ul>
 
                     <div class="warning-box">
@@ -872,12 +1127,12 @@
                     <div class="form-group">
                         <label>Quick Presets:</label>
                         <div class="preset-buttons">
-                            <button class="preset-btn" onclick="setPreset('15m', this)">Last 15min</button>
-                            <button class="preset-btn active" onclick="setPreset('1h', this)">Last 1h</button>
-                            <button class="preset-btn" onclick="setPreset('3h', this)">Last 3h</button>
-                            <button class="preset-btn" onclick="setPreset('6h', this)">Last 6h</button>
-                            <button class="preset-btn" onclick="setPreset('12h', this)">Last 12h</button>
-                            <button class="preset-btn" onclick="setPreset('24h', this)">Last 24h</button>
+                            <button class="preset-btn" onclick="setPreset('15m', this)">Last 15 min</button>
+                            <button class="preset-btn active" onclick="setPreset('1h', this)">Last 1 h</button>
+                            <button class="preset-btn" onclick="setPreset('3h', this)">Last 3 h</button>
+                            <button class="preset-btn" onclick="setPreset('6h', this)">Last 6 h</button>
+                            <button class="preset-btn" onclick="setPreset('12h', this)">Last 12 h</button>
+                            <button class="preset-btn" onclick="setPreset('24h', this)">Last 24 h</button>
                         </div>
                     </div>
 
@@ -915,12 +1170,12 @@
                 <div class="step-content">
                     <div class="info-box"
                         style="background-color: #e8f5e9; border-left: 4px solid #4caf50; margin-bottom: 20px;">
-                        <strong>[OK] Flexible URL Parser:</strong> Paste URL in ANY format - with paths, tenant ID, from
-                        Grafana datasource - everything works!
+                        <strong>[OK] Flexible URL Parser:</strong> Paste a URL in any format — paths, tenant ID, or a
+                        Grafana datasource.
                     </div>
 
                     <details class="help-section">
-                        <summary>[INFO] Accepted URL Formats (Click to expand)</summary>
+                        <summary>[INFO] Accepted URL formats (click to expand)</summary>
                         <div class="help-content">
                             <h4 style="margin-top: 10px; color: #1976d2;">[OK] Format 1: Base URL (simple)</h4>
                             <div class="url-example-grid">
@@ -996,12 +1251,61 @@
 
                 <div class="button-group">
                     <button class="btn-secondary" onclick="prevStep()">Back</button>
-                    <button class="btn-next" data-next="true" id="step3Next" onclick="nextStep()" disabled>Next</button>
+                    <div class="next-tooltip-wrapper" id="step3NextWrapper">
+                        <button class="btn-next" data-next="true" id="step3Next" onclick="nextStep()" disabled>Next</button>
+                        <div class="next-tooltip" id="step3NextTooltip">Run Test Connection to continue</div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Step 4: Select Components -->
+            <!-- Step 4: Metrics Selector / Query -->
             <div class="step" data-step="4">
+                <h2 class="step-title">Metric Selector / Query</h2>
+                <div class="step-content">
+                    <div class="info-box">
+                        Enter a selector or MetricsQL query. We auto-detect the type and adjust the next step.
+                    </div>
+                    <div class="form-group">
+                        <label for="customQueryInput">Metric selector or MetricsQL query</label>
+                        <textarea id="customQueryInput" rows="3"
+                            placeholder='{job="vmstorage"} or rate(vm_rows_inserted_total[5m])'
+                            oninput="customQueryValidated=false;updateCustomQueryDetection();updateCustomQueryValidation();"></textarea>
+                        <small id="customQueryStatus" class="input-hint">Validation will confirm the detected type.</small>
+                    </div>
+
+                    <div class="query-detection">
+                        <span id="queryTypeBadge" class="query-badge">Awaiting input</span>
+                        <span id="customQueryBehavior">Enter a selector or query to see which path will be used.</span>
+                    </div>
+
+                    <div class="query-examples">
+                        <p><strong>Selector (per-job selection enabled):</strong>
+                            <code>{job="vmstorage"}</code>,
+                            <code>vm_app_version{job="vmselect"}</code>,
+                            <code>{job=~"vm.*", instance=~"vm-.*"}</code>
+                        </p>
+                        <p style="margin-top: 6px;"><strong>MetricsQL (target step skipped):</strong>
+                            <code>rate(vm_rows_inserted_total[5m])</code>,
+                            <code>topk(20, sum(rate(http_requests_total[1m])) by (job))</code>,
+                            <code>avg_over_time(vm_cache_size_bytes[10m])</code>
+                        </p>
+                    </div>
+
+                    <button class="btn-primary" id="validateCustomQueryBtn" style="width: 100%; margin-top: 12px;"
+                        onclick="validateCustomQuery()">
+                        Validate query
+                    </button>
+                    <div id="customQueryValidationResult" style="margin-top: 12px;"></div>
+                </div>
+
+                <div class="button-group">
+                    <button class="btn-secondary" onclick="prevStep()">Back</button>
+                    <button class="btn-next" data-next="true" onclick="nextStep()">Next</button>
+                </div>
+            </div>
+
+            <!-- Step 5: Select Components / Targets -->
+            <div class="step" data-step="5">
                 <h2 class="step-title">Select Components to Export</h2>
                 <div class="step-content">
                     <div class="info-box">
@@ -1015,20 +1319,21 @@
                         </div>
                     </div>
                     <div id="componentsList" class="component-list" style="display: none;"></div>
+                    <div id="selectorJobsList" class="component-list" style="display: none;"></div>
                     <div id="componentsError" class="hidden" style="padding: 16px; background: #fef2f2; border-left: 4px solid #ef4444; border-radius: 4px; color: #b91c1c; margin-bottom: 16px;"></div>
                 </div>
 
                 <div class="button-group">
                     <button class="btn-secondary" onclick="prevStep()">Back</button>
-                    <button class="btn-next" data-next="true" id="step4Next" onclick="nextStep()">Next</button>
+                    <button class="btn-next" data-next="true" id="step5Next" onclick="nextStep()">Next</button>
                 </div>
             </div>
 
-            <!-- Step 5: Obfuscation -->
-            <div class="step" data-step="5">
+            <!-- Step 6: Obfuscation -->
+            <div class="step" data-step="6">
                 <h2 class="step-title">Obfuscation Options</h2>
                 <div class="step-content">
-                    <div class="info-box">
+                    <div class="info-box" id="obfuscationInfoBox">
                         Obfuscate sensitive information before sending to VictoriaMetrics team.
                     </div>
 
@@ -1083,6 +1388,22 @@
                             </summary>
                             <div id="samplePreview" class="sample-preview">
                                 <p style="text-align: center; color: var(--text-muted);">Loading samples...</p>
+                            </div>
+                        </details>
+
+                        <details id="dropLabelsDetails" style="margin-top: 20px;">
+                            <summary id="dropLabelsSummary"
+                                style="cursor: pointer; font-weight: 600; color: var(--primary); padding: 10px; background: var(--background); border-radius: 4px;">
+                                Remove labels from export
+                            </summary>
+                            <div id="dropLabels" class="label-selector">
+                                <div style="text-align: center; color: var(--text-muted); padding: 20px;">
+                                    <div class="sample-loading-spinner" style="display: inline-block;"></div>
+                                    <p style="margin-top: 10px;">Loading labels...</p>
+                                </div>
+                            </div>
+                            <div class="input-hint" style="margin-top: 8px;">
+                                Removed labels are stripped from export payloads (custom mode only).
                             </div>
                         </details>
                     </div>
@@ -1162,8 +1483,8 @@
                 </div>
             </div>
 
-            <!-- Step 6: Complete -->
-            <div class="step" data-step="6">
+            <!-- Step 7: Complete -->
+            <div class="step" data-step="7">
                 <h2 class="step-title">Export Complete!</h2>
                 <div class="step-content">
                     <div class="success-box">
@@ -1206,31 +1527,36 @@
                 </div>
             </div>
         </div>
+            </div>
+            <div class="card-face card-back" aria-hidden="true"></div>
+        </div>
+    </div>
+
+    <div id="dirPickerOverlay" class="dir-picker-overlay">
+        <div class="dir-picker-popover">
+            <div class="dir-picker-header">
+                <div>
+                    <div style="font-size:12px;color:#666;">Browsing</div>
+                    <div id="dirPickerCurrent" class="dir-picker-current"></div>
+                </div>
+                <button class="btn-inline" onclick="closeDirectoryPicker()">Close</button>
+            </div>
+            <div class="dir-picker-actions">
+                <button type="button" class="btn-inline" id="dirPickerParentBtn"
+                    onclick="navigateDirectoryParent()">Up one level</button>
+                <button type="button" class="btn-inline" onclick="refreshDirectoryPicker()">Refresh</button>
+            </div>
+            <div id="dirPickerList" class="dir-picker-list"></div>
+            <div id="dirPickerStatus" class="dir-picker-status"></div>
+            <div class="dir-picker-footer">
+                <button class="btn-primary" type="button" onclick="selectCurrentDirectory()">Use this directory</button>
+                <button class="btn-inline" type="button" onclick="closeDirectoryPicker()">Cancel</button>
+            </div>
+        </div>
     </div>
 
     <script src="/static/app.js"></script>
 
 </body>
-<div id="dirPickerOverlay" class="dir-picker-overlay">
-    <div class="dir-picker-popover">
-        <div class="dir-picker-header">
-            <div>
-                <div style="font-size:12px;color:#666;">Browsing</div>
-                <div id="dirPickerCurrent" class="dir-picker-current"></div>
-            </div>
-            <button class="btn-inline" onclick="closeDirectoryPicker()">Close</button>
-        </div>
-        <div class="dir-picker-actions">
-            <button type="button" class="btn-inline" id="dirPickerParentBtn" onclick="navigateDirectoryParent()">Up one level</button>
-            <button type="button" class="btn-inline" onclick="refreshDirectoryPicker()">Refresh</button>
-        </div>
-        <div id="dirPickerList" class="dir-picker-list"></div>
-        <div id="dirPickerStatus" class="dir-picker-status"></div>
-        <div class="dir-picker-footer">
-            <button class="btn-primary" type="button" onclick="selectCurrentDirectory()">Use this directory</button>
-            <button class="btn-inline" type="button" onclick="closeDirectoryPicker()">Cancel</button>
-        </div>
-    </div>
-</div>
 
 </html>

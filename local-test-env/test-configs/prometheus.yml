@@ -72,3 +72,18 @@ scrape_configs:
           cluster: 'vm-cluster'
           component: 'vmauth'
 
+  # Custom test jobs (non-VM installation data)
+  - job_name: 'test1'
+    static_configs:
+      - targets: ['test-data-generator:9090']
+        labels:
+          env: 'test'
+          source: 'custom'
+
+  - job_name: 'test2'
+    static_configs:
+      - targets: ['test-data-generator:9090']
+        labels:
+          env: 'test'
+          source: 'custom'
+

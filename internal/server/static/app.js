@@ -1,7 +1,9 @@
 // vmgather Frontend - Enhanced UX/UI
 // State
-let currentStep = 1;
-const totalSteps = 6;
+let currentStepIndex = 0;
+let stepSequence = [];
+let stepNames = [];
+const totalStepsDefault = 6;
 let DEFAULT_STAGING_DIR = '/tmp/vmgather';
 let connectionValid = false;
 let resolvedConnection = null;
@@ -11,6 +13,7 @@ let programmaticUrlUpdate = false;
 let lastValidationAttempts = [];
 let lastValidationFinalEndpoint = '';
 let discoveredComponents = [];
+let discoveredSelectorJobs = [];
 let sampleMetrics = [];
 let exportResult = null;
 let currentExportJobId = null;
@@ -23,6 +26,7 @@ let sampleStatus = 'idle';
 let sampleRequestCount = 0;
 let userEditedStaging = false;
 const selectedCustomLabels = new Set();
+const removedLabels = new Set();
 let exportStagingPath = '';
 let currentJobObfuscationEnabled = false;
 let stagingDirValidationTimer = null;
@@ -33,6 +37,11 @@ let appConfigLoaded = false;
 let currentExportButton = null;
 let cancelRequestInFlight = false;
 let componentsLoadingInFlight = false;
+let currentMode = 'cluster';
+let customQueryType = 'selector';
+let customQueryValidated = false;
+let customQueryValidationMessage = '';
+let obfuscationTouched = false;
 
 async function bootstrapAppConfig() {
     if (appConfigLoaded) {
@@ -68,15 +77,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     initializeDateTimePickers();
     markHelpAutoOpenFlag(false);
 
+    initializeModeToggle();
     initializeUrlValidation();
+    initializeStep3NextTooltip();
     initializeAuthCacheInvalidation();
     updateSelectionSummary();
     updateNextButtons();
     initializeObfuscationOptions();
+    updateSelectionStepCopy();
+    updateWelcomeCopy();
+    updateObfuscationCopy();
+    rebuildStepSequence();
+    showStepByIndex(0, true);
 
     document.addEventListener('change', (event) => {
         const target = event.target;
         if (!target || !target.classList || !target.classList.contains('obf-label-checkbox')) {
+            if (target && target.matches && target.matches('.selector-job-item input[type="checkbox"]')) {
+                updateSelectionSummary();
+                scheduleSampleReload();
+            }
             return;
         }
 
@@ -97,6 +117,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     disableCancelButton();
     wireAdvancedSummaries();
     initializeHelpSection();
+    initializeCustomQueryInputs();
 });
 
 function resetResolvedConnectionCache() {
@@ -264,6 +285,7 @@ function initializeUrlValidation() {
             if (nextBtn) {
                 nextBtn.disabled = true;
             }
+            updateStep3NextTooltip();
         }
     };
 
@@ -274,6 +296,271 @@ function initializeUrlValidation() {
         applyState();
     });
     applyState();
+}
+
+function initializeStep3NextTooltip() {
+    const wrapper = document.getElementById('step3NextWrapper');
+    const btn = document.getElementById('step3Next');
+    if (!wrapper || !btn) {
+        return;
+    }
+    wrapper.addEventListener('mouseenter', () => {
+        if (btn.disabled) {
+            wrapper.classList.add('show-tooltip');
+        }
+    });
+    wrapper.addEventListener('mouseleave', () => {
+        wrapper.classList.remove('show-tooltip');
+    });
+    updateStep3NextTooltip();
+}
+
+function updateStep3NextTooltip() {
+    const wrapper = document.getElementById('step3NextWrapper');
+    const btn = document.getElementById('step3Next');
+    if (!wrapper || !btn) {
+        return;
+    }
+    if (!btn.disabled) {
+        wrapper.classList.remove('show-tooltip');
+    }
+}
+
+function initializeModeToggle() {
+    const toggle = document.getElementById('modeToggleInput');
+    const wrapper = document.getElementById('modeToggleWrapper');
+    if (!toggle || !wrapper) {
+        return;
+    }
+
+    document.body.classList.toggle('mode-custom', currentMode === 'custom');
+    toggle.checked = currentMode === 'custom';
+    toggle.addEventListener('change', () => {
+        if (!canSwitchMode()) {
+            toggle.checked = currentMode === 'custom';
+            return;
+        }
+        const nextMode = toggle.checked ? 'custom' : 'cluster';
+        setMode(nextMode, true);
+    });
+
+    wrapper.addEventListener('mouseenter', () => {
+        if (!canSwitchMode()) {
+            wrapper.classList.add('show-tooltip');
+        }
+    });
+    wrapper.addEventListener('mouseleave', () => {
+        wrapper.classList.remove('show-tooltip');
+    });
+
+    updateModeToggleLock();
+    updateModeLabels();
+}
+
+function canSwitchMode() {
+    return currentStepIndex === 0;
+}
+
+function updateModeToggleLock() {
+    const toggle = document.getElementById('modeToggleInput');
+    const wrapper = document.getElementById('modeToggleWrapper');
+    if (!toggle || !wrapper) {
+        return;
+    }
+    const locked = !canSwitchMode();
+    toggle.disabled = locked;
+    wrapper.classList.toggle('locked', locked);
+    wrapper.classList.toggle('show-tooltip', false);
+}
+
+function setMode(mode, animate = false) {
+    if (mode !== 'cluster' && mode !== 'custom') {
+        return;
+    }
+    if (currentMode === mode) {
+        return;
+    }
+    currentMode = mode;
+    const toggle = document.getElementById('modeToggleInput');
+    if (toggle) {
+        toggle.checked = currentMode === 'custom';
+    }
+    document.body.classList.toggle('mode-custom', currentMode === 'custom');
+    updateModeLabels();
+    updateSelectionStepCopy();
+    updateWelcomeCopy();
+    updateObfuscationCopy();
+    triggerModeFlip(animate);
+    resetModeState();
+    rebuildStepSequence();
+    showStepByIndex(0, true);
+}
+
+function updateSelectionStepCopy() {
+    const step = document.querySelector('.step[data-step="5"]');
+    if (!step) {
+        return;
+    }
+    const title = step.querySelector('.step-title');
+    const info = step.querySelector('.info-box');
+    const loadingText = step.querySelector('#componentsLoading p');
+    if (currentMode === 'custom' && customQueryType === 'selector') {
+        if (title) {
+            title.textContent = 'Select Targets to Export';
+        }
+        if (info) {
+            info.textContent = 'Select jobs discovered from your selector.';
+        }
+        if (loadingText) {
+            loadingText.textContent = 'Discovering jobs...';
+        }
+    } else {
+        if (title) {
+            title.textContent = 'Select Components to Export';
+        }
+        if (info) {
+            info.textContent = 'Select which VictoriaMetrics components you want to export metrics from.';
+        }
+        if (loadingText) {
+            loadingText.textContent = 'Discovering components...';
+        }
+    }
+}
+
+function updateWelcomeCopy() {
+    const purpose = document.getElementById('welcomePurpose');
+    const intro = document.getElementById('welcomeIntro');
+    const steps = document.querySelectorAll('#welcomeSteps [data-welcome-step]');
+
+    if (!purpose || !intro || steps.length === 0) {
+        return;
+    }
+
+    if (currentMode === 'custom') {
+        purpose.innerHTML = '<strong>Purpose:</strong> Export metrics by selector or MetricsQL query for VictoriaMetrics team analysis';
+        intro.textContent = 'This wizard will guide you through exporting metrics from any dataset in VictoriaMetrics. You will:';
+        steps.forEach(step => {
+            const key = step.dataset.welcomeStep;
+            switch (key) {
+                case 'time':
+                    step.textContent = 'Select a time range for your query';
+                    break;
+                case 'connect':
+                    step.textContent = 'Connect to your VictoriaMetrics endpoint';
+                    break;
+                case 'select':
+                    step.textContent = 'Enter a selector or query and optionally choose targets';
+                    break;
+                case 'obfuscate':
+                    step.textContent = 'Adjust obfuscation and remove unwanted labels';
+                    break;
+                case 'download':
+                    step.textContent = 'Download the ready-to-send archive';
+                    break;
+            }
+        });
+    } else {
+        purpose.innerHTML = '<strong>Purpose:</strong> Export VictoriaMetrics internal metrics for VictoriaMetrics team analysis';
+        intro.textContent = 'This wizard will guide you through exporting metrics from your VictoriaMetrics installation. You will:';
+        steps.forEach(step => {
+            const key = step.dataset.welcomeStep;
+            switch (key) {
+                case 'time':
+                    step.textContent = 'Select a time range for export';
+                    break;
+                case 'connect':
+                    step.textContent = 'Connect to your VM instance (vmselect/vmsingle)';
+                    break;
+                case 'select':
+                    step.textContent = 'Choose which components to export';
+                    break;
+                case 'obfuscate':
+                    step.textContent = 'Obfuscate sensitive information (IPs, job names)';
+                    break;
+                case 'download':
+                    step.textContent = 'Download the ready-to-send archive';
+                    break;
+            }
+        });
+    }
+}
+
+function updateObfuscationCopy() {
+    const info = document.getElementById('obfuscationInfoBox');
+    const dropDetails = document.getElementById('dropLabelsDetails');
+    if (info) {
+        info.textContent = currentMode === 'custom'
+            ? 'Customize obfuscation and remove labels before exporting your query results.'
+            : 'Obfuscate sensitive information before sending to VictoriaMetrics team.';
+    }
+    if (dropDetails) {
+        dropDetails.style.display = currentMode === 'custom' ? 'block' : 'none';
+    }
+}
+
+function updateModeLabels() {
+    const clusterLabel = document.getElementById('modeLabelCluster');
+    const customLabel = document.getElementById('modeLabelCustom');
+    if (clusterLabel) {
+        clusterLabel.classList.toggle('active', currentMode === 'cluster');
+    }
+    if (customLabel) {
+        customLabel.classList.toggle('active', currentMode === 'custom');
+    }
+}
+
+function triggerModeFlip(animate) {
+    if (!animate) {
+        return;
+    }
+    const container = document.getElementById('cardFlip');
+    if (!container) {
+        return;
+    }
+    container.classList.remove('flip');
+    void container.offsetWidth;
+    container.classList.add('flip');
+    setTimeout(() => {
+        container.classList.remove('flip');
+    }, 700);
+}
+
+function resetModeState() {
+    connectionValid = false;
+    resolvedConnection = null;
+    lastValidatedInput = '';
+    lastValidatedConfigKey = '';
+    lastValidationAttempts = [];
+    lastValidationFinalEndpoint = '';
+    discoveredComponents = [];
+    discoveredSelectorJobs = [];
+    sampleMetrics = [];
+    sampleStatus = 'idle';
+    sampleHadError = false;
+    customQueryValidated = false;
+    customQueryValidationMessage = '';
+    customQueryType = 'selector';
+    obfuscationTouched = false;
+    selectedCustomLabels.clear();
+    removedLabels.clear();
+    resetResolvedConnectionCache();
+    const queryInput = document.getElementById('customQueryInput');
+    if (queryInput) {
+        queryInput.value = '';
+    }
+    const queryResult = document.getElementById('customQueryValidationResult');
+    if (queryResult) {
+        queryResult.innerHTML = '';
+    }
+    const connectionResult = document.getElementById('connectionResult');
+    if (connectionResult) {
+        connectionResult.innerHTML = '';
+    }
+    clearSelectionUI();
+    renderSelectorJobs([]);
+    updateSelectionSummary();
+    updateCustomQueryDetection();
+    updateCustomQueryValidation();
 }
 
 const PROTOCOL_REGEX = /^[a-zA-Z][a-zA-Z0-9+\-.]*:\/\//;
@@ -357,58 +644,89 @@ function isValidHost(host) {
 
 // Navigation
 function nextStep() {
-    if (currentStep >= totalSteps) return;
+    if (currentStepIndex >= stepSequence.length - 1) return;
 
-    // Validate current step
-    if (!validateStep(currentStep)) return;
-
-    // Move to next step
-    const steps = document.querySelectorAll('.step');
-    steps[currentStep - 1].classList.remove('active');
-    currentStep++;
-    steps[currentStep - 1].classList.add('active');
-    if (currentStep === 3 && shouldAutoOpenHelp()) {
-        const help = document.querySelector('.step[data-step="3"] .help-section');
-        if (help) {
-            help.setAttribute('open', '');
-            const content = help.querySelector('.help-content');
-            if (content) {
-                content.style.display = 'block';
-            }
-        }
-        markHelpAutoOpenFlag(false);
+    const currentStepId = getActiveStepId();
+    if (!validateStep(currentStepId)) {
+        return;
     }
-    updateNextButtons();
 
-    updateProgress();
-
-    // Load data for specific steps
-    if (currentStep === 4) {
-        discoverComponents();
-    } else if (currentStep === 5) {
-        applyRecommendedMetricStep(true);
-        loadSampleMetrics();
-    }
+    showStepByIndex(currentStepIndex + 1);
 }
 
 function prevStep() {
-    if (currentStep <= 1) return;
+    if (currentStepIndex <= 0) return;
+    showStepByIndex(currentStepIndex - 1);
+}
 
-    const steps = document.querySelectorAll('.step');
-    steps[currentStep - 1].classList.remove('active');
-    currentStep--;
-    steps[currentStep - 1].classList.add('active');
+function rebuildStepSequence() {
+    const defaultSequence = [1, 2, 3, 5, 6, 7];
+    const defaultNames = ['Welcome', 'Time Range', 'VM Connection', 'Select Components', 'Obfuscation', 'Complete'];
+
+    if (currentMode === 'custom') {
+        if (customQueryType === 'metricsql') {
+            stepSequence = [1, 2, 3, 4, 6, 7];
+            stepNames = ['Welcome', 'Time Range', 'VM Connection', 'Selector / Query', 'Obfuscation', 'Complete'];
+        } else {
+            stepSequence = [1, 2, 3, 4, 5, 6, 7];
+            stepNames = ['Welcome', 'Time Range', 'VM Connection', 'Selector / Query', 'Select Targets', 'Obfuscation', 'Complete'];
+        }
+    } else {
+        stepSequence = defaultSequence;
+        stepNames = defaultNames;
+    }
+
+    if (!stepSequence.includes(getActiveStepId())) {
+        currentStepIndex = 0;
+    }
 
     updateProgress();
     updateNextButtons();
+    updateModeToggleLock();
+}
+
+function getActiveStepId() {
+    if (stepSequence.length === 0) {
+        return 1;
+    }
+    return stepSequence[currentStepIndex] || stepSequence[0];
+}
+
+function showStepByIndex(index, force = false) {
+    const steps = document.querySelectorAll('.step');
+    steps.forEach(step => step.classList.remove('active'));
+
+    const stepId = stepSequence[index];
+    const nextStepEl = document.querySelector(`.step[data-step="${stepId}"]`);
+    if (!nextStepEl) {
+        return;
+    }
+
+    currentStepIndex = index;
+    nextStepEl.classList.add('active');
+
+    if (stepId === 3 && shouldAutoOpenHelp()) {
+        const help = document.querySelector('.step[data-step="3"] .help-section');
+        if (help) {
+            help.setAttribute('open', '');
+        }
+        markHelpAutoOpenFlag(false);
+    }
+
+    updateProgress();
+    updateNextButtons();
+    updateModeToggleLock();
+    onStepEntered(stepId, force);
 }
 
 function updateProgress() {
-    const progress = ((currentStep - 1) / (totalSteps - 1)) * 100;
+    const total = stepSequence.length || totalStepsDefault;
+    const current = Math.min(currentStepIndex + 1, total);
+    const progress = total > 1 ? ((current - 1) / (total - 1)) * 100 : 0;
     document.getElementById('progress').style.width = progress + '%';
 
-    const stepNames = ['Welcome', 'Time Range', 'VM Connection', 'Select Components', 'Obfuscation', 'Complete'];
-    document.getElementById('stepInfo').textContent = `Step ${currentStep} of ${totalSteps}: ${stepNames[currentStep - 1]}`;
+    const stepName = stepNames[currentStepIndex] || 'Step';
+    document.getElementById('stepInfo').textContent = `Step ${current} of ${total}: ${stepName}`;
 }
 
 function updateNextButtons() {
@@ -429,10 +747,49 @@ function updateNextButtons() {
     });
 }
 
-function validateStep(step) {
-    switch (step) {
-        case 2:
-            // Validate time range
+function onStepEntered(stepId, force = false) {
+    if (stepId === 4 && currentMode === 'custom') {
+        focusCustomQueryInput();
+    }
+    if (stepId === 5) {
+        if (currentMode === 'cluster') {
+            discoverComponents();
+        } else if (currentMode === 'custom' && customQueryType === 'selector') {
+            discoverSelectorJobs();
+        }
+    } else if (stepId === 6) {
+        ensureObfuscationDefaults();
+        applyRecommendedMetricStep(true);
+        loadSampleMetrics();
+    }
+}
+
+function validateComponentSelection() {
+    if (currentMode === 'custom' && customQueryType === 'selector') {
+        let selected = document.querySelectorAll('.selector-job-item input[type="checkbox"]:checked');
+        if (selected.length === 0) {
+            document.querySelectorAll('.selector-job-item input[type="checkbox"]').forEach(cb => {
+                cb.checked = true;
+            });
+            selected = document.querySelectorAll('.selector-job-item input[type="checkbox"]:checked');
+        }
+        return selected.length > 0;
+    }
+
+    let selected = document.querySelectorAll('.component-item input[type="checkbox"]:checked');
+    if (selected.length === 0) {
+        document.querySelectorAll('.component-header input[type="checkbox"]').forEach(cb => {
+            cb.checked = true;
+            handleComponentCheck(cb);
+        });
+        selected = document.querySelectorAll('.component-item input[type="checkbox"]:checked');
+    }
+    return selected.length > 0;
+}
+
+function validateStep(stepId) {
+    switch (stepId) {
+        case 2: {
             const from = document.getElementById('timeFrom').value;
             const to = document.getElementById('timeTo').value;
             if (!from || !to) {
@@ -444,28 +801,31 @@ function validateStep(step) {
                 return false;
             }
             return true;
-
+        }
         case 3:
-            // Validate connection
             if (!connectionValid) {
                 alert('Please test the connection first');
                 return false;
             }
             return true;
-
         case 4:
-            // Validate component selection
-            let selected = document.querySelectorAll('.component-item input[type="checkbox"]:checked');
-            if (selected.length === 0) {
-                // Auto-select all components to avoid blocking the flow
-                document.querySelectorAll('.component-header input[type="checkbox"]').forEach(cb => {
-                    cb.checked = true;
-                    handleComponentCheck(cb);
-                });
-                selected = document.querySelectorAll('.component-item input[type="checkbox"]:checked');
+            if (currentMode !== 'custom') {
+                return true;
             }
-            return selected.length > 0;
-
+            if (!getActiveCustomQuery()) {
+                alert('Please enter a selector or query first');
+                return false;
+            }
+            if (!customQueryValidated) {
+                alert('Please validate the selector or query before proceeding');
+                return false;
+            }
+            return true;
+        case 5:
+            if (currentMode === 'custom' && customQueryType === 'metricsql') {
+                return true;
+            }
+            return validateComponentSelection();
         default:
             return true;
     }
@@ -699,6 +1059,7 @@ async function testConnection() {
 
                 connectionValid = false;
                 nextBtn.disabled = true;
+                updateStep3NextTooltip();
                 return;
             }
 
@@ -737,6 +1098,7 @@ async function testConnection() {
 
             connectionValid = true;
             nextBtn.disabled = false;
+            updateStep3NextTooltip();
             const hint = document.getElementById('vmUrlHint');
             if (hint) {
                 hint.textContent = '[OK] URL looks valid';
@@ -904,18 +1266,197 @@ function getConnectionConfig() {
     return config;
 }
 
+function initializeCustomQueryInputs() {
+    const input = document.getElementById('customQueryInput');
+    const validateBtn = document.getElementById('validateCustomQueryBtn');
+
+    if (input) {
+        input.addEventListener('input', () => {
+            customQueryValidated = false;
+            updateCustomQueryDetection();
+            updateCustomQueryValidation();
+        });
+    }
+    if (validateBtn) {
+        validateBtn.addEventListener('click', () => validateCustomQuery());
+    }
+
+    updateCustomQueryDetection();
+    updateCustomQueryValidation();
+}
+
+function isLikelySelectorQuery(query) {
+    const trimmed = (query || '').trim();
+    if (!trimmed) {
+        return false;
+    }
+    if (trimmed.includes('(') || trimmed.includes(')')) {
+        return false;
+    }
+    const selectorPattern = /^\s*([a-zA-Z_:][a-zA-Z0-9_:]*)?\s*(\{.*\})?\s*$/;
+    return selectorPattern.test(trimmed);
+}
+
+function updateCustomQueryDetection() {
+    const query = getActiveCustomQuery();
+    const badge = document.getElementById('queryTypeBadge');
+    const behavior = document.getElementById('customQueryBehavior');
+
+    if (!query) {
+        if (badge) {
+            badge.textContent = 'Awaiting input';
+        }
+        if (behavior) {
+            behavior.textContent = 'Enter a selector or query to see which path will be used.';
+        }
+        customQueryType = 'selector';
+        rebuildStepSequence();
+        updateSelectionStepCopy();
+        return;
+    }
+
+    const detected = isLikelySelectorQuery(query) ? 'selector' : 'metricsql';
+    customQueryType = detected;
+    if (badge) {
+        badge.textContent = detected === 'selector' ? 'Selector detected' : 'MetricsQL detected';
+    }
+    if (behavior) {
+        behavior.textContent = detected === 'selector'
+            ? 'Selector mode enables per-job target selection.'
+            : 'MetricsQL mode skips target selection and exports the query result.';
+    }
+    rebuildStepSequence();
+    updateSelectionStepCopy();
+}
+
+function getActiveCustomQuery() {
+    const input = document.getElementById('customQueryInput');
+    return (input?.value || '').trim();
+}
+
+function focusCustomQueryInput() {
+    document.getElementById('customQueryInput')?.focus();
+}
+
+async function validateCustomQuery() {
+    const query = getActiveCustomQuery();
+    const resultEl = document.getElementById('customQueryValidationResult');
+
+    if (!query) {
+        if (resultEl) {
+            resultEl.innerHTML = '<div class="error-message">[FAIL] Query is required</div>';
+        }
+        customQueryValidated = false;
+        updateCustomQueryValidation();
+        return;
+    }
+
+    const config = getConnectionConfig();
+    if (!connectionValid) {
+        if (resultEl) {
+            resultEl.innerHTML = '<div class="error-message">[FAIL] Please test the connection first</div>';
+        }
+        customQueryValidated = false;
+        updateCustomQueryValidation();
+        return;
+    }
+
+    if (resultEl) {
+        resultEl.innerHTML = '<div class="loading-banner" style="text-align:center;color:#888;padding:12px;"><div class="loading-spinner" style="display:inline-block;"></div> Validating...</div>';
+    }
+
+    try {
+        const response = await fetch('/api/validate-query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                connection: config,
+                query: query
+            })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            const errMsg = data.error || data.message || 'Validation failed';
+            if (resultEl) {
+                resultEl.innerHTML = `<div class="error-message">[FAIL] ${errMsg}</div>`;
+            }
+            customQueryValidated = false;
+            customQueryValidationMessage = errMsg;
+            updateCustomQueryValidation();
+            return;
+        }
+        customQueryValidated = true;
+        customQueryType = data.query_type === 'selector' ? 'selector' : 'metricsql';
+        customQueryValidationMessage = '';
+        if (resultEl) {
+            const meta = data.result_count != null ? `<div class="input-hint">Matched series: ${data.result_count}</div>` : '';
+            resultEl.innerHTML = `<div class="success-box" style="padding:12px;margin-top:10px;">[OK] Query validated (${customQueryType})${meta}</div>`;
+        }
+        updateCustomQueryDetection();
+        updateCustomQueryValidation();
+        rebuildStepSequence();
+    } catch (err) {
+        if (resultEl) {
+            resultEl.innerHTML = `<div class="error-message">[FAIL] ${err.message}</div>`;
+        }
+        customQueryValidated = false;
+        customQueryValidationMessage = err.message;
+        updateCustomQueryValidation();
+    }
+}
+
+function updateCustomQueryValidation() {
+    const badge = document.getElementById('customQueryStatus');
+    if (!badge) {
+        return;
+    }
+    if (currentMode !== 'custom') {
+        badge.textContent = '';
+        return;
+    }
+    if (customQueryValidated) {
+        badge.textContent = `[OK] Validated (${customQueryType})`;
+        badge.classList.remove('error');
+        badge.classList.add('success');
+    } else {
+        badge.textContent = customQueryValidationMessage ? `[FAIL] ${customQueryValidationMessage}` : '[WAIT] Validation required';
+        badge.classList.remove('success');
+        badge.classList.add('error');
+    }
+}
+
+function clearSelectionUI() {
+    const list = document.getElementById('componentsList');
+    const selectorList = document.getElementById('selectorJobsList');
+    const error = document.getElementById('componentsError');
+    if (list) {
+        list.innerHTML = '';
+    }
+    if (selectorList) {
+        selectorList.innerHTML = '';
+    }
+    if (error) {
+        error.textContent = '';
+        error.classList.add('hidden');
+    }
+}
+
 // Component Discovery
 function setComponentsLoadingState(isLoading) {
     const loading = document.getElementById('componentsLoading');
     const list = document.getElementById('componentsList');
+    const selectorList = document.getElementById('selectorJobsList');
     const error = document.getElementById('componentsError');
-    const nextBtn = document.getElementById('step4Next');
+    const nextBtn = document.getElementById('step5Next');
     componentsLoadingInFlight = isLoading;
     if (loading) {
         loading.style.display = isLoading ? 'block' : 'none';
     }
     if (list) {
-        list.style.display = isLoading ? 'none' : 'block';
+        list.style.display = isLoading ? 'none' : (currentMode === 'cluster' ? 'block' : 'none');
+    }
+    if (selectorList) {
+        selectorList.style.display = isLoading ? 'none' : (currentMode === 'custom' && customQueryType === 'selector' ? 'block' : 'none');
     }
     if (error && isLoading) {
         error.classList.add('hidden');
@@ -934,8 +1475,7 @@ async function discoverComponents() {
 
     try {
         const config = getConnectionConfig();
-        const from = new Date(document.getElementById('timeFrom').value).toISOString();
-        const to = new Date(document.getElementById('timeTo').value).toISOString();
+        const { from, to } = getSafeTimeRangeIso();
 
         // [SEARCH] DEBUG: Log discovery request
         console.group('[INFO] Component Discovery');
@@ -985,6 +1525,48 @@ async function discoverComponents() {
     }
 }
 
+async function discoverSelectorJobs() {
+    const loading = document.getElementById('componentsLoading');
+    const list = document.getElementById('selectorJobsList');
+    const error = document.getElementById('componentsError');
+
+    setComponentsLoadingState(true);
+
+    try {
+        const config = getConnectionConfig();
+        const { from, to } = getSafeTimeRangeIso();
+        const selector = getActiveCustomQuery();
+
+        const response = await fetch('/api/discover-selector', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                connection: config,
+                time_range: { start: from, end: to },
+                selector: selector
+            })
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || 'Selector discovery failed');
+        }
+
+        discoveredSelectorJobs = Array.isArray(data.jobs) ? data.jobs : [];
+        renderSelectorJobs(discoveredSelectorJobs);
+        setComponentsLoadingState(false);
+    } catch (err) {
+        setComponentsLoadingState(false);
+        if (error) {
+            error.textContent = err.message + ' (Check console F12 for details)';
+            error.classList.remove('hidden');
+        }
+        if (list) {
+            list.innerHTML = '';
+        }
+    }
+}
+
 function renderComponents(components) {
     const list = document.getElementById('componentsList');
 
@@ -1023,6 +1605,38 @@ function renderComponents(components) {
     });
 
     list.innerHTML = html;
+    updateSelectionSummary();
+}
+
+function renderSelectorJobs(jobs) {
+    const list = document.getElementById('selectorJobsList');
+    if (!list) {
+        return;
+    }
+    if (!jobs || jobs.length === 0) {
+        list.innerHTML = '<p style="text-align:center;color:#888;">No jobs found for selector</p>';
+        return;
+    }
+
+    list.innerHTML = '';
+    jobs.sort((a, b) => (a.job || '').localeCompare(b.job || '')).forEach(job => {
+        const jobName = job.job || 'unknown';
+        const instances = job.instance_count || 0;
+        const seriesEstimate = typeof job.metrics_count_estimate === 'number' && job.metrics_count_estimate >= 0
+            ? `${job.metrics_count_estimate.toLocaleString()} series`
+            : 'series unknown';
+
+        const item = document.createElement('div');
+        item.className = 'selector-job-item';
+        item.innerHTML = `
+            <label>
+                <input type="checkbox" data-job="${jobName}" checked>
+                <strong>${jobName}</strong>
+                <span class="selector-job-meta">${instances} instance(s) · ${seriesEstimate}</span>
+            </label>
+        `;
+        list.appendChild(item);
+    });
     updateSelectionSummary();
 }
 
@@ -1097,8 +1711,7 @@ function handleJobCheck(checkbox) {
 }
 
 function isObfuscationStepActive() {
-    const step = document.querySelector('.step[data-step="5"]');
-    return step && step.classList.contains('active');
+    return getActiveStepId() === 6;
 }
 
 function scheduleSampleReload() {
@@ -1517,16 +2130,28 @@ async function loadSampleMetrics() {
 
     try {
         const config = getConnectionConfig();
-        const from = new Date(document.getElementById('timeFrom').value).toISOString();
-        const to = new Date(document.getElementById('timeTo').value).toISOString();
-
-        // Get selected components/jobs
-        const selected = getSelectedComponents();
-        if (selected.length === 0) {
-            throw new Error('No components selected. Please go back to Step 4.');
+        const { from, to } = getSafeTimeRangeIso();
+        if (currentMode === 'custom' && !customQueryValidated) {
+            throw new Error('Custom selector/query is not validated yet.');
         }
-        const uniqueComponents = Array.from(new Set(selected.map(s => s.component)));
-        const selectedJobs = selected.map(s => s.job).filter(Boolean);
+
+        let selection = getSelectionPayload();
+        if (currentMode === 'cluster' && (!selection.selected || selection.selected.length === 0)) {
+            autoSelectAllComponents();
+            selection = getSelectionPayload();
+        }
+        if (currentMode === 'custom' && customQueryType === 'selector' && selection.jobs.length === 0) {
+            autoSelectAllSelectorJobs();
+            selection = getSelectionPayload();
+        }
+        if (currentMode === 'cluster' && (!selection.selected || selection.selected.length === 0)) {
+            throw new Error('No components selected. Please go back to Step 5.');
+        }
+        if (currentMode === 'custom' && customQueryType === 'selector' && selection.jobs.length === 0) {
+            throw new Error('No jobs selected. Please go back to Step 5.');
+        }
+        const uniqueComponents = selection.components || [];
+        const selectedJobs = selection.jobs || [];
 
         // [SEARCH] DEBUG: Log sample request
         console.group('[STATS] Sample Metrics Loading');
@@ -1551,6 +2176,9 @@ async function loadSampleMetrics() {
                     time_range: { start: from, end: to },
                     components: uniqueComponents,
                     jobs: selectedJobs,
+                    mode: currentMode,
+                    query_type: currentMode === 'custom' ? customQueryType : '',
+                    query: currentMode === 'custom' ? getActiveCustomQuery() : '',
                     obfuscation: obfuscation  // Add obfuscation to samples
                 },
                 limit: 10
@@ -1595,6 +2223,7 @@ async function loadSampleMetrics() {
 
         renderSamplePreview(sampleMetrics);
         renderAdvancedLabels(sampleMetrics);
+        renderDropLabels(sampleMetrics);
         updateSelectionSummary();
         window.__vm_samples_version = (window.__vm_samples_version || 0) + 1;
         document.querySelectorAll('#advancedLoader,#previewLoader').forEach(el => el.remove());
@@ -1630,6 +2259,7 @@ async function loadSampleMetrics() {
 
         // Show error in UI
         const detailMessage = err.message || lastServerError || 'Unknown error';
+        window.__lastSampleError = detailMessage;
         const advDetails = document.getElementById('advancedLabelsDetails');
         if (advDetails) {
             advDetails.open = true;
@@ -1690,15 +2320,21 @@ function renderSamplePreview(samples) {
 
     limited.forEach(sample => {
         // Handle both 'name' and 'metric_name' fields for backward compatibility
-        const metricName = sample.name || sample.metric_name || 'unknown';
+        const metricNameRaw = sample.name || sample.metric_name || (sample.labels && sample.labels.__name__);
+        const metricName = metricNameRaw || 'unknown';
+        const missingName = !metricNameRaw;
 
         // Ensure labels exist
         const labels = Object.entries(sample.labels || {})
             .map(([k, v]) => `${k}="${v}"`)
             .join(', ');
+        const nameHint = missingName && customQueryType === 'metricsql'
+            ? '<div class="metric-note">Metric name removed by aggregation (__name__ not present).</div>'
+            : '';
 
         html += `
             <div class="sample-metric">
+                ${nameHint}
                 <div class="metric-name">${metricName}</div>
                 <div class="metric-labels">{${labels}}</div>
             </div>
@@ -1765,6 +2401,68 @@ function renderAdvancedLabels(samples) {
     });
 }
 
+function renderDropLabels(samples) {
+    const container = document.getElementById('dropLabels');
+    if (!container) {
+        return;
+    }
+    if (currentMode !== 'custom') {
+        container.innerHTML = '<div class="label-item" style="text-align:center;color:#888;padding:20px;">Label removal is available in custom mode.</div>';
+        return;
+    }
+
+    const labelSet = new Set();
+    const labelSamples = {};
+    samples.forEach(sample => {
+        Object.keys(sample.labels || {}).forEach(label => {
+            labelSet.add(label);
+            if (!labelSamples[label]) {
+                labelSamples[label] = sample.labels[label];
+            }
+        });
+    });
+
+    const labels = Array.from(labelSet)
+        .filter(label => !label.startsWith('__'))
+        .sort();
+
+    if (labels.length === 0) {
+        container.innerHTML = '<div class="label-item" style="text-align:center;color:#888;padding:20px;">No removable labels found</div>';
+        return;
+    }
+
+    let html = '';
+    labels.forEach(label => {
+        const sample = labelSamples[label] || 'example_value';
+        const checkedAttr = removedLabels.has(label) ? 'checked' : '';
+        html += `
+            <div class="label-item">
+                <label>
+                    <input type="checkbox" class="drop-label-checkbox" data-label="${label}" ${checkedAttr}>
+                    <strong>${label}</strong>
+                    <span class="label-sample">(e.g., ${sample})</span>
+                </label>
+            </div>
+        `;
+    });
+    container.innerHTML = html;
+
+    container.querySelectorAll('.drop-label-checkbox').forEach(cb => {
+        cb.addEventListener('change', () => {
+            const label = cb.dataset.label;
+            if (!label) {
+                return;
+            }
+            if (cb.checked) {
+                removedLabels.add(label);
+            } else {
+                removedLabels.delete(label);
+            }
+            scheduleSampleReload();
+        });
+    });
+}
+
 function moveAdvancedSections(enabled) {
     const slot = document.getElementById('obfuscationAdvancedSlot');
     const mount = document.getElementById('obfuscationAdvancedMount');
@@ -1781,8 +2479,11 @@ function moveAdvancedSections(enabled) {
     });
 }
 
-function toggleObfuscation() {
+function toggleObfuscation(markTouched = true) {
     const enabled = document.getElementById('enableObfuscation').checked;
+    if (markTouched) {
+        obfuscationTouched = true;
+    }
     const options = document.getElementById('obfuscationOptions');
     const instanceCheckbox = document.querySelector('.obf-label-checkbox[data-label="instance"]');
     const jobCheckbox = document.querySelector('.obf-label-checkbox[data-label="job"]');
@@ -1832,47 +2533,38 @@ function initializeObfuscationOptions() {
     if (!enabled) {
         return;
     }
-    toggleObfuscation();
+    toggleObfuscation(false);
+}
+
+function ensureObfuscationDefaults() {
+    const checkbox = document.getElementById('enableObfuscation');
+    if (!checkbox || obfuscationTouched) {
+        return;
+    }
+    if (currentMode === 'custom') {
+        checkbox.checked = false;
+    }
+    toggleObfuscation(false);
 }
 
 function wireAdvancedSummaries() {
-    const advSummary = document.getElementById('advancedLabelsSummary');
-    const previewSummary = document.getElementById('previewSummary');
-    if (advSummary) {
-        advSummary.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const details = document.getElementById('advancedLabelsDetails');
-            if (details) {
-                details.open = true;
-            }
-            if (sampleStatus === 'error') {
-                return;
-            }
-            if (sampleRequestInFlight) {
-                return;
-            }
-            sampleHadError = false;
-            loadSampleMetrics();
-        });
+    const advDetails = document.getElementById('advancedLabelsDetails');
+    const previewDetails = document.getElementById('previewDetails');
+    const handleToggle = (details) => {
+        if (!details || !details.open) {
+            return;
+        }
+        if (sampleStatus === 'error' || sampleRequestInFlight) {
+            return;
+        }
+        sampleHadError = false;
+        loadSampleMetrics();
+    };
+    if (advDetails) {
+        advDetails.addEventListener('toggle', () => handleToggle(advDetails));
     }
-    if (previewSummary) {
-        previewSummary.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const details = document.getElementById('previewDetails');
-            if (details) {
-                details.open = true;
-            }
-            if (sampleStatus === 'error') {
-                return;
-            }
-            if (sampleRequestInFlight) {
-                return;
-            }
-            sampleHadError = false;
-            loadSampleMetrics();
-        });
+    if (previewDetails) {
+        previewDetails.addEventListener('toggle', () => handleToggle(previewDetails));
     }
 }
 
@@ -1881,18 +2573,12 @@ function initializeHelpSection() {
     if (!helpDetails) {
         return;
     }
-    const helpSummary = helpDetails.querySelector('summary');
-    if (helpSummary) {
-        helpSummary.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            helpDetails.open = true;
-            const content = helpDetails.querySelector('.help-content');
-            if (content) {
-                content.style.display = 'block';
-            }
-        });
-    }
+    helpDetails.addEventListener('toggle', () => {
+        if (!helpDetails.open) {
+            return;
+        }
+        markHelpAutoOpenFlag(false);
+    });
 }
 
 function getSelectedComponents() {
@@ -1923,9 +2609,119 @@ function getSelectedComponents() {
     return selected;
 }
 
+function getSelectedJobsFromSelector() {
+    const selected = [];
+    document.querySelectorAll('.selector-job-item input[type="checkbox"]:checked').forEach(cb => {
+        const job = cb.dataset.job;
+        if (job) {
+            selected.push(job);
+        }
+    });
+    return selected;
+}
+
+function getSelectionPayload() {
+    if (currentMode === 'custom' && customQueryType === 'selector') {
+        return {
+            components: [],
+            jobs: getSelectedJobsFromSelector(),
+        };
+    }
+
+    const selected = getSelectedComponents();
+    const uniqueComponents = Array.from(new Set(selected.map(s => s.component)));
+    const selectedJobs = selected.map(s => s.job).filter(Boolean);
+    return {
+        components: uniqueComponents,
+        jobs: selectedJobs,
+        selected,
+    };
+}
+
+function getSafeTimeRangeIso() {
+    const fromInput = document.getElementById('timeFrom')?.value || '';
+    const toInput = document.getElementById('timeTo')?.value || '';
+    let fromDate = new Date(fromInput);
+    let toDate = new Date(toInput);
+    if (!fromInput || !toInput || Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+        const now = new Date();
+        toDate = now;
+        fromDate = new Date(now.getTime() - 60 * 60 * 1000);
+        console.warn('[WARN] Invalid time range, defaulting to last 1h');
+    }
+    return { from: fromDate.toISOString(), to: toDate.toISOString() };
+}
+
+function autoSelectAllComponents() {
+    document.querySelectorAll('.component-header input[type="checkbox"]').forEach(cb => {
+        cb.checked = true;
+        handleComponentCheck(cb);
+    });
+}
+
+function autoSelectAllSelectorJobs() {
+    document.querySelectorAll('.selector-job-item input[type="checkbox"]').forEach(cb => {
+        cb.checked = true;
+    });
+    updateSelectionSummary();
+}
+
 function updateSelectionSummary() {
     const summary = document.getElementById('selectionSummary');
     if (!summary) {
+        return;
+    }
+
+    if (currentMode === 'custom' && customQueryType === 'metricsql') {
+        summary.innerHTML = `
+            <h4>[BUILD] Estimated Export Volume</h4>
+            <p class="summary-placeholder">MetricsQL mode exports series directly from your query.</p>
+        `;
+        return;
+    }
+
+    if (currentMode === 'custom' && customQueryType === 'selector') {
+        const selectedJobs = getSelectedJobsFromSelector();
+        if (!selectedJobs || selectedJobs.length === 0) {
+            summary.innerHTML = `
+                <h4>[BUILD] Estimated Export Volume</h4>
+                <p class="summary-placeholder">Select jobs above to see series estimates.</p>
+            `;
+            return;
+        }
+
+        const stats = computeSelectorSelectionStats(selectedJobs);
+        if (stats.length === 0) {
+            summary.innerHTML = `
+                <h4>[BUILD] Estimated Export Volume</h4>
+                <p class="summary-placeholder">Metrics data is not available for the selected jobs.</p>
+            `;
+            return;
+        }
+
+        const totalKnown = stats.reduce((sum, stat) => stat.series != null ? sum + stat.series : sum, 0);
+        const hasUnknown = stats.some(stat => stat.series == null);
+
+        let html = '<h4>[BUILD] Estimated Export Volume</h4><div class="summary-grid">';
+        stats.forEach(stat => {
+            const seriesLabel = stat.series != null
+                ? `${stat.series.toLocaleString()} series`
+                : 'Series count unavailable';
+            html += `
+                <div class="summary-card">
+                    <div><strong>${stat.job}</strong></div>
+                    <div class="summary-meta">${stat.instances} instance(s)</div>
+                    <div class="summary-meta">${seriesLabel}</div>
+                </div>
+            `;
+        });
+        html += '</div>';
+        if (hasUnknown) {
+            html += `<div class="summary-total">Known total: ${totalKnown.toLocaleString()} series (additional data pending)</div>`;
+        } else {
+            html += `<div class="summary-total">Total: ${totalKnown.toLocaleString()} series</div>`;
+        }
+        summary.innerHTML = html;
         return;
     }
 
@@ -2052,8 +2848,28 @@ function computeSelectionStats(selected) {
     });
 }
 
+function computeSelectorSelectionStats(selectedJobs) {
+    const jobMap = new Map();
+    discoveredSelectorJobs.forEach(job => {
+        jobMap.set(job.job, job);
+    });
+
+    return selectedJobs.map(jobName => {
+        const job = jobMap.get(jobName) || {};
+        const series = typeof job.metrics_count_estimate === 'number' && job.metrics_count_estimate >= 0
+            ? job.metrics_count_estimate
+            : null;
+        return {
+            job: jobName,
+            instances: job.instance_count || 0,
+            series,
+        };
+    });
+}
+
 function getObfuscationConfig() {
     const enabled = document.getElementById('enableObfuscation').checked;
+    const dropLabels = Array.from(removedLabels);
 
     if (!enabled) {
         return {
@@ -2061,7 +2877,8 @@ function getObfuscationConfig() {
             obfuscate_instance: false,
             obfuscate_job: false,
             preserve_structure: true,
-            custom_labels: []
+            custom_labels: [],
+            drop_labels: dropLabels
         };
     }
 
@@ -2086,7 +2903,8 @@ function getObfuscationConfig() {
         obfuscate_instance: selectedLabels.has('instance'),
         obfuscate_job: selectedLabels.has('job'),
         preserve_structure: true,
-        custom_labels: customLabels  // pod, namespace, etc.
+        custom_labels: customLabels,  // pod, namespace, etc.
+        drop_labels: dropLabels
     };
 }
 
@@ -2129,22 +2947,33 @@ async function exportMetrics(buttonElement) {
     btn.innerHTML = '<span class="btn-spinner"></span> Collecting metrics...';
 
     try {
+        window.__lastExportError = null;
         const config = getConnectionConfig();
-        const from = new Date(document.getElementById('timeFrom').value).toISOString();
-        const to = new Date(document.getElementById('timeTo').value).toISOString();
-        const selected = getSelectedComponents();
-        if (selected.length === 0) {
-            throw new Error('No components selected. Please go back to Step 4.');
+        const { from, to } = getSafeTimeRangeIso();
+        let selection = getSelectionPayload();
+        if (currentMode === 'cluster' && (!selection.selected || selection.selected.length === 0)) {
+            autoSelectAllComponents();
+            selection = getSelectionPayload();
         }
-        const uniqueComponents = Array.from(new Set(selected.map(s => s.component)));
-        const selectedJobs = selected.map(s => s.job).filter(Boolean);
+        if (currentMode === 'custom' && customQueryType === 'selector' && selection.jobs.length === 0) {
+            autoSelectAllSelectorJobs();
+            selection = getSelectionPayload();
+        }
+        if (currentMode === 'cluster' && (!selection.selected || selection.selected.length === 0)) {
+            throw new Error('No components selected. Please go back to Step 5.');
+        }
+        if (currentMode === 'custom' && customQueryType === 'selector' && selection.jobs.length === 0) {
+            throw new Error('No jobs selected. Please go back to Step 5.');
+        }
+        const uniqueComponents = selection.components || [];
+        const selectedJobs = selection.jobs || [];
         const obfuscation = getObfuscationConfig();
 
         // [SEARCH] DEBUG: Log export request
         console.group('[SEND] Metrics Export');
         console.log('[INFO] Export Config:', {
             time_range: { from, to },
-            components: selected.length,
+            components: uniqueComponents.length,
             obfuscation: {
                 enabled: obfuscation.enabled,
                 obfuscate_instance: obfuscation.obfuscate_instance,
@@ -2166,19 +2995,25 @@ async function exportMetrics(buttonElement) {
             custom_interval_secs: batchWindowSeconds,
         };
 
+        const exportPayload = {
+            connection: config,
+            time_range: { start: from, end: to },
+            components: uniqueComponents,
+            jobs: selectedJobs,
+            mode: currentMode,
+            query_type: currentMode === 'custom' ? customQueryType : '',
+            query: currentMode === 'custom' ? getActiveCustomQuery() : '',
+            obfuscation: obfuscation,
+            staging_dir: stagingDirValue,
+            metric_step_seconds: metricStepSeconds,
+            batching: batchingConfig
+        };
+        window.__lastExportStartPayload = exportPayload;
+
         const response = await fetch('/api/export/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                connection: config,
-                time_range: { start: from, end: to },
-                components: uniqueComponents,
-                jobs: selectedJobs,
-                obfuscation: obfuscation,
-                staging_dir: stagingDirValue,
-                metric_step_seconds: metricStepSeconds,
-                batching: batchingConfig
-            })
+            body: JSON.stringify(exportPayload)
         });
 
         console.log('[QUERY] Response Status:', response.status, response.statusText);
@@ -2198,6 +3033,7 @@ async function exportMetrics(buttonElement) {
         console.error('[FAIL] Export failed:', err);
         console.groupEnd();
 
+        window.__lastExportError = err?.message || String(err);
         alert('Export failed: ' + err.message + '\n\nCheck browser console (F12) for details');
         btn.disabled = false;
         btn.textContent = 'Prepare Support Bundle';
@@ -2396,11 +3232,17 @@ function renderExportSpoilers(samples) {
 
     limited.forEach((sample, idx) => {
         // Handle both 'name' and 'metric_name' fields for backward compatibility
-        const metricName = sample.name || sample.metric_name || 'unknown';
+        const metricNameRaw = sample.name || sample.metric_name || (sample.labels && sample.labels.__name__);
+        const metricName = metricNameRaw || 'unknown';
+        const missingName = !metricNameRaw;
 
         const labels = Object.entries(sample.labels || {})
             .map(([k, v]) => `${k}="${v}"`)
             .join(', ');
+
+        const nameHint = missingName && customQueryType === 'metricsql'
+            ? '<div class="metric-note">Metric name removed by aggregation (__name__ not present).</div>'
+            : '';
 
         html += `
             <div class="spoiler">
@@ -2411,6 +3253,7 @@ function renderExportSpoilers(samples) {
                 <div class="spoiler-content">
                     <div class="spoiler-body">
                         <div class="sample-metric">
+                            ${nameHint}
                             <div class="metric-name">${metricName}</div>
                             <div class="metric-labels">{${labels}}</div>
                             ${sample.value ? `<div style="margin-top: 10px; color: #2962FF;">Value: ${sample.value}</div>` : ''}

@@ -114,6 +114,7 @@ test.describe('Sample Loading - Error Handling', () => {
     await page.locator('.step.active button:has-text("Next")').click();
 
     await page.waitForSelector('.step.active h2:has-text("Obfuscation")');
+    await page.evaluate(() => window.loadSampleMetrics && window.loadSampleMetrics());
     await page.locator('summary:has-text("Advanced: Obfuscate other labels")').click();
 
     // Verify loading spinner appears
@@ -142,6 +143,7 @@ test.describe('Sample Loading - Error Handling', () => {
     await page.locator('.step.active button:has-text("Next")').click();
 
     await page.waitForSelector('.step.active h2:has-text("Obfuscation")');
+    await page.evaluate(() => window.loadSampleMetrics && window.loadSampleMetrics());
     await page.locator('summary:has-text("Advanced: Obfuscate other labels")').click();
 
     // Wait for error message
@@ -158,7 +160,7 @@ test.describe('Sample Loading - Error Handling', () => {
     // Mock sample endpoint to fail first time, succeed second time
     await page.route('/api/sample', async route => {
       callCount++;
-      if (callCount === 1) {
+    if (callCount <= 2) {
         await route.fulfill({
           status: 500,
           contentType: 'application/json',

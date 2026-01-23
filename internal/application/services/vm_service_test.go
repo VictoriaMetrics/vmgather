@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -242,6 +243,153 @@ func TestVMService_BuildSampleQueries(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestVMService_IsSelectorQuery(t *testing.T) {
+	tests := []struct {
+		name     string
+		query    string
+		expected bool
+	}{
+		{
+			name:     "metric selector",
+			query:    `{job="vmselect"}`,
+			expected: true,
+		},
+		{
+			name:     "metric with labels",
+			query:    `vm_app_version{job="vmstorage"}`,
+			expected: true,
+		},
+		{
+			name:     "plain metric name",
+			query:    "up",
+			expected: true,
+		},
+		{
+			name:     "metricsql function",
+			query:    "rate(up[5m])",
+			expected: false,
+		},
+		{
+			name:     "empty",
+			query:    "",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if IsSelectorQuery(tt.query) != tt.expected {
+				t.Fatalf("IsSelectorQuery(%q) expected %v", tt.query, tt.expected)
+			}
+		})
+	}
+}
+
+func TestVMService_DiscoverSelectorJobs(t *testing.T) {
+	var receivedQueries []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/query" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		query := r.URL.Query().Get("query")
+		receivedQueries = append(receivedQueries, query)
+
+		payload := map[string]interface{}{
+			"status": "success",
+			"data": map[string]interface{}{
+				"resultType": "vector",
+				"result":     []interface{}{},
+			},
+		}
+
+		switch {
+		case strings.HasPrefix(query, "group by (job, instance)"):
+			payload["data"].(map[string]interface{})["result"] = []map[string]interface{}{
+				{"metric": map[string]string{"job": "job-a", "instance": "inst-1"}},
+				{"metric": map[string]string{"job": "job-a", "instance": "inst-2"}},
+				{"metric": map[string]string{"job": "job-b", "instance": "inst-9"}},
+			}
+		case strings.HasPrefix(query, "count by (job)"):
+			payload["data"].(map[string]interface{})["result"] = []map[string]interface{}{
+				{"metric": map[string]string{"job": "job-a"}, "value": []interface{}{float64(1), "12"}},
+				{"metric": map[string]string{"job": "job-b"}, "value": []interface{}{float64(1), "5"}},
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(payload)
+	}))
+	defer srv.Close()
+
+	service := &vmServiceImpl{
+		clientFactory: func(conn domain.VMConnection) *vm.Client {
+			return vm.NewClient(domain.VMConnection{URL: srv.URL})
+		},
+	}
+
+	tr := domain.TimeRange{Start: time.Now().Add(-time.Hour), End: time.Now()}
+	jobs, err := service.DiscoverSelectorJobs(context.Background(), domain.VMConnection{URL: srv.URL}, `{job!=""}`, tr)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("expected 2 jobs, got %d", len(jobs))
+	}
+	if jobs[0].Job != "job-a" || jobs[0].InstanceCount != 2 {
+		t.Fatalf("unexpected job-a data: %+v", jobs[0])
+	}
+	if jobs[1].Job != "job-b" || jobs[1].InstanceCount != 1 {
+		t.Fatalf("unexpected job-b data: %+v", jobs[1])
+	}
+	if len(receivedQueries) < 2 {
+		t.Fatalf("expected multiple queries, got %d", len(receivedQueries))
+	}
+}
+
+func TestVMService_DiscoverSelectorJobs_MissingJobLabel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/query" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		query := r.URL.Query().Get("query")
+		payload := map[string]interface{}{
+			"status": "success",
+			"data": map[string]interface{}{
+				"resultType": "vector",
+				"result":     []interface{}{},
+			},
+		}
+		switch {
+		case strings.HasPrefix(query, "group by (job, instance)"):
+			payload["data"].(map[string]interface{})["result"] = []map[string]interface{}{
+				{"metric": map[string]string{"instance": "inst-1"}},
+				{"metric": map[string]string{"instance": "inst-2"}},
+			}
+		case strings.HasPrefix(query, "count by (job)"):
+			payload["data"].(map[string]interface{})["result"] = []map[string]interface{}{}
+		case strings.HasPrefix(query, "count("):
+			payload["data"].(map[string]interface{})["result"] = []map[string]interface{}{
+				{"metric": map[string]string{}, "value": []interface{}{float64(1), "2"}},
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(payload)
+	}))
+	defer srv.Close()
+
+	service := &vmServiceImpl{
+		clientFactory: func(conn domain.VMConnection) *vm.Client {
+			return vm.NewClient(domain.VMConnection{URL: srv.URL})
+		},
+	}
+
+	tr := domain.TimeRange{Start: time.Now().Add(-time.Hour), End: time.Now()}
+	_, err := service.DiscoverSelectorJobs(context.Background(), domain.VMConnection{URL: srv.URL}, `{__name__=~".+"}`, tr)
+	if err == nil || !strings.Contains(err.Error(), "without job labels") {
+		t.Fatalf("expected missing job labels error, got %v", err)
 	}
 }
 

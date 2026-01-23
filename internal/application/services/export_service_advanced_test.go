@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"strings"
@@ -112,6 +113,37 @@ this is not json at all
 			t.Errorf("expected 0 metrics, got %d", count)
 		}
 	})
+}
+
+func TestExportService_ProcessMetrics_DropLabels(t *testing.T) {
+	service := &exportServiceImpl{}
+
+	metricsData := `{"metric":{"__name__":"vm_app_version","job":"test1","env":"dev","instance":"host:1234"},"values":[1],"timestamps":[1]}` + "\n"
+	reader := strings.NewReader(metricsData)
+	obfConfig := domain.ObfuscationConfig{
+		Enabled:    false,
+		DropLabels: []string{"env", "job"},
+	}
+
+	processed, count, _, err := service.processMetrics(reader, obfConfig)
+	if err != nil {
+		t.Fatalf("processMetrics failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 metric, got %d", count)
+	}
+
+	out, err := io.ReadAll(processed)
+	if err != nil {
+		t.Fatalf("read processed metrics: %v", err)
+	}
+	output := string(out)
+	if strings.Contains(output, "\"env\"") || strings.Contains(output, "\"job\"") {
+		t.Fatalf("dropped labels still present in output: %s", output)
+	}
+	if !strings.Contains(output, "\"instance\"") {
+		t.Fatalf("expected instance label to remain in output")
+	}
 }
 
 // TestExportService_ProcessMetrics_LargeStream tests large stream processing
