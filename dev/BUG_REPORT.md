@@ -43,7 +43,7 @@ Status legend: TODO -> IN PROGRESS -> DONE.
 6. [P0][DONE] Release version injection is broken (ldflags cannot override `const`)
 7. [P0][DONE] HTTP client timeout (30s) is incompatible with streaming exports and batch timeouts
 8. [P0][DONE] Resumed export progress double-counts batches (progress/ETA can be wildly wrong)
-9. [P1][TODO] `CheckExportAPI` leaks response bodies (connection leak on success path)
+9. [P1][DONE] `CheckExportAPI` leaks response bodies (connection leak on success path)
 10. [P1][TODO] Regex injection / query correctness risk when building `{job=~"..."}`
 11. [P1][TODO] Canceled jobs are never removed by retention cleanup
 12. [P1][TODO] Hard-coded 15 minute job timeout can kill legitimate exports
@@ -207,6 +207,8 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 
 ### P1: `CheckExportAPI` leaks response bodies (connection leak on success path)
 
+**Status**: DONE
+
 **Impact**
 - Successful export availability checks leak HTTP connections until GC, and can exhaust idle connections over time.
 
@@ -217,6 +219,15 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 **Suggested fix**
 - If `client.Export(...)` returns a reader with `err == nil`, close it immediately (optionally read/discard a small amount if needed to validate format).
 - Consider changing `Client.Export` to optionally “probe” the endpoint with a HEAD/GET-equivalent if VM supports it, to avoid opening a streaming body for a capability check.
+
+**Implemented**
+- `internal/application/services/vm_service.go`: `CheckExportAPI` now closes the export response body on the success path.
+- `internal/application/services/vm_service_test.go`: added `TestCheckExportAPI_ClosesResponseBodyOnSuccess` regression.
+
+**Verification**
+- `make test-full`: PASS
+- `make test-race`: PASS
+- `cd tests/e2e && npx playwright test --workers=1`: PASS (99 passed / 3 skipped)
 
 ---
 

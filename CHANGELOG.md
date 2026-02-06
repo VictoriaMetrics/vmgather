@@ -18,6 +18,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Data races fixed in async job workflows (export job manager and importer upload response snapshot); `make test-race` is now clean.
 - Release builds can now inject the correct runtime version via `-ldflags "-X main.version=..."` (both `vmgather` and `vmimporter`).
 - Streaming exports no longer fail due to a hard-coded 30s HTTP client timeout; request-scoped context timeouts control export duration.
+- Export API availability checks no longer leak HTTP response bodies; connections are closed immediately on success.
 - Resumed exports no longer double-count completed batches; progress and ETA remain correct after resume.
 - Obfuscation advanced sections (labels/preview) no longer auto-open by default; sample-loading errors and retries render consistently.
 

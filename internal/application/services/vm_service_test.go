@@ -552,3 +552,46 @@ func TestVMService_DiscoverComponents_IgnoresInvalidMetrics(t *testing.T) {
 		t.Errorf("expected 1 component after filtering, got %d", len(componentMap))
 	}
 }
+
+func TestCheckExportAPI_ClosesResponseBodyOnSuccess(t *testing.T) {
+	bodyClosed := make(chan struct{}, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/export" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+
+		select {
+		case <-r.Context().Done():
+			select {
+			case bodyClosed <- struct{}{}:
+			default:
+			}
+		case <-time.After(2 * time.Second):
+			// If the client doesn't close the response body, it will keep the request open.
+		}
+	}))
+	defer server.Close()
+
+	service := NewVMService().(*vmServiceImpl)
+	conn := domain.VMConnection{
+		URL:  server.URL,
+		Auth: domain.AuthConfig{Type: domain.AuthTypeNone},
+	}
+
+	if ok := service.CheckExportAPI(context.Background(), conn); !ok {
+		t.Fatal("expected CheckExportAPI=true on 200 OK response")
+	}
+
+	select {
+	case <-bodyClosed:
+		return
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected CheckExportAPI to close the export response body on success")
+	}
+}

@@ -496,7 +496,7 @@ func (s *vmServiceImpl) CheckExportAPI(ctx context.Context, conn domain.VMConnec
 	// Try to export a single metric (up is commonly available)
 	selector := "up"
 
-	_, err := client.Export(ctx, selector, start, end)
+	reader, err := client.Export(ctx, selector, start, end)
 
 	if err != nil {
 		errMsg := strings.ToLower(err.Error())
@@ -516,6 +516,8 @@ func (s *vmServiceImpl) CheckExportAPI(ctx context.Context, conn domain.VMConnec
 		// We'll consider this as "export available but failed"
 		return true
 	}
+
+	_ = reader.Close()
 
 	// Export succeeded - API is available
 	return true
