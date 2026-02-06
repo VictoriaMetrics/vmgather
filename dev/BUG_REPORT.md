@@ -69,6 +69,8 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
    - Result: `make test-race` now reliably fails on real races (used to expose `ExportJobManager` and importer job snapshot races, now fixed).
 6. Avoid stale `webServer` reuse in Playwright by default
    - Implemented: `tests/e2e/playwright.config.js` now reuses existing server only when `PW_REUSE_EXISTING_SERVER=1` is explicitly set.
+7. Ensure Playwright `webServer` stays alive for full E2E run
+   - Implemented: increased `webServer.timeout` to 10 minutes to prevent mid-run server termination and `net::ERR_CONNECTION_REFUSED` failures.
 
 ## Findings (prioritized)
 

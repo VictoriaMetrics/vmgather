@@ -21,6 +21,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Export API availability checks no longer leak HTTP response bodies; connections are closed immediately on success.
 - Resumed exports no longer double-count completed batches; progress and ETA remain correct after resume.
 - Obfuscation advanced sections (labels/preview) no longer auto-open by default; sample-loading errors and retries render consistently.
+- Playwright E2E no longer intermittently fails with `net::ERR_CONNECTION_REFUSED` on longer runs; the `webServer` timeout is increased to keep the server alive.
 
 ## [v1.7.0] - 2026-01-23
 

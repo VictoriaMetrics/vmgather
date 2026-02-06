@@ -83,6 +83,9 @@ module.exports = defineConfig({
     // Default to a fresh server per run to avoid stale binaries / state affecting E2E determinism.
     // Opt-in reuse via `PW_REUSE_EXISTING_SERVER=1`.
     reuseExistingServer: process.env.PW_REUSE_EXISTING_SERVER === '1',
-    timeout: 120 * 1000,
+    // Observed: with a 120s timeout, Playwright may terminate the webServer mid-run, leading to
+    // intermittent `net::ERR_CONNECTION_REFUSED` failures for later specs. Set this to comfortably
+    // exceed the longest expected local E2E run time.
+    timeout: 10 * 60 * 1000,
   },
 });
