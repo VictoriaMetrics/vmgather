@@ -20,6 +20,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Streaming exports no longer fail due to a hard-coded 30s HTTP client timeout; request-scoped context timeouts control export duration.
 - Export API availability checks no longer leak HTTP response bodies; connections are closed immediately on success.
 - Resumed exports no longer double-count completed batches; progress and ETA remain correct after resume.
+- Job filter selectors now escape regex metacharacters (e.g. `.` or `|`) to avoid query corruption and regex injection risks.
 - Obfuscation advanced sections (labels/preview) no longer auto-open by default; sample-loading errors and retries render consistently.
 - Playwright E2E no longer intermittently fails with `net::ERR_CONNECTION_REFUSED` on longer runs; the `webServer` timeout is increased to keep the server alive.
 

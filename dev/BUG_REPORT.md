@@ -44,7 +44,7 @@ Status legend: TODO -> IN PROGRESS -> DONE.
 7. [P0][DONE] HTTP client timeout (30s) is incompatible with streaming exports and batch timeouts
 8. [P0][DONE] Resumed export progress double-counts batches (progress/ETA can be wildly wrong)
 9. [P1][DONE] `CheckExportAPI` leaks response bodies (connection leak on success path)
-10. [P1][TODO] Regex injection / query correctness risk when building `{job=~"..."}`
+10. [P1][DONE] Regex injection / query correctness risk when building `{job=~"..."}`
 11. [P1][TODO] Canceled jobs are never removed by retention cleanup
 12. [P1][TODO] Hard-coded 15 minute job timeout can kill legitimate exports
 13. [P2][TODO] `/api/fs/*` endpoints enlarge security surface (especially if bound to non-localhost)

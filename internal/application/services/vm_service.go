@@ -214,9 +214,8 @@ func (s *vmServiceImpl) estimateComponentMetrics(ctx context.Context, client *vm
 		return 0, nil
 	}
 
-	// Build job selector: job=~"job1|job2|job3"
-	jobRegex := strings.Join(jobs, "|")
-	selector := fmt.Sprintf(`{job=~"%s"}`, jobRegex)
+	// Build job selector: job=~"job1|job2|job3" (escaped to avoid regex injection).
+	selector := buildJobFilterSelector(jobs)
 
 	// Count unique series
 	query := fmt.Sprintf("count(%s)", selector)
@@ -247,8 +246,8 @@ func (s *vmServiceImpl) countInstances(ctx context.Context, client *vm.Client, j
 		return 0, nil
 	}
 
-	jobRegex := strings.Join(jobs, "|")
-	query := fmt.Sprintf(`count(count by (instance) ({job=~"%s"}))`, jobRegex)
+	selector := buildJobFilterSelector(jobs)
+	query := fmt.Sprintf("count(count by (instance) (%s))", selector)
 
 	result, err := client.Query(ctx, query, tr.End)
 	if err != nil {
@@ -278,8 +277,8 @@ func (s *vmServiceImpl) estimateJobMetrics(ctx context.Context, client *vm.Clien
 		return jobCounts
 	}
 
-	jobRegex := strings.Join(jobs, "|")
-	query := fmt.Sprintf(`count by (job) ({job=~"%s"})`, jobRegex)
+	selector := buildJobFilterSelector(jobs)
+	query := fmt.Sprintf("count by (job) (%s)", selector)
 
 	result, err := client.Query(ctx, query, tr.End)
 	if err != nil || len(result.Data.Result) == 0 {

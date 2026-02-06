@@ -595,3 +595,56 @@ func TestCheckExportAPI_ClosesResponseBodyOnSuccess(t *testing.T) {
 		t.Fatal("expected CheckExportAPI to close the export response body on success")
 	}
 }
+
+func TestVMService_EstimateQueries_EscapeJobRegex(t *testing.T) {
+	queries := make(chan string, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/query" {
+			http.NotFound(w, r)
+			return
+		}
+		queries <- r.URL.Query().Get("query")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
+	}))
+	defer server.Close()
+
+	client := vm.NewClient(domain.VMConnection{
+		URL:  server.URL,
+		Auth: domain.AuthConfig{Type: domain.AuthTypeNone},
+	})
+	service := NewVMService().(*vmServiceImpl)
+	tr := domain.TimeRange{Start: time.Now().Add(-time.Hour), End: time.Now()}
+	jobs := []string{"job.1", "job|2"}
+
+	if _, err := service.estimateComponentMetrics(context.Background(), client, jobs, tr); err != nil {
+		t.Fatalf("estimateComponentMetrics failed: %v", err)
+	}
+	if _, err := service.countInstances(context.Background(), client, jobs, tr); err != nil {
+		t.Fatalf("countInstances failed: %v", err)
+	}
+	_ = service.estimateJobMetrics(context.Background(), client, jobs, tr)
+
+	want := []string{
+		`count({job=~"job\.1|job\|2"})`,
+		`count(count by (instance) ({job=~"job\.1|job\|2"}))`,
+		`count by (job) ({job=~"job\.1|job\|2"})`,
+	}
+
+	got := make([]string, 0, len(want))
+	for i := 0; i < len(want); i++ {
+		select {
+		case q := <-queries:
+			got = append(got, q)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for query %d", i+1)
+		}
+	}
+
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("query %d mismatch:\n got: %q\nwant: %q", i+1, got[i], want[i])
+		}
+	}
+}
