@@ -45,7 +45,7 @@ Status legend: TODO -> IN PROGRESS -> DONE.
 10. [P1][DONE] Regex injection / query correctness risk when building `{job=~"..."}`
 11. [P1][DONE] Canceled jobs are never removed by retention cleanup
 12. [P1][DONE] Hard-coded 15 minute job timeout can kill legitimate exports
-13. [P2][TODO] `/api/fs/*` endpoints enlarge security surface (especially if bound to non-localhost)
+13. [P2][DONE] `/api/fs/*` endpoints enlarge security surface (especially if bound to non-localhost)
 14. [P2][TODO] Debug/diagnostic logging is noisy by default
 15. [P2][TODO] Documentation inconsistencies (customer-facing confusion)
 
@@ -305,6 +305,8 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 
 ### P2: `/api/fs/*` endpoints enlarge security surface (especially if bound to non-localhost)
 
+**Status**: DONE
+
 **Impact**
 - `GET /api/fs/list` and `POST /api/fs/check` allow listing arbitrary directories and creating directories on the server host.
 - Today `vmgather` defaults to `localhost:8080`, but users can bind to `0.0.0.0` via `-addr`, turning these into remote-accessible primitives.
@@ -321,6 +323,13 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 - Strongly gate these endpoints behind an explicit opt-in flag (or build tag) and document the risk.
 - If kept, restrict to a safe base directory (e.g., under user home) and/or require a per-session CSRF token from the UI.
 - Add tests for “FS endpoints are disabled by default” (if the product direction is to limit them).
+
+**Implemented**
+- `internal/server/server.go`: `/api/fs/list` and `/api/fs/check` now reject non-loopback requests; they are only available from localhost.
+- `internal/server/server_test.go`: existing FS endpoint tests now set a loopback `RemoteAddr`, and new regression tests assert the 403 behavior for non-loopback callers.
+
+**Verification**
+- `make test-all`: PASS (includes unit/integration + Playwright E2E; 99 passed / 3 skipped)
 
 ---
 

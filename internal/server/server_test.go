@@ -245,6 +245,7 @@ func TestHandleListDirectory(t *testing.T) {
 
 	server := NewServer(tmpDir, "test-version", false)
 	req := httptest.NewRequest(http.MethodGet, "/api/fs/list?path="+tmpDir, nil)
+	req.RemoteAddr = "127.0.0.1:1234"
 	w := httptest.NewRecorder()
 
 	server.Router().ServeHTTP(w, req)
@@ -262,6 +263,25 @@ func TestHandleListDirectory(t *testing.T) {
 	}
 }
 
+func TestHandleListDirectoryRejectsNonLoopbackRemoteAddr(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "vmgather-list-reject-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	server := NewServer(tmpDir, "test-version", false)
+	req := httptest.NewRequest(http.MethodGet, "/api/fs/list?path="+tmpDir, nil)
+	// httptest defaults to a non-loopback RemoteAddr (192.0.2.1:1234).
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
+	}
+}
+
 func TestHandleCheckDirectory(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "vmgather-check-*")
 	if err != nil {
@@ -274,6 +294,7 @@ func TestHandleCheckDirectory(t *testing.T) {
 	body, _ := json.Marshal(reqBody)
 	req := httptest.NewRequest(http.MethodPost, "/api/fs/check", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.1:1234"
 	w := httptest.NewRecorder()
 
 	server.Router().ServeHTTP(w, req)
@@ -296,6 +317,24 @@ func TestHandleCheckDirectory(t *testing.T) {
 	}
 }
 
+func TestHandleCheckDirectoryRejectsNonLoopbackRemoteAddr(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	server := NewServer(tmpDir, "test-version", false)
+	reqBody := map[string]string{"path": tmpDir}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/fs/check", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	// httptest defaults to a non-loopback RemoteAddr (192.0.2.1:1234).
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
+	}
+}
+
 func TestHandleCheckDirectoryCreatesMissing(t *testing.T) {
 	tmpDir := t.TempDir()
 	missing := filepath.Join(tmpDir, "nested", "dir")
@@ -307,6 +346,7 @@ func TestHandleCheckDirectoryCreatesMissing(t *testing.T) {
 	body, _ := json.Marshal(reqBody)
 	req := httptest.NewRequest(http.MethodPost, "/api/fs/check", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.1:1234"
 	w := httptest.NewRecorder()
 	server.Router().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -328,6 +368,7 @@ func TestHandleCheckDirectoryCreatesMissing(t *testing.T) {
 	body, _ = json.Marshal(reqBody)
 	req = httptest.NewRequest(http.MethodPost, "/api/fs/check", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.1:1234"
 	w = httptest.NewRecorder()
 	server.Router().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {

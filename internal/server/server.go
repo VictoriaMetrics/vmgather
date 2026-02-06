@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -981,9 +982,31 @@ func canCreateDirectory(path string) bool {
 	return false
 }
 
+func isLoopbackRemoteAddr(remoteAddr string) bool {
+	if remoteAddr == "" {
+		return false
+	}
+
+	host := remoteAddr
+	if h, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		host = h
+	}
+
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
+}
+
 func (s *Server) handleListDirectory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if !isLoopbackRemoteAddr(r.RemoteAddr) {
+		respondWithError(w, http.StatusForbidden, "This endpoint is only available from localhost")
 		return
 	}
 
@@ -1066,6 +1089,11 @@ func (s *Server) handleListDirectory(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCheckDirectory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if !isLoopbackRemoteAddr(r.RemoteAddr) {
+		respondWithError(w, http.StatusForbidden, "This endpoint is only available from localhost")
 		return
 	}
 
