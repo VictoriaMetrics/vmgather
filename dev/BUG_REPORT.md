@@ -7,11 +7,9 @@ This document is an internal engineering review of the `/Users/yu-key/VMexporter
 ## Scope and repo state
 
 - Repo: `VictoriaMetrics/vmgather` (local path: `/Users/yu-key/VMexporter`)
-- Current branch: `feature/custom-mode-oneshot` (HEAD `5345454`)
+- Current branch: `feature/custom-mode-oneshot`
 - Baseline for comparison: `origin/main` (`42d8f0e`)
-- Local-only commits on top of `origin/main` (not pushed):
-  - `2ffad40` test: preserve `go test` exit codes
-  - `5345454` ui/e2e: stabilize advanced sections and test server
+- Local-only commits on top of `origin/main` exist (not pushed). See `git log origin/main..HEAD` for the exact list.
 - Working tree: clean (except this report file while editing)
 
 ## Validation executed locally
@@ -45,7 +43,7 @@ Status legend: TODO -> IN PROGRESS -> DONE.
 8. [P0][DONE] Resumed export progress double-counts batches (progress/ETA can be wildly wrong)
 9. [P1][DONE] `CheckExportAPI` leaks response bodies (connection leak on success path)
 10. [P1][DONE] Regex injection / query correctness risk when building `{job=~"..."}`
-11. [P1][TODO] Canceled jobs are never removed by retention cleanup
+11. [P1][DONE] Canceled jobs are never removed by retention cleanup
 12. [P1][TODO] Hard-coded 15 minute job timeout can kill legitimate exports
 13. [P2][TODO] `/api/fs/*` endpoints enlarge security surface (especially if bound to non-localhost)
 14. [P2][TODO] Debug/diagnostic logging is noisy by default
@@ -255,15 +253,25 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 
 ### P1: Canceled jobs are never removed by retention cleanup
 
+**Status**: DONE
+
 **Impact**
 - Canceled jobs remain in memory indefinitely (until process restart), which can clutter status views and increase memory usage over time.
 
 **Evidence**
-- `internal/server/export_jobs.go:340-347` cleanup only removes `completed` and `failed`, but not `canceled`.
+- Prior to the fix, retention cleanup only removed `completed` and `failed`, but not `canceled`.
 
 **Suggested fix**
 - Include `JobCanceled` in cleanup retention logic.
 - Consider also removing `pending` jobs that never started (if the system ever creates them).
+
+**Implemented**
+- `internal/server/export_jobs.go`: retention cleanup now includes `JobCanceled` alongside `completed` and `failed`.
+- `internal/server/export_jobs_test.go`: added `TestExportJobManagerCleanupRemovesCanceledJobsAfterRetention`.
+
+**Verification**
+- `make test-full`: PASS
+- `cd tests/e2e && npx playwright test --workers=1`: PASS (99 passed / 3 skipped)
 
 ---
 

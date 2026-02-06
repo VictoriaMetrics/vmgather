@@ -353,7 +353,7 @@ func (m *ExportJobManager) CancelJob(jobID string) error {
 
 func (m *ExportJobManager) cleanupLocked(now time.Time) {
 	for id, job := range m.jobs {
-		if job.status.State == JobCompleted || job.status.State == JobFailed {
+		if job.status.State == JobCompleted || job.status.State == JobFailed || job.status.State == JobCanceled {
 			if job.status.CompletedAt != nil && now.Sub(*job.status.CompletedAt) > m.retention {
 				delete(m.jobs, id)
 			}

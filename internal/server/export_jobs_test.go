@@ -330,3 +330,26 @@ resume:
 		}
 	}
 }
+
+func TestExportJobManagerCleanupRemovesCanceledJobsAfterRetention(t *testing.T) {
+	manager := NewExportJobManager(&fakeExportService{})
+	manager.retention = 1 * time.Second
+
+	completedAt := time.Now().Add(-2 * time.Second)
+	job := &exportJob{
+		status: &ExportJobStatus{
+			ID:          "job-canceled",
+			State:       JobCanceled,
+			CompletedAt: &completedAt,
+		},
+	}
+
+	manager.mu.Lock()
+	manager.jobs[job.status.ID] = job
+	manager.cleanupLocked(time.Now())
+	manager.mu.Unlock()
+
+	if _, ok := manager.GetStatus(job.status.ID); ok {
+		t.Fatalf("expected canceled job to be removed after retention")
+	}
+}
