@@ -11,6 +11,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Export batching payload is now built from the batch-window selector instead of forcing batching to match metric step.
 - Metric step selector now refreshes the batch-window hint to reflect the current recommendation.
 - Playwright E2E now starts a fresh `vmgather` web server by default (opt-in reuse via `PW_REUSE_EXISTING_SERVER=1`).
+- Makefile now provides `test-e2e` and `test-all` targets for running Playwright locally.
 
 ### Fixed
 - Frontend batching payload field now matches the backend contract: `custom_interval_seconds` (was `custom_interval_secs`).

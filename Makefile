@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-llm build build-safe build-all clean fmt lint help test-env test-env-up test-env-down test-env-logs test-scenarios test-config-bootstrap docker-build docker-build-vmgather docker-build-vmimporter
+.PHONY: test test-fast test-llm build build-safe build-all clean fmt lint help test-env test-env-up test-env-down test-env-logs test-e2e test-all test-scenarios test-config-bootstrap docker-build docker-build-vmgather docker-build-vmimporter
 
 VERSION ?= $(shell git describe --tags --always --dirty)
 PKG_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "latest")
@@ -106,6 +106,8 @@ help:
 	@echo "  make test-integration  - Binary tests Docker environment (needs Docker)"
 	@echo "  make test-env-up       - Start test environment"
 	@echo "  make test-env-down     - Stop test environment"
+	@echo "  make test-e2e          - Run Playwright suite (requires test-env-up)"
+	@echo "  make test-all          - Everything: test-full + test-e2e"
 	@echo ""
 	@echo "FULL TEST SUITE:"
 	@echo "  make test-full         - Everything: unit + Docker scenarios"
@@ -472,6 +474,49 @@ test-env: test-env-up test-integration
 	@echo ""
 	@echo "[OK] All E2E tests completed!"
 	@echo "Run 'make test-env-down' to stop the environment"
+
+# Playwright tests: require the local docker environment.
+test-e2e:
+	@echo "================================================================================"
+	@echo "Playwright E2E Suite"
+	@echo "================================================================================"
+	@if ! docker ps | grep -q vmsingle-noauth; then \
+		echo "[ERROR] Docker test environment not running"; \
+		echo "Run 'make test-env-up' (or 'make test-full') first"; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "[1/3] Building vmgather..."
+	@go build -o vmgather ./cmd/vmgather
+	@echo ""
+	@echo "[2/3] Ensuring E2E dependencies exist..."
+	@if [ ! -d "tests/e2e/node_modules" ]; then \
+		echo "  Installing node deps via npm ci..."; \
+		cd tests/e2e && npm ci; \
+	fi
+	@echo ""
+	@echo "[3/3] Running Playwright (workers=1)..."
+	@set -e; \
+		eval "$$(cd local-test-env && ./testconfig env)"; \
+		if [ -n "$$VMGATHER_PORT" ] && command -v lsof >/dev/null 2>&1; then \
+			pid="$$(lsof -tiTCP:$$VMGATHER_PORT -sTCP:LISTEN || true)"; \
+			if [ -n "$$pid" ]; then \
+				cmd="$$(ps -p "$$pid" -o command= || true)"; \
+				if echo "$$cmd" | grep -q "[/]vmgather" && echo "$$cmd" | grep -q -- "-no-browser"; then \
+					echo "  [WARN] Killing stale vmgather web server (pid=$$pid, port=$$VMGATHER_PORT)"; \
+					kill "$$pid" || true; \
+					sleep 1; \
+				fi; \
+			fi; \
+		fi; \
+		cd tests/e2e && npx playwright test --workers=1
+	@echo ""
+	@echo "================================================================================"
+	@echo "[OK] Playwright E2E suite passed!"
+	@echo "================================================================================"
+
+# Everything: unit + docker scenarios + Playwright.
+test-all: test-full test-e2e
 
 # =============================================================================
 # FULL TEST SUITE

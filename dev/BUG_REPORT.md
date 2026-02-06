@@ -69,6 +69,9 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
    - Implemented: `tests/e2e/playwright.config.js` now reuses existing server only when `PW_REUSE_EXISTING_SERVER=1` is explicitly set.
 7. Ensure Playwright `webServer` stays alive for full E2E run
    - Implemented: increased `webServer.timeout` to 10 minutes to prevent mid-run server termination and `net::ERR_CONNECTION_REFUSED` failures.
+8. Add a single-command local full-suite runner (including Playwright)
+   - Implemented: `make test-e2e` (builds `vmgather`, runs Playwright with `--workers=1`, and kills stale `vmgather -no-browser` server on `VMGATHER_PORT` if needed).
+   - Implemented: `make test-all` (runs `make test-full` and then `make test-e2e`).
 
 ## Findings (prioritized)
 
