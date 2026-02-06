@@ -21,9 +21,8 @@ import (
 	"github.com/VictoriaMetrics/vmgather/internal/server"
 )
 
-const (
-	version = "1.4.1"
-)
+// Overridable at build time via: -ldflags "-X main.version=<value>"
+var version = "dev"
 
 func main() {
 	// Parse flags

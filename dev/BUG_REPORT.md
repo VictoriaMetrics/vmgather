@@ -40,7 +40,7 @@ Status legend: TODO -> IN PROGRESS -> DONE.
 3. [P1][DONE] Help section auto-opens on time range input (breaks UX + E2E assumptions)
 4. [P1][DONE] Obfuscation advanced `<details>` are open by default (click-to-open tests close them)
 5. [P1][DONE] Sample loading error/spinner tests rely on stable open/close behavior for advanced sections
-6. [P0][TODO] Release version injection is broken (ldflags cannot override `const`)
+6. [P0][DONE] Release version injection is broken (ldflags cannot override `const`)
 7. [P0][TODO] HTTP client timeout (30s) is incompatible with streaming exports and batch timeouts
 8. [P0][TODO] Resumed export progress double-counts batches (progress/ETA can be wildly wrong)
 9. [P1][TODO] `CheckExportAPI` leaks response bodies (connection leak on success path)
@@ -74,7 +74,7 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 
 ### P0: Release version injection is broken (ldflags cannot override `const`)
 
-**Status**: TODO
+**Status**: DONE
 
 **Impact**
 - Release builds produced by `build/builder.go` likely report the wrong runtime version in logs and bundle metadata.
@@ -90,6 +90,11 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 - Replace `const version = "..."` with `var version = "dev"` (or empty) in both `cmd/vmgather` and `cmd/vmimporter`.
 - Ensure both binaries print `dev` when not set, and allow `-X main.version` to override.
 - Add a small unit test per binary package that checks `version` is not a `const` (or that `version != hardcodedRelease`), plus a CI sanity check that `-ldflags -X` changes the startup banner.
+
+**Implemented**
+- `cmd/vmgather`: `version` is now a `var` with default `dev` (ldflags-overridable).
+- `cmd/vmimporter`: `version` is now a `var` with default `dev` (ldflags-overridable).
+- Added compile-time regression tests: `cmd/vmgather/version_test.go`, `cmd/vmimporter/version_test.go`.
 
 ---
 
