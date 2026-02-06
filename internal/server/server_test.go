@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -230,6 +231,222 @@ func TestHandleExportStart_StagingPermissionDenied(t *testing.T) {
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for read-only directory, got %d", w.Code)
+	}
+}
+
+func TestHandleValidateConnectionDoesNotLogConnectionDetailsByDefault(t *testing.T) {
+	server := NewServer(t.TempDir(), "test-version", false)
+
+	var buf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(prevOutput)
+
+	reqBody := map[string]interface{}{
+		"connection": map[string]interface{}{
+			"url": "http://127.0.0.1:8428",
+			"auth": map[string]interface{}{
+				"type":     "basic",
+				"username": "secret-user",
+				"password": "secret-password",
+			},
+		},
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	logs := buf.String()
+	if strings.Contains(logs, "Validating connection:") {
+		t.Fatalf("expected connection details logging to be disabled by default, but it was logged:\n%s", logs)
+	}
+	if strings.Contains(logs, "secret-password") {
+		t.Fatalf("expected password to never appear in logs, but it did:\n%s", logs)
+	}
+}
+
+func TestHandleValidateConnectionLogsConnectionDetailsWhenDebugEnabled(t *testing.T) {
+	server := NewServer(t.TempDir(), "test-version", true)
+
+	var buf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(prevOutput)
+
+	reqBody := map[string]interface{}{
+		"connection": map[string]interface{}{
+			"url": "http://127.0.0.1:8428",
+			"auth": map[string]interface{}{
+				"type":     "basic",
+				"username": "secret-user",
+				"password": "secret-password",
+			},
+		},
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	logs := buf.String()
+	if !strings.Contains(logs, "Validating connection:") {
+		t.Fatalf("expected debug logging to include connection details, but it did not:\n%s", logs)
+	}
+	if strings.Contains(logs, "secret-password") {
+		t.Fatalf("expected password to never appear in logs, but it did:\n%s", logs)
+	}
+}
+
+func TestHandleDiscoverComponentsDoesNotLogDiscoveryRequestByDefault(t *testing.T) {
+	server := NewServer(t.TempDir(), "test-version", false)
+	server.vmService = &mockVMService{}
+
+	var buf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(prevOutput)
+
+	reqBody := map[string]interface{}{
+		"connection": map[string]interface{}{
+			"url":  "http://127.0.0.1:8428",
+			"auth": map[string]interface{}{"type": "none"},
+		},
+		"time_range": map[string]string{
+			"start": time.Now().Add(-time.Hour).Format(time.RFC3339),
+			"end":   time.Now().Format(time.RFC3339),
+		},
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/discover", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	logs := buf.String()
+	if strings.Contains(logs, "🔎 Component Discovery:") {
+		t.Fatalf("expected discovery request logging to be disabled by default, but it was logged:\n%s", logs)
+	}
+}
+
+func TestHandleDiscoverComponentsLogsDiscoveryRequestWhenDebugEnabled(t *testing.T) {
+	server := NewServer(t.TempDir(), "test-version", true)
+	server.vmService = &mockVMService{}
+
+	var buf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(prevOutput)
+
+	reqBody := map[string]interface{}{
+		"connection": map[string]interface{}{
+			"url":  "http://127.0.0.1:8428",
+			"auth": map[string]interface{}{"type": "none"},
+		},
+		"time_range": map[string]string{
+			"start": time.Now().Add(-time.Hour).Format(time.RFC3339),
+			"end":   time.Now().Format(time.RFC3339),
+		},
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/discover", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	logs := buf.String()
+	if !strings.Contains(logs, "🔎 Component Discovery:") {
+		t.Fatalf("expected debug logging to include discovery request details, but it did not:\n%s", logs)
+	}
+}
+
+func TestHandleGetSampleDoesNotLogSampleRequestByDefault(t *testing.T) {
+	server := NewServer(t.TempDir(), "test-version", false)
+	server.vmService = &mockVMService{
+		samples: []domain.MetricSample{{MetricName: "vm_app_version", Labels: map[string]string{"job": "test-job"}}},
+	}
+
+	var buf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(prevOutput)
+
+	cfg := domain.ExportConfig{
+		Connection: domain.VMConnection{
+			URL:  "http://127.0.0.1:8428",
+			Auth: domain.AuthConfig{Type: "none"},
+		},
+	}
+	reqBody := map[string]interface{}{
+		"config": cfg,
+		"limit":  1,
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/sample", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	logs := buf.String()
+	if strings.Contains(logs, "Sample Metrics Request:") {
+		t.Fatalf("expected sample request logging to be disabled by default, but it was logged:\n%s", logs)
+	}
+}
+
+func TestHandleGetSampleLogsSampleRequestWhenDebugEnabled(t *testing.T) {
+	server := NewServer(t.TempDir(), "test-version", true)
+	server.vmService = &mockVMService{
+		samples: []domain.MetricSample{{MetricName: "vm_app_version", Labels: map[string]string{"job": "test-job"}}},
+	}
+
+	var buf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(prevOutput)
+
+	cfg := domain.ExportConfig{
+		Connection: domain.VMConnection{
+			URL:  "http://127.0.0.1:8428",
+			Auth: domain.AuthConfig{Type: "none"},
+		},
+	}
+	reqBody := map[string]interface{}{
+		"config": cfg,
+		"limit":  1,
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/sample", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	logs := buf.String()
+	if !strings.Contains(logs, "Sample Metrics Request:") {
+		t.Fatalf("expected debug logging to include sample request details, but it did not:\n%s", logs)
 	}
 }
 

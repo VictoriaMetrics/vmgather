@@ -46,7 +46,7 @@ Status legend: TODO -> IN PROGRESS -> DONE.
 11. [P1][DONE] Canceled jobs are never removed by retention cleanup
 12. [P1][DONE] Hard-coded 15 minute job timeout can kill legitimate exports
 13. [P2][DONE] `/api/fs/*` endpoints enlarge security surface (especially if bound to non-localhost)
-14. [P2][TODO] Debug/diagnostic logging is noisy by default
+14. [P2][DONE] Debug/diagnostic logging is noisy by default
 15. [P2][TODO] Documentation inconsistencies (customer-facing confusion)
 
 ## Test suite expansion and hardening plan
@@ -335,6 +335,8 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 
 ### P2: Debug/diagnostic logging is noisy by default
 
+**Status**: DONE
+
 **Impact**
 - Customers running the binary may see verbose logs that aren’t actionable, which complicates support instructions (“paste logs”).
 
@@ -344,6 +346,13 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 **Suggested fix**
 - Gate these logs behind `s.debug` (or a verbose level).
 - Ensure sensitive fields are never printed (currently it logs booleans, which is OK, but the default verbosity is the bigger issue).
+
+**Implemented**
+- `internal/server/server.go`: connection-detail debug dump during `/api/validate` is now gated behind `s.debug`.
+- `internal/server/server_test.go`: added regression tests `TestHandleValidateConnectionDoesNotLogConnectionDetailsByDefault` and `TestHandleValidateConnectionLogsConnectionDetailsWhenDebugEnabled`.
+
+**Verification**
+- `make test-all`: PASS (includes unit/integration + Playwright E2E; 99 passed / 3 skipped)
 
 ---
 

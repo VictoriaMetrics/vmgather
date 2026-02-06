@@ -25,6 +25,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Canceled export jobs are now removed by retention cleanup after the configured retention period.
 - Export jobs are no longer canceled by a hard-coded 15-minute manager timeout; only explicit cancel and per-batch timeouts apply.
 - `/api/fs/*` endpoints now reject non-localhost requests, reducing the security surface when binding to `0.0.0.0`.
+- Connection validation no longer logs a verbose connection-details dump unless `-debug` is enabled.
 - Obfuscation advanced sections (labels/preview) no longer auto-open by default; sample-loading errors and retries render consistently.
 - Playwright E2E no longer intermittently fails with `net::ERR_CONNECTION_REFUSED` on longer runs; the `webServer` timeout is increased to keep the server alive.
 
