@@ -286,8 +286,7 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 - Large time ranges (or slow endpoints) can exceed 15 minutes, causing the export to be canceled even though the user expects it to run.
 
 **Evidence**
-- `internal/server/export_jobs.go:109-110` uses `context.WithTimeout(..., 15*time.Minute)` for new jobs.
-- `internal/server/export_jobs.go:158-159` applies the same limit to resumed jobs.
+- Prior to the fix, `ExportJobManager` wrapped the whole export job in a fixed `context.WithTimeout(..., 15*time.Minute)` (both new and resumed jobs).
 
 **Suggested fix**
 - Prefer no hard timeout (use explicit cancel) or make it configurable via flag/env.
@@ -298,7 +297,9 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 - `internal/server/export_jobs_test.go`: added `TestExportJobManagerDoesNotSetJobContextDeadlineByDefault`.
 
 **Verification**
-- `make test-all`: PASS (includes unit/integration + Playwright E2E; 99 passed / 3 skipped)
+- `make test-full`: PASS
+- `make test-race`: PASS
+- `make test-e2e`: PASS (99 passed / 3 skipped)
 
 ---
 
