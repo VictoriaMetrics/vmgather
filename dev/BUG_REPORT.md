@@ -42,7 +42,7 @@ Status legend: TODO -> IN PROGRESS -> DONE.
 5. [P1][DONE] Sample loading error/spinner tests rely on stable open/close behavior for advanced sections
 6. [P0][DONE] Release version injection is broken (ldflags cannot override `const`)
 7. [P0][DONE] HTTP client timeout (30s) is incompatible with streaming exports and batch timeouts
-8. [P0][TODO] Resumed export progress double-counts batches (progress/ETA can be wildly wrong)
+8. [P0][DONE] Resumed export progress double-counts batches (progress/ETA can be wildly wrong)
 9. [P1][TODO] `CheckExportAPI` leaks response bodies (connection leak on success path)
 10. [P1][TODO] Regex injection / query correctness risk when building `{job=~"..."}`
 11. [P1][TODO] Canceled jobs are never removed by retention cleanup
@@ -129,6 +129,8 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 
 ### P0: Resumed export progress double-counts batches (progress/ETA can be wildly wrong)
 
+**Status**: DONE
+
 **Impact**
 - After resume, the UI can show progress > 100%, incorrect ETA, and wrong “completed batches”.
 - This undermines trust in the progress UI and makes resume behavior appear broken.
@@ -150,6 +152,15 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
   - initial run partial completion
   - resume
   - correct `CompletedBatches`, `Progress`, `ETA` monotonicity
+
+**Implemented**
+- `internal/server/export_jobs.go`: treat `BatchProgress.BatchIndex` as the absolute 1-based batch number and update `CompletedBatches` monotonically; compute avg/ETA using batches observed in the current run after resume.
+- `internal/server/export_jobs_test.go`: added `TestResumeJobDoesNotDoubleCountBatches` regression.
+
+**Verification**
+- `make test-full`: PASS
+- `make test-race`: PASS
+- `cd tests/e2e && npx playwright test --workers=1`: PASS
 
 ---
 

@@ -235,3 +235,98 @@ func TestResumeJobUsesSameStagingAndOffset(t *testing.T) {
 	}
 	service.mu.Unlock()
 }
+
+type resumableProgressExportService struct {
+	mu           sync.Mutex
+	calls        int
+	totalBatches int
+	cancelAfter  int
+}
+
+func (s *resumableProgressExportService) ExecuteExport(ctx context.Context, config domain.ExportConfig) (*domain.ExportResult, error) {
+	s.mu.Lock()
+	s.calls++
+	callNum := s.calls
+	s.mu.Unlock()
+
+	startIdx := config.ResumeFromBatch
+	for batchIndex := startIdx; batchIndex < s.totalBatches; batchIndex++ {
+		services.ReportBatchProgress(ctx, services.BatchProgress{
+			BatchIndex:   batchIndex + 1,
+			TotalBatches: s.totalBatches,
+			TimeRange:    config.TimeRange,
+			Metrics:      1,
+			Duration:     10 * time.Millisecond,
+		})
+		time.Sleep(5 * time.Millisecond)
+		if callNum == 1 && (batchIndex+1) == s.cancelAfter {
+			return nil, context.Canceled
+		}
+	}
+	return &domain.ExportResult{ExportID: "resume-progress", MetricsExported: s.totalBatches}, nil
+}
+
+func TestResumeJobDoesNotDoubleCountBatches(t *testing.T) {
+	service := &resumableProgressExportService{
+		totalBatches: 4,
+		cancelAfter:  2,
+	}
+	manager := NewExportJobManager(service)
+
+	now := time.Now()
+	cfg := domain.ExportConfig{
+		TimeRange: domain.TimeRange{
+			Start: now.Add(-20 * time.Minute),
+			End:   now,
+		},
+		Batching:    domain.BatchSettings{Enabled: true},
+		StagingFile: "/tmp/job-resume-progress.partial",
+	}
+
+	status, err := manager.StartJob(context.Background(), "job-resume-progress", cfg)
+	if err != nil {
+		t.Fatalf("failed to start job: %v", err)
+	}
+
+	// Wait for the job to become canceled at the configured checkpoint.
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for canceled status")
+		default:
+			if s, ok := manager.GetStatus(status.ID); ok && s.State == JobCanceled {
+				if s.CompletedBatches != 2 {
+					t.Fatalf("expected 2 completed batches before resume, got %d", s.CompletedBatches)
+				}
+				goto resume
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+resume:
+	if _, err := manager.ResumeJob(context.Background(), status.ID); err != nil {
+		t.Fatalf("resume failed: %v", err)
+	}
+
+	// Wait for completion after resume.
+	deadline = time.After(2 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for resumed job completion")
+		default:
+			if s, ok := manager.GetStatus(status.ID); ok && s.State == JobCompleted {
+				if s.CompletedBatches != 4 {
+					t.Fatalf("expected 4 completed batches after resume, got %d", s.CompletedBatches)
+				}
+				if s.MetricsProcessed != 4 {
+					t.Fatalf("expected 4 metrics processed, got %d", s.MetricsProcessed)
+				}
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}

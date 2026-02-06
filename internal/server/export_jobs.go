@@ -265,9 +265,15 @@ func (m *ExportJobManager) updateBatch(jobID string, progress services.BatchProg
 		job.status.TotalBatches = progress.TotalBatches
 	}
 
-	job.status.CompletedBatches = baseBatches + progress.BatchIndex
+	if progress.BatchIndex > job.status.CompletedBatches {
+		job.status.CompletedBatches = progress.BatchIndex
+	}
 	if job.status.TotalBatches > 0 {
-		job.status.Progress = float64(job.status.CompletedBatches) / float64(job.status.TotalBatches)
+		p := float64(job.status.CompletedBatches) / float64(job.status.TotalBatches)
+		if p > 1.0 {
+			p = 1.0
+		}
+		job.status.Progress = p
 	}
 
 	if baseMetrics > 0 && job.status.MetricsProcessed < baseMetrics {
@@ -278,7 +284,11 @@ func (m *ExportJobManager) updateBatch(jobID string, progress services.BatchProg
 	job.durationTotal += progress.Duration
 
 	if job.status.CompletedBatches > 0 {
-		avg := job.durationTotal.Seconds() / float64(job.status.CompletedBatches)
+		observedBatches := job.status.CompletedBatches - baseBatches
+		if observedBatches <= 0 {
+			observedBatches = job.status.CompletedBatches
+		}
+		avg := job.durationTotal.Seconds() / float64(observedBatches)
 		job.status.AverageBatchSeconds = avg
 
 		remaining := job.status.TotalBatches - job.status.CompletedBatches
