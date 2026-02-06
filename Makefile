@@ -128,7 +128,13 @@ test:
 	@echo "TEST SUITE: Fast Mode (no race detector, skip slow tests)"
 	@echo "================================================================================"
 	@echo ""
-	@go test -short -coverprofile=coverage.out ./... | $(MAKE) --no-print-directory format-test-output
+	@set -e; \
+		tmpfile="$$(mktemp)"; \
+		status=0; \
+		go test -short -coverprofile=coverage.out ./... >"$$tmpfile" 2>&1 || status=$$?; \
+		cat "$$tmpfile" | $(MAKE) --no-print-directory format-test-output; \
+		rm -f "$$tmpfile"; \
+		exit $$status
 	@echo ""
 	@$(MAKE) --no-print-directory test-summary
 
@@ -138,7 +144,13 @@ test-fast:
 	@echo "TEST SUITE: Ultra-Fast Mode (no coverage, skip slow tests)"
 	@echo "================================================================================"
 	@echo ""
-	@go test -short ./... | $(MAKE) --no-print-directory format-test-output
+	@set -e; \
+		tmpfile="$$(mktemp)"; \
+		status=0; \
+		go test -short ./... >"$$tmpfile" 2>&1 || status=$$?; \
+		cat "$$tmpfile" | $(MAKE) --no-print-directory format-test-output; \
+		rm -f "$$tmpfile"; \
+		exit $$status
 	@echo ""
 	@$(MAKE) --no-print-directory test-summary
 
@@ -148,7 +160,13 @@ test-race:
 	@echo "TEST SUITE: Race detector mode"
 	@echo "================================================================================"
 	@echo ""
-	@go test -v -race -coverprofile=coverage.out ./... | $(MAKE) --no-print-directory format-test-output
+	@set -e; \
+		tmpfile="$$(mktemp)"; \
+		status=0; \
+		go test -v -race -coverprofile=coverage.out ./... >"$$tmpfile" 2>&1 || status=$$?; \
+		cat "$$tmpfile" | $(MAKE) --no-print-directory format-test-output; \
+		rm -f "$$tmpfile"; \
+		exit $$status
 	@echo ""
 	@$(MAKE) --no-print-directory test-summary
 

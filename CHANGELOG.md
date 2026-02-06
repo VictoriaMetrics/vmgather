@@ -2,6 +2,19 @@
 
 All notable changes to vmgather are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and versions adhere to semantic versioning.
 
+## [v1.8.0] - Unreleased
+
+### Added
+- Export wizard now lets you configure a separate batch window (auto/preset/custom seconds) independent of metric sampling step.
+
+### Changed
+- Export batching payload is now built from the batch-window selector instead of forcing batching to match metric step.
+- Metric step selector now refreshes the batch-window hint to reflect the current recommendation.
+
+### Fixed
+- Frontend batching payload field now matches the backend contract: `custom_interval_seconds` (was `custom_interval_secs`).
+- Makefile test targets now preserve `go test` exit codes (piped output no longer masks failures).
+
 ## [v1.7.0] - 2026-01-23
 
 ### Added
