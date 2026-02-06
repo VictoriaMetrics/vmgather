@@ -41,7 +41,7 @@ Status legend: TODO -> IN PROGRESS -> DONE.
 4. [P1][DONE] Obfuscation advanced `<details>` are open by default (click-to-open tests close them)
 5. [P1][DONE] Sample loading error/spinner tests rely on stable open/close behavior for advanced sections
 6. [P0][DONE] Release version injection is broken (ldflags cannot override `const`)
-7. [P0][TODO] HTTP client timeout (30s) is incompatible with streaming exports and batch timeouts
+7. [P0][DONE] HTTP client timeout (30s) is incompatible with streaming exports and batch timeouts
 8. [P0][TODO] Resumed export progress double-counts batches (progress/ETA can be wildly wrong)
 9. [P1][TODO] `CheckExportAPI` leaks response bodies (connection leak on success path)
 10. [P1][TODO] Regex injection / query correctness risk when building `{job=~"..."}`
@@ -100,6 +100,8 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 
 ### P0: HTTP client timeout (30s) is incompatible with streaming exports and batch timeouts
 
+**Status**: DONE
+
 **Impact**
 - Long-running `/api/v1/export` responses may be cut off at 30s regardless of per-batch contexts.
 - This can manifest as partial bundles, unexpected export failures, or retries that look like “random timeouts” to customers.
@@ -113,6 +115,15 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 - Prefer request-scoped timeouts via `context.WithTimeout` and remove/zero `http.Client.Timeout` (or set it to a value >= max expected batch duration).
 - If keeping a client-level timeout, make it configurable and ensure it is always >= the largest per-request timeout used by services.
 - Add an integration test that simulates a slow streaming `/api/v1/export` response and verifies it is not cut off by the client.
+
+**Implemented**
+- Removed the global `http.Client.Timeout` from `internal/infrastructure/vm/client.go` so request-scoped contexts can control streaming runtime.
+- Added a regression assertion in `internal/infrastructure/vm/client_test.go` that `NewClient` leaves `httpClient.Timeout` unset (0).
+
+**Verification**
+- `make test-full`: PASS
+- `make test-race`: PASS
+- `cd tests/e2e && npx playwright test --workers=1`: PASS
 
 ---
 

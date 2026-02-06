@@ -76,7 +76,6 @@ func NewClient(conn domain.VMConnection) *Client {
 	return &Client{
 		httpClient: &http.Client{
 			Transport: transport,
-			Timeout:   30 * time.Second,
 		},
 		conn: conn,
 	}

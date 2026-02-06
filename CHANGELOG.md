@@ -17,6 +17,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Makefile test targets now preserve `go test` exit codes (piped output no longer masks failures).
 - Data races fixed in async job workflows (export job manager and importer upload response snapshot); `make test-race` is now clean.
 - Release builds can now inject the correct runtime version via `-ldflags "-X main.version=..."` (both `vmgather` and `vmimporter`).
+- Streaming exports no longer fail due to a hard-coded 30s HTTP client timeout; request-scoped context timeouts control export duration.
 - Obfuscation advanced sections (labels/preview) no longer auto-open by default; sample-loading errors and retries render consistently.
 
 ## [v1.7.0] - 2026-01-23
