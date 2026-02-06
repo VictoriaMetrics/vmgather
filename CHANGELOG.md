@@ -15,6 +15,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 ### Fixed
 - Frontend batching payload field now matches the backend contract: `custom_interval_seconds` (was `custom_interval_secs`).
 - Makefile test targets now preserve `go test` exit codes (piped output no longer masks failures).
+- Data races fixed in async job workflows (export job manager and importer upload response snapshot); `make test-race` is now clean.
 - Obfuscation advanced sections (labels/preview) no longer auto-open by default; sample-loading errors and retries render consistently.
 
 ## [v1.7.0] - 2026-01-23

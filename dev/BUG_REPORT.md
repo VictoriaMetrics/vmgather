@@ -7,64 +7,49 @@ This document is an internal engineering review of the `/Users/yu-key/VMexporter
 ## Scope and repo state
 
 - Repo: `VictoriaMetrics/vmgather` (local path: `/Users/yu-key/VMexporter`)
-- Current branch: `feature/custom-mode-oneshot` (HEAD `3035bd6`)
+- Current branch: `feature/custom-mode-oneshot` (HEAD `5345454`)
 - Baseline for comparison: `origin/main` (`42d8f0e`)
-- Important: there is no committed code diff vs `origin/main` (merge metadata only).
-- Local uncommitted changes (must not be discarded; intended for next version):
-  - `CHANGELOG.md`
-  - `internal/server/static/app.js`
-  - `internal/server/static/index.html`
-  - `local-test-env/healthcheck.sh`
-  - `tests/e2e/specs/bugfixes-verification.spec.js`
-  - `tests/e2e/specs/complete-flow.spec.js`
-  - `tests/e2e/specs/export-progress.spec.js`
-  - `tests/e2e/specs/navigation.spec.js`
-  - `tests/e2e/specs/timezone-support.spec.js`
-  - `dev/BUG_REPORT.md` (this file)
+- Local-only commits on top of `origin/main` (not pushed):
+  - `2ffad40` test: preserve `go test` exit codes
+  - `5345454` ui/e2e: stabilize advanced sections and test server
+- Working tree: clean (except this report file while editing)
 
 ## Validation executed locally
 
 Baseline commands executed in this review cycle:
 
 - `make test-full`: PASS (unit + integration; Docker env is left running)
-- `make test-race`: PASS (note: Makefile currently pipes `go test` output and may not propagate failures; see Test hardening)
 - `go build -o vmgather ./cmd/vmgather`: PASS (used by Playwright `webServer` command)
-- `cd tests/e2e && npm test`: FAIL (8 failed / 91 passed / 3 skipped)
+- `cd tests/e2e && npx playwright test --workers=1`: PASS (99 passed / 3 skipped)
+- `make test-race`: PASS (after fixes; previously exposed data races in `internal/server` and `internal/importer/server`)
 
-## Full test baseline (before any fixes)
+## Full test baseline (current HEAD)
 
 This is the “everything” run requested (unit + integration + E2E) to establish a baseline.
 
 - `make test-full`: PASS (unit + integration)
-- `cd tests/e2e && npm test`: FAIL
-  - 8 failed / 91 passed / 3 skipped (Playwright; 7 workers; base URL from `local-test-env/.env.dynamic`)
-  - Failing tests (current list):
-    - `tests/e2e/specs/complete-flow.spec.js`:
-      - `should complete full wizard flow with mock data` (help section unexpectedly opens)
-      - `should show help documentation for VM URL` (clicking summary closes an already-open `<details>`)
-    - `tests/e2e/specs/sample-loading-errors.spec.js`:
-      - `should display error message when sample loading fails`
-      - `should show loading spinner while loading samples`
-      - `should handle network errors gracefully`
-      - `should allow retry after error`
-    - `tests/e2e/specs/obfuscation-functionality.spec.js`:
-      - `should not obfuscate pod or namespace labels`
-      - `should refresh sample preview when toggles change`
-  - Working hypothesis for most failures: multiple `<details>` sections are open by default in `internal/server/static/index.html`, and tests currently "click to open", which actually closes them and hides the expected UI.
-
-## Current test status (after fixes in this cycle)
-
-- `make test-full`: PASS
-- `cd tests/e2e && npm test`: PASS (99 passed / 3 skipped)
+- `make test-race`: PASS
+- `cd tests/e2e && npx playwright test --workers=1`: PASS (99 passed / 3 skipped)
 
 ## Bugfix tracker (ordered)
 
 Status legend: TODO -> IN PROGRESS -> DONE.
 
-1. [P0][DONE] Makefile test targets must fail on `go test` failure (exit code masking via pipe)
-2. [P1][DONE] Help section auto-opens on time range input (breaks UX + E2E assumptions)
-3. [P1][DONE] Obfuscation advanced `<details>` are open by default (click-to-open tests close them)
-4. [P1][DONE] Sample loading error/spinner tests rely on stable open/close behavior for advanced sections
+1. [P0][DONE] Fix data races caught by `make test-race` (ExportJobManager start/status snapshot; importer upload job snapshot)
+2. [P0][DONE] Makefile test targets must fail on `go test` failure (exit code masking via pipe)
+3. [P1][DONE] Help section auto-opens on time range input (breaks UX + E2E assumptions)
+4. [P1][DONE] Obfuscation advanced `<details>` are open by default (click-to-open tests close them)
+5. [P1][DONE] Sample loading error/spinner tests rely on stable open/close behavior for advanced sections
+6. [P0][TODO] Release version injection is broken (ldflags cannot override `const`)
+7. [P0][TODO] HTTP client timeout (30s) is incompatible with streaming exports and batch timeouts
+8. [P0][TODO] Resumed export progress double-counts batches (progress/ETA can be wildly wrong)
+9. [P1][TODO] `CheckExportAPI` leaks response bodies (connection leak on success path)
+10. [P1][TODO] Regex injection / query correctness risk when building `{job=~"..."}`
+11. [P1][TODO] Canceled jobs are never removed by retention cleanup
+12. [P1][TODO] Hard-coded 15 minute job timeout can kill legitimate exports
+13. [P2][TODO] `/api/fs/*` endpoints enlarge security surface (especially if bound to non-localhost)
+14. [P2][TODO] Debug/diagnostic logging is noisy by default
+15. [P2][TODO] Documentation inconsistencies (customer-facing confusion)
 
 ## Test suite expansion and hardening plan
 
@@ -79,15 +64,17 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 4. Add targeted regression tests per bug fix
    - For concurrency bugs: add unit tests that fail under `-race` and then validate via `make test-race`.
    - For behavior bugs: add unit-level tests where possible, and only add E2E assertions when the bug is UI-contract specific.
-5. Make Makefile test targets fail on failures
-   - `make test` / `make test-race` currently pipe `go test` output through `format-test-output`, which can mask non-zero exit codes.
-   - Implemented: capture `go test` exit code and return it after formatting output (portable, no `pipefail` dependency).
+5. Ensure Makefile test targets preserve exit codes
+   - Implemented (`2ffad40`): capture `go test` exit code and return it after formatting output (portable, no `pipefail` dependency).
+   - Result: `make test-race` now reliably fails on real races (used to expose `ExportJobManager` and importer job snapshot races, now fixed).
 6. Avoid stale `webServer` reuse in Playwright by default
    - Implemented: `tests/e2e/playwright.config.js` now reuses existing server only when `PW_REUSE_EXISTING_SERVER=1` is explicitly set.
 
 ## Findings (prioritized)
 
 ### P0: Release version injection is broken (ldflags cannot override `const`)
+
+**Status**: TODO
 
 **Impact**
 - Release builds produced by `build/builder.go` likely report the wrong runtime version in logs and bundle metadata.
@@ -150,19 +137,44 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 
 ---
 
-### P1: Data race / unsafe map access in `ExportJobManager.runJob`
+### P0: Data races in export job manager (ExportJobManager)
+
+**Status**: DONE
 
 **Impact**
-- Under concurrency (cleanup/cancel/resume), reading `m.jobs` without a lock can trigger a data race, and in worst cases can crash with `fatal error: concurrent map read and map write`.
-- `make test-race` currently passes because there is no test that hits this path concurrently.
+- `make test-race` fails and/or the process can crash under concurrency (`concurrent map read and map write`) if the job manager is exercised concurrently (start/cancel/resume/cleanup).
 
 **Evidence**
-- `internal/server/export_jobs.go:181-184` reads `m.jobs[jobID]` without holding `m.mu`.
-- `m.jobs` is mutated under lock in multiple methods (start/resume/cleanup/cancel/mark*).
+- `internal/server/export_jobs.go` had two distinct race issues:
+  - `StartJob` returned `status.clone()` after starting the async goroutine, while `markRunning()` could update the same `status` concurrently.
+  - `runJob` read `m.jobs[jobID]` without holding `m.mu`, while other goroutines can mutate `m.jobs` under lock.
+- Repro (before fix): `make test-race` failed (race detected during `internal/server.TestHandleExportCancel`).
 
-**Suggested fix**
-- Guard the read with `m.mu.RLock()` / `RUnlock()`, or pass needed values into `runJob` when starting the goroutine (no map access inside `runJob`).
-- Add a race-focused unit test that exercises start/cancel/cleanup concurrently.
+**Fix**
+- `StartJob`: snapshot the initial status under `m.mu` before starting `runJob`.
+- `runJob`: read `m.jobs[jobID]` under `m.mu.RLock()`.
+
+**Verification**
+- `make test-race`: PASS.
+
+---
+
+### P0: Data race in importer upload response snapshot (`/api/upload`)
+
+**Status**: DONE
+
+**Impact**
+- `make test-race` fails and the initial job JSON returned from `/api/upload` can be inconsistent under concurrency.
+
+**Evidence**
+- `internal/importer/server/server.go` `handleUpload` started `runImportJob` in a goroutine before returning `snapshotJob(job)` in the HTTP response.
+- Repro (before fix): `make test-race` failed (race detected during `internal/importer/server.TestSkipsNonNumericValues`).
+
+**Fix**
+- `handleUpload`: take a snapshot before starting the async goroutine and return that snapshot.
+
+**Verification**
+- `make test-race`: PASS.
 
 ---
 

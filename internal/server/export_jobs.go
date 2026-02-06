@@ -117,11 +117,12 @@ func (m *ExportJobManager) StartJob(ctx context.Context, jobID string, config do
 	}
 	m.jobs[jobID] = job
 	m.activeJobs++
+	statusSnapshot := status.clone()
 	m.mu.Unlock()
 
 	go m.runJob(jobCtx, jobID, config)
 
-	return status.clone(), nil
+	return statusSnapshot, nil
 }
 
 func (m *ExportJobManager) GetStatus(jobID string) (*ExportJobStatus, bool) {
@@ -178,7 +179,10 @@ func (m *ExportJobManager) ResumeJob(ctx context.Context, jobID string) (*Export
 func (m *ExportJobManager) runJob(ctx context.Context, jobID string, config domain.ExportConfig) {
 	baseBatches := 0
 	baseMetrics := 0
-	if job, ok := m.jobs[jobID]; ok {
+	m.mu.RLock()
+	job, ok := m.jobs[jobID]
+	m.mu.RUnlock()
+	if ok {
 		baseBatches = job.resumeFrom
 		baseMetrics = job.baseMetrics
 	}
