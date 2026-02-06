@@ -206,17 +206,27 @@ func TestExportJobManagerDoesNotSetJobContextDeadlineByDefault(t *testing.T) {
 type resumeExportService struct {
 	mu      sync.Mutex
 	configs []domain.ExportConfig
+	blockCh chan struct{}
 }
 
 func (r *resumeExportService) ExecuteExport(ctx context.Context, config domain.ExportConfig) (*domain.ExportResult, error) {
 	r.mu.Lock()
 	r.configs = append(r.configs, config)
 	r.mu.Unlock()
-	return &domain.ExportResult{ExportID: "resume"}, nil
+
+	if r.blockCh == nil {
+		return &domain.ExportResult{ExportID: "resume"}, nil
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-r.blockCh:
+		return &domain.ExportResult{ExportID: "resume"}, nil
+	}
 }
 
 func TestResumeJobUsesSameStagingAndOffset(t *testing.T) {
-	service := &resumeExportService{}
+	service := &resumeExportService{blockCh: make(chan struct{})}
 	manager := NewExportJobManager(service)
 
 	cfg := domain.ExportConfig{
@@ -228,17 +238,31 @@ func TestResumeJobUsesSameStagingAndOffset(t *testing.T) {
 		Batching:    domain.BatchSettings{Enabled: true},
 	}
 
-	if _, err := manager.StartJob(context.Background(), "job-resume", cfg); err != nil {
+	status, err := manager.StartJob(context.Background(), "job-resume", cfg)
+	if err != nil {
 		t.Fatalf("start job failed: %v", err)
 	}
-	// Simulate partial progress and cancellation
+
+	// Cancel and wait until the manager marks the job as canceled, so we don't race with the job goroutine.
+	if err := manager.CancelJob(status.ID); err != nil {
+		t.Fatalf("cancel failed: %v", err)
+	}
+	deadlineCancel := time.Now().Add(2 * time.Second)
+	for {
+		if s, ok := manager.GetStatus(status.ID); ok && s.State == JobCanceled {
+			break
+		}
+		if time.Now().After(deadlineCancel) {
+			t.Fatal("timeout waiting for canceled state")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Simulate partial progress before resume.
 	manager.mu.Lock()
 	job := manager.jobs["job-resume"]
-	job.status.State = JobCanceled
 	job.status.CompletedBatches = 2
 	job.status.MetricsProcessed = 42
-	job.resumeFrom = 2
-	job.config.ResumeFromBatch = 2
 	manager.mu.Unlock()
 
 	resumed, err := manager.ResumeJob(context.Background(), "job-resume")
@@ -272,6 +296,8 @@ func TestResumeJobUsesSameStagingAndOffset(t *testing.T) {
 		t.Fatalf("expected staging file %s, got %s", cfg.StagingFile, lastCfg.StagingFile)
 	}
 	service.mu.Unlock()
+
+	close(service.blockCh)
 }
 
 type resumableProgressExportService struct {
