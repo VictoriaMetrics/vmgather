@@ -106,7 +106,9 @@ func (m *ExportJobManager) StartJob(ctx context.Context, jobID string, config do
 		ObfuscationEnabled: config.Obfuscation.Enabled,
 	}
 
-	jobCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	// Export execution is already governed by per-request/per-batch timeouts inside the export service.
+	// Do not apply a fixed hard deadline here, since large exports can legitimately take hours.
+	jobCtx, cancel := context.WithCancel(context.Background())
 	job := &exportJob{status: status, cancel: cancel, config: config}
 
 	m.mu.Lock()
@@ -156,7 +158,7 @@ func (m *ExportJobManager) ResumeJob(ctx context.Context, jobID string) (*Export
 	if m.activeJobs >= m.maxConcurrentJobs {
 		return nil, fmt.Errorf("maximum concurrent exports reached (%d)", m.maxConcurrentJobs)
 	}
-	jobCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	jobCtx, cancel := context.WithCancel(context.Background())
 	job.cancel = cancel
 	job.config = cfg
 	job.resumeFrom = resumeFrom

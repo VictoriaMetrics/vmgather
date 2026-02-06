@@ -165,6 +165,44 @@ func TestExportJobManagerCancelJob(t *testing.T) {
 	}
 }
 
+type deadlineProbeExportService struct {
+	hasDeadlineCh chan bool
+}
+
+func (s *deadlineProbeExportService) ExecuteExport(ctx context.Context, config domain.ExportConfig) (*domain.ExportResult, error) {
+	_, ok := ctx.Deadline()
+	s.hasDeadlineCh <- ok
+	return &domain.ExportResult{ExportID: "deadline-probe"}, nil
+}
+
+func TestExportJobManagerDoesNotSetJobContextDeadlineByDefault(t *testing.T) {
+	svc := &deadlineProbeExportService{
+		hasDeadlineCh: make(chan bool, 1),
+	}
+	manager := NewExportJobManager(svc)
+
+	cfg := domain.ExportConfig{
+		TimeRange: domain.TimeRange{
+			Start: time.Now().Add(-time.Minute),
+			End:   time.Now(),
+		},
+		StagingFile: "/tmp/job-no-deadline.partial",
+	}
+
+	if _, err := manager.StartJob(context.Background(), "job-no-deadline", cfg); err != nil {
+		t.Fatalf("unexpected error starting job: %v", err)
+	}
+
+	select {
+	case ok := <-svc.hasDeadlineCh:
+		if ok {
+			t.Fatal("expected no context deadline by default, but deadline was set")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for export service to be called")
+	}
+}
+
 type resumeExportService struct {
 	mu      sync.Mutex
 	configs []domain.ExportConfig

@@ -44,7 +44,7 @@ Status legend: TODO -> IN PROGRESS -> DONE.
 9. [P1][DONE] `CheckExportAPI` leaks response bodies (connection leak on success path)
 10. [P1][DONE] Regex injection / query correctness risk when building `{job=~"..."}`
 11. [P1][DONE] Canceled jobs are never removed by retention cleanup
-12. [P1][TODO] Hard-coded 15 minute job timeout can kill legitimate exports
+12. [P1][DONE] Hard-coded 15 minute job timeout can kill legitimate exports
 13. [P2][TODO] `/api/fs/*` endpoints enlarge security surface (especially if bound to non-localhost)
 14. [P2][TODO] Debug/diagnostic logging is noisy by default
 15. [P2][TODO] Documentation inconsistencies (customer-facing confusion)
@@ -280,6 +280,8 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 
 ### P1: Hard-coded 15 minute job timeout can kill legitimate exports
 
+**Status**: DONE
+
 **Impact**
 - Large time ranges (or slow endpoints) can exceed 15 minutes, causing the export to be canceled even though the user expects it to run.
 
@@ -290,6 +292,13 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 **Suggested fix**
 - Prefer no hard timeout (use explicit cancel) or make it configurable via flag/env.
 - If a timeout is required, compute it from `TotalBatches * defaultBatchTimeout + overhead`.
+
+**Implemented**
+- `internal/server/export_jobs.go`: the export job manager no longer applies a fixed 15 minute deadline to job execution contexts; it now uses `context.WithCancel(context.Background())`.
+- `internal/server/export_jobs_test.go`: added `TestExportJobManagerDoesNotSetJobContextDeadlineByDefault`.
+
+**Verification**
+- `make test-all`: PASS (includes unit/integration + Playwright E2E; 99 passed / 3 skipped)
 
 ---
 
