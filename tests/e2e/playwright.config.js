@@ -80,8 +80,9 @@ module.exports = defineConfig({
   webServer: {
     command: `../../vmgather -no-browser -addr ${webAddr || 'localhost:8080'}`,
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
+    // Default to a fresh server per run to avoid stale binaries / state affecting E2E determinism.
+    // Opt-in reuse via `PW_REUSE_EXISTING_SERVER=1`.
+    reuseExistingServer: process.env.PW_REUSE_EXISTING_SERVER === '1',
     timeout: 120 * 1000,
   },
 });
-

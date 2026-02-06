@@ -60,8 +60,8 @@ test.describe('Timezone Support', () => {
         await page.selectOption('#timezone', 'UTC');
         await page.waitForTimeout(100);
         
-        // Click "Last 1h" preset
-        await page.click('button:has-text("Last 1h")');
+        // Click "Last 1 h" preset
+        await page.click('button:has-text("Last 1 h")');
         await page.waitForTimeout(100);
         
         // Verify time inputs are populated
@@ -82,10 +82,10 @@ test.describe('Timezone Support', () => {
         await page.waitForTimeout(100);
         
         // Click different presets
-        await page.click('button:has-text("Last 3h")');
+        await page.click('button:has-text("Last 3 h")');
         await page.waitForTimeout(100);
         
-        await page.click('button:has-text("Last 6h")');
+        await page.click('button:has-text("Last 6 h")');
         await page.waitForTimeout(100);
         
         // Timezone should still be Europe/London

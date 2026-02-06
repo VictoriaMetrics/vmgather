@@ -10,10 +10,12 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 ### Changed
 - Export batching payload is now built from the batch-window selector instead of forcing batching to match metric step.
 - Metric step selector now refreshes the batch-window hint to reflect the current recommendation.
+- Playwright E2E now starts a fresh `vmgather` web server by default (opt-in reuse via `PW_REUSE_EXISTING_SERVER=1`).
 
 ### Fixed
 - Frontend batching payload field now matches the backend contract: `custom_interval_seconds` (was `custom_interval_secs`).
 - Makefile test targets now preserve `go test` exit codes (piped output no longer masks failures).
+- Obfuscation advanced sections (labels/preview) no longer auto-open by default; sample-loading errors and retries render consistently.
 
 ## [v1.7.0] - 2026-01-23
 

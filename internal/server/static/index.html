@@ -164,6 +164,17 @@
             margin-bottom: 24px;
         }
 
+        .form-row {
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+        }
+
+        .form-row .form-group {
+            flex: 1;
+            margin-bottom: 0;
+        }
+
         .input-hint {
             color: var(--text-muted);
             font-size: 0.875rem;
@@ -1001,6 +1012,14 @@
         }
 
         @media (max-width: 768px) {
+            .form-row {
+                flex-direction: column;
+            }
+
+            .form-row .form-group {
+                margin-bottom: 24px;
+            }
+
             .card-back {
                 border-radius: 0;
                 border: none;
@@ -1368,7 +1387,7 @@
                     </div>
 
                     <div id="obfuscationAdvancedMount">
-                        <details id="advancedLabelsDetails" style="margin-top: 20px;" open>
+                        <details id="advancedLabelsDetails" style="margin-top: 20px;">
                             <summary id="advancedLabelsSummary"
                                 style="cursor: pointer; font-weight: 600; color: var(--primary); padding: 10px; background: var(--background); border-radius: 4px;">
                                 Advanced: Obfuscate other labels
@@ -1381,7 +1400,7 @@
                             </div>
                         </details>
 
-                        <details id="previewDetails" style="margin-top: 20px;" open>
+                        <details id="previewDetails" style="margin-top: 20px;">
                             <summary id="previewSummary"
                                 style="cursor: pointer; font-weight: 600; color: var(--primary); padding: 10px; background: var(--background); border-radius: 4px;">
                                 Preview sample data
@@ -1433,15 +1452,31 @@
                             so partial files survive interruptions.</span>
                     </div>
 
-                    <div class="form-group">
-                        <label for="metricStep">Metric sampling step</label>
-                        <select id="metricStep">
-                            <option value="auto">Auto (based on time range)</option>
-                            <option value="30">30 seconds</option>
-                            <option value="60">1 minute</option>
-                            <option value="300">5 minutes</option>
-                        </select>
-                        <span class="input-hint" id="metricStepHint">Recommended step: 1 min</span>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="metricStep">Metric sampling step</label>
+                            <select id="metricStep">
+                                <option value="auto">Auto (based on time range)</option>
+                                <option value="30">30 seconds</option>
+                                <option value="60">1 minute</option>
+                                <option value="300">5 minutes</option>
+                            </select>
+                            <span class="input-hint" id="metricStepHint">Recommended step: 1 min</span>
+                        </div>
+                        <div class="form-group">
+                            <label for="batchWindowSelect">Batch window (Auto)</label>
+                            <select id="batchWindowSelect">
+                                <option value="auto" selected>Auto (recommended)</option>
+                                <option value="300">5 minutes</option>
+                                <option value="900">15 minutes</option>
+                                <option value="3600">1 hour</option>
+                                <option value="custom">Custom...</option>
+                            </select>
+                            <input type="number" id="customBatchWindowInput" placeholder="Seconds"
+                                min="30" step="1" style="display: none; margin-top: 8px;">
+                            <span class="input-hint" id="batchWindowHint">Max duration per batch. Auto adapts to the
+                                time range.</span>
+                        </div>
                     </div>
 
                     <div id="exportProgressPanel" class="export-progress hidden">

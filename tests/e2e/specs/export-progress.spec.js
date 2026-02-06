@@ -162,6 +162,7 @@ async function goToObfuscationStep(page) {
   await page.evaluate(() => window.validateStagingDir && window.validateStagingDir(true));
   await waitForHintText(page, 'Ready');
   await page.selectOption('#metricStep', '60');
+  await page.selectOption('#batchWindowSelect', '300');
 }
 
 test.describe('Export progress UI', () => {
@@ -172,7 +173,7 @@ test.describe('Export progress UI', () => {
       expect(requestBody.metric_step_seconds).toBe(60);
       expect(requestBody.batching).toMatchObject({
         strategy: 'custom',
-        custom_interval_secs: 60,
+        custom_interval_seconds: 300,
       });
       route.fulfill({
         status: 200,

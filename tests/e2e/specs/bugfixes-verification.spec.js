@@ -181,7 +181,7 @@ test.describe('Bug Fix Verification', () => {
       await page.waitForTimeout(500);
 
       // Step 2: Set time range
-      await page.locator('button:has-text("Last 1h")').click();
+      await page.locator('button:has-text("Last 1 h")').click();
       nextButton = page.locator('.step.active button.btn-primary:has-text("Next")');
       await nextButton.click();
       await page.waitForTimeout(500);
@@ -319,7 +319,7 @@ test.describe('Bug Fix Verification', () => {
       await nextButton.click();
       await page.waitForTimeout(500);
 
-      await page.locator('button:has-text("Last 1h")').click();
+      await page.locator('button:has-text("Last 1 h")').click();
       nextButton = page.locator('.step.active button.btn-primary:has-text("Next")');
       await nextButton.click();
       await page.waitForTimeout(500);

@@ -63,24 +63,35 @@ test.describe('Sample Loading - Error Handling', () => {
 
     // Step 5: Obfuscation - open advanced labels
     await page.waitForSelector('.step.active h2:has-text("Obfuscation")');
-    await page.locator('summary:has-text("Advanced: Obfuscate other labels")').click();
+    const advancedDetails = page.locator('#advancedLabelsDetails');
+    await advancedDetails.evaluate(el => { el.open = true; });
 
     // Wait for error message
-    await page.waitForSelector('.error-message', { timeout: 5000 });
+    const errorBox = page.locator('#advancedLabels .error-message');
+    await expect(errorBox).toBeVisible({ timeout: 10000 });
 
     // Verify error is displayed
-    const errorText = await page.locator('.error-message').first().textContent();
-    expect(errorText).toContain('Failed to load sample metrics');
-    expect(errorText).toContain('VM connection timeout');
+    await expect(errorBox).toContainText('Failed to load sample metrics');
+    await expect(errorBox).toContainText('VM connection timeout');
 
     // Verify retry button is present
-    await expect(page.locator('button:has-text("Retry")')).toBeVisible();
+    await expect(errorBox.locator('button:has-text(\"Retry\")')).toBeVisible();
   });
 
   test('should show loading spinner while loading samples', async ({ page }) => {
-    // Mock sample endpoint with delay
+    let releaseResponse;
+    const releasePromise = new Promise(resolve => {
+      releaseResponse = resolve;
+    });
+    let isFirstCall = true;
+
+    // Mock sample endpoint - block the first call so we can assert on the loader deterministically.
     await page.route('/api/sample', async route => {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      if (isFirstCall) {
+        isFirstCall = false;
+        await releasePromise;
+      }
+
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -113,15 +124,20 @@ test.describe('Sample Loading - Error Handling', () => {
     await page.locator('.component-header input[type="checkbox"]').first().click();
     await page.locator('.step.active button:has-text("Next")').click();
 
-    await page.waitForSelector('.step.active h2:has-text("Obfuscation")');
-    await page.evaluate(() => window.loadSampleMetrics && window.loadSampleMetrics());
-    await page.locator('summary:has-text("Advanced: Obfuscate other labels")').click();
+	    await page.waitForSelector('.step.active h2:has-text("Obfuscation")');
+	    const advancedDetails = page.locator('#advancedLabelsDetails');
+	    await advancedDetails.evaluate(el => { el.open = true; });
+	    const previewDetails = page.locator('#previewDetails');
+	    await previewDetails.evaluate(el => { el.open = true; });
 
-    // Verify loading spinner appears
-    await expect(page.locator('text=Loading sample metrics')).toBeVisible();
+	    // Verify loading spinner appears
+	    await expect(page.locator('#advancedLabels #advancedLoader')).toBeVisible({ timeout: 10000 });
+	    await expect(page.locator('#samplePreview #previewLoader')).toBeVisible({ timeout: 10000 });
+
+    releaseResponse();
 
     // Wait for loading to complete
-    await page.waitForSelector('.label-item', { timeout: 5000 });
+    await page.waitForSelector('#advancedLabels .label-item', { timeout: 10000 });
   });
 
   test('should handle network errors gracefully', async ({ page }) => {
@@ -143,15 +159,15 @@ test.describe('Sample Loading - Error Handling', () => {
     await page.locator('.step.active button:has-text("Next")').click();
 
     await page.waitForSelector('.step.active h2:has-text("Obfuscation")');
-    await page.evaluate(() => window.loadSampleMetrics && window.loadSampleMetrics());
-    await page.locator('summary:has-text("Advanced: Obfuscate other labels")').click();
+    const advancedDetails = page.locator('#advancedLabelsDetails');
+    await advancedDetails.evaluate(el => { el.open = true; });
 
     // Wait for error message
-    await page.waitForSelector('.error-message', { timeout: 5000 });
+    const errorBox = page.locator('#advancedLabels .error-message');
+    await expect(errorBox).toBeVisible({ timeout: 10000 });
 
     // Verify error message is shown
-    const errorText = await page.locator('.error-message').first().textContent();
-    expect(errorText).toContain('Failed to load sample metrics');
+    await expect(errorBox).toContainText('Failed to load sample metrics');
   });
 
   test('should allow retry after error', async ({ page }) => {
@@ -160,7 +176,7 @@ test.describe('Sample Loading - Error Handling', () => {
     // Mock sample endpoint to fail first time, succeed second time
     await page.route('/api/sample', async route => {
       callCount++;
-    if (callCount <= 2) {
+      if (callCount === 1) {
         await route.fulfill({
           status: 500,
           contentType: 'application/json',
@@ -197,18 +213,22 @@ test.describe('Sample Loading - Error Handling', () => {
     await page.locator('.step.active button:has-text("Next")').click();
 
     await page.waitForSelector('.step.active h2:has-text("Obfuscation")');
-    await page.locator('summary:has-text("Advanced: Obfuscate other labels")').click();
+    const advancedDetails = page.locator('#advancedLabelsDetails');
+    await advancedDetails.evaluate(el => { el.open = true; });
 
     // Wait for error
-    await page.waitForSelector('.error-message', { timeout: 5000 });
+    const errorBox = page.locator('#advancedLabels .error-message');
+    await expect(errorBox).toBeVisible({ timeout: 10000 });
 
-    // Click retry
-    await page.locator('button:has-text("Retry")').click();
+	    // Click retry
+	    const retryButton = errorBox.locator('button:has-text("Retry")');
+	    await expect(retryButton).toBeVisible({ timeout: 10000 });
+	    await retryButton.evaluate(button => button.click());
 
     // Wait for success - labels should appear
-    await page.waitForSelector('.label-item', { timeout: 5000 });
+    await page.waitForSelector('#advancedLabels .label-item', { timeout: 10000 });
 
     // Verify no error is shown
-    await expect(page.locator('.error-message')).not.toBeVisible();
+    await expect(page.locator('#advancedLabels .error-message')).toHaveCount(0);
   });
 });

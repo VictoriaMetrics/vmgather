@@ -114,6 +114,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     initializeStagingDirInput();
     initializeMetricStepSelector();
+    initializeBatchWindowSelector();
     disableCancelButton();
     wireAdvancedSummaries();
     initializeHelpSection();
@@ -1767,8 +1768,8 @@ function initializeMetricStepSelector() {
     [timeFrom, timeTo].forEach(el => {
         if (el) {
             const markAndRecalc = () => {
-                markHelpAutoOpenFlag(true);
                 applyRecommendedMetricStep(false);
+                updateBatchWindowHint();
             };
             el.addEventListener('change', markAndRecalc);
             el.addEventListener('input', markAndRecalc);
@@ -1822,6 +1823,81 @@ function getSelectedMetricStepSeconds() {
     }
     const parsed = parseInt(value, 10);
     return isNaN(parsed) ? 0 : parsed;
+}
+
+function initializeBatchWindowSelector() {
+    const select = document.getElementById('batchWindowSelect');
+    const customInput = document.getElementById('customBatchWindowInput');
+    if (!select) {
+        return;
+    }
+    const syncUI = () => {
+        if (customInput) {
+            const showCustom = select.value === 'custom';
+            customInput.style.display = showCustom ? 'block' : 'none';
+        }
+        updateBatchWindowHint();
+    };
+    select.addEventListener('change', syncUI);
+    if (customInput) {
+        customInput.addEventListener('input', updateBatchWindowHint);
+    }
+    syncUI();
+}
+
+function updateBatchWindowHint() {
+    const hint = document.getElementById('batchWindowHint');
+    const select = document.getElementById('batchWindowSelect');
+    const customInput = document.getElementById('customBatchWindowInput');
+    if (!hint || !select) {
+        return;
+    }
+    const recommended = getRecommendedMetricStepSeconds();
+    const value = select.value || 'auto';
+    if (value === 'auto') {
+        hint.textContent = `Auto batches by time range (current: ${formatStepLabel(recommended)}).`;
+        return;
+    }
+    if (value === 'custom') {
+        const parsed = parseInt(customInput?.value || '', 10);
+        if (!parsed || parsed <= 0) {
+            hint.textContent = 'Enter a custom window in seconds (min 30s).';
+            return;
+        }
+        hint.textContent = `Custom batch window: ${formatStepLabel(parsed)}.`;
+        return;
+    }
+    const parsed = parseInt(value, 10);
+    if (parsed > 0) {
+        hint.textContent = `Batch window: ${formatStepLabel(parsed)}.`;
+        return;
+    }
+    hint.textContent = `Auto batches by time range (current: ${formatStepLabel(recommended)}).`;
+}
+
+function getBatchingConfig() {
+    const select = document.getElementById('batchWindowSelect');
+    const customInput = document.getElementById('customBatchWindowInput');
+    let strategy = 'auto';
+    let customInterval = 0;
+    const value = select?.value || 'auto';
+    if (value && value !== 'auto') {
+        if (value === 'custom') {
+            customInterval = parseInt(customInput?.value || '', 10);
+        } else {
+            customInterval = parseInt(value, 10);
+        }
+        if (!isNaN(customInterval) && customInterval > 0) {
+            strategy = 'custom';
+        } else {
+            customInterval = 0;
+        }
+    }
+    return {
+        enabled: true,
+        strategy,
+        custom_interval_seconds: customInterval
+    };
 }
 
 function formatStepLabel(seconds) {
@@ -2105,15 +2181,6 @@ async function loadSampleMetrics() {
         (samplePreviewContainer || advancedLabelsContainer)?.prepend(globalSpinner);
     } else {
         globalSpinner.style.display = 'inline-block';
-    }
-
-    const advDetails = document.getElementById('advancedLabelsDetails');
-    if (advDetails) {
-        advDetails.open = true;
-    }
-    const prevDetails = document.getElementById('previewDetails');
-    if (prevDetails) {
-        prevDetails.open = true;
     }
 
     if (sampleAbortController) {
@@ -2507,10 +2574,6 @@ function toggleObfuscation(markTouched = true) {
         if (jobCheckbox && !jobCheckbox.checked) {
             jobCheckbox.checked = true;
         }
-        const advDetails = document.getElementById('advancedLabelsDetails');
-        if (advDetails) {
-            advDetails.open = true;
-        }
     }
 
     if (enabled && isObfuscationStepActive()) {
@@ -2522,6 +2585,10 @@ function toggleObfuscation(markTouched = true) {
             }
         }
         loadSampleMetrics();
+        return;
+    }
+
+    if (!markTouched) {
         return;
     }
 
@@ -2988,12 +3055,7 @@ async function exportMetrics(buttonElement) {
             throw new Error('Please provide a staging directory');
         }
         const metricStepSeconds = getSelectedMetricStepSeconds();
-        const batchWindowSeconds = metricStepSeconds || getRecommendedMetricStepSeconds();
-        const batchingConfig = {
-            enabled: true,
-            strategy: 'custom',
-            custom_interval_secs: batchWindowSeconds,
-        };
+        const batchingConfig = getBatchingConfig();
 
         const exportPayload = {
             connection: config,
