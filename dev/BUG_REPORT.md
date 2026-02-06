@@ -341,18 +341,23 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 - Customers running the binary may see verbose logs that aren’t actionable, which complicates support instructions (“paste logs”).
 
 **Evidence**
-- `internal/server/server.go:195-207` logs connection details unconditionally (not gated by `s.debug`).
+- The server contains verbose request/summary dumps that should not be printed by default:
+  - `/api/validate`: `internal/server/server.go:196-209` ("Validating connection" with auth presence booleans).
+  - `/api/discover`: `internal/server/server.go:382-389` (request dump) and `internal/server/server.go:433-436` (summary dump).
+  - `/api/sample`: `internal/server/server.go:579-587` (request dump), `internal/server/server.go:609-615` (obfuscation debug line), and `internal/server/server.go:630-633` (summary dump).
 
 **Suggested fix**
 - Gate these logs behind `s.debug` (or a verbose level).
 - Ensure sensitive fields are never printed (currently it logs booleans, which is OK, but the default verbosity is the bigger issue).
 
 **Implemented**
-- `internal/server/server.go`: connection-detail debug dump during `/api/validate` is now gated behind `s.debug`.
-- `internal/server/server_test.go`: added regression tests `TestHandleValidateConnectionDoesNotLogConnectionDetailsByDefault` and `TestHandleValidateConnectionLogsConnectionDetailsWhenDebugEnabled`.
+- `internal/server/server.go`: verbose request/summary dumps for `/api/validate`, `/api/discover`, and `/api/sample` are now gated behind `s.debug`.
+- `internal/server/server_test.go`: added regression tests for validate/discover/sample log gating (debug off vs debug on).
 
 **Verification**
-- `make test-all`: PASS (includes unit/integration + Playwright E2E; 99 passed / 3 skipped)
+- `make test-full`: PASS
+- `make test-race`: PASS
+- `make test-e2e`: PASS (99 passed / 3 skipped)
 
 ---
 
