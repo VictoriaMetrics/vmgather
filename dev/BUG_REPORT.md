@@ -17,6 +17,8 @@ This document is an internal engineering review of the `/Users/yu-key/VMexporter
 Baseline commands executed in this review cycle:
 
 - `COMPOSE_PROJECT_NAME=vmtest2 make test-all-clean`: PASS (unit + integration + Playwright E2E; 102 passed / 0 skipped; auto-cleans Docker env + volumes)
+- `COMPOSE_PROJECT_NAME=vmtest_baseline make test-all-clean`: PASS (same as above; confirms no-skip full suite still passes on current HEAD)
+- `COMPOSE_PROJECT_NAME=vmtest_shless3 make test-all-clean`: PASS (verifies Go-based healthcheck/scenarios and stale-container cleanup in test-env-up)
 - `make test-unit-full`: PASS
 - `make test-race`: PASS (earlier in cycle; previously exposed data races in `internal/server` and `internal/importer/server`)
 
@@ -26,6 +28,8 @@ This is the “everything” run requested (unit + integration + E2E) to establi
 
 - `COMPOSE_PROJECT_NAME=vmtest2 make test-all`: PASS (unit + integration + Playwright E2E; 102 passed / 0 skipped)
 - `COMPOSE_PROJECT_NAME=vmtest2 make test-all-clean`: PASS (same as above, plus `docker compose down -v` cleanup)
+- `COMPOSE_PROJECT_NAME=vmtest_baseline make test-all-clean`: PASS (same as above; also verifies auto-clean removes volumes/networks)
+- `COMPOSE_PROJECT_NAME=vmtest_shless3 make test-all-clean`: PASS (same as above; validates Go-based `testconfig` subcommands in the local test env)
 
 Notes:
 - `make test` runs `go test -short` (slow/advanced unit tests are skipped). Use `make test-unit-full` (or `make test-all`) for a no-skip unit run.
@@ -54,13 +58,16 @@ Status legend: TODO -> IN PROGRESS -> DONE.
 15. [P1][DONE] Full-suite test targets were skipping coverage (`make test-full` ran unit tests with `-short`; Playwright skipped "real" specs). Added `test-unit-full` and updated `test-e2e` defaults so `make test-all` runs with 0 skips.
 16. [P1][DONE] Fix flaky `TestExportService_ExecuteExportStreamsWithoutPrematureCancellation` (too-tight 1s timeout + `t.Parallel`) so full local suite is stable.
 17. [P2][TODO] Documentation inconsistencies (customer-facing confusion)
+18. [P1][DONE] Remove `.sh` scripts from the repo (prefer Go + Makefile targets): migrate healthcheck/scenarios/pre-push into `local-test-env/testconfig` subcommands and Makefile targets.
+19. [P2][DONE] `make test-env-up` now removes stale test containers to avoid name conflicts across runs.
+20. [P3][TODO] Remove obsolete `version:` attribute from `local-test-env/docker-compose.test.yml` (avoids noisy Docker Compose warnings).
 
 ## Test suite expansion and hardening plan
 
 Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback, minimal flakiness).
 
 1. Stabilize test environment readiness
-   - Verified: `local-test-env/healthcheck.sh` already waits for `vmauth-export-test` `vm_app_version` (tenant 2022).
+   - Verified: `local-test-env/testconfig healthcheck` already waits for `vmauth-export-test` `vm_app_version` (tenant 2022).
 2. Make E2E selectors resilient
    - Replace brittle text-based preset selectors in Playwright with stable selectors (ideally a `data-testid` or `data-preset` attribute; fallback: updated text to match the UI).
 3. Reduce E2E flakiness during local “full” runs
@@ -81,9 +88,10 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 	- Implemented: `make test-all` (runs `make test-full` and then `make test-e2e`), now with Playwright defaults so the suite runs with 0 skipped specs against the local Docker env.
 9. Make local Docker env startup more resilient on OrbStack
 	- Implemented: `make test-env-up` auto-detects "no space left on device" failures and runs `docker system prune -af` before retrying.
+	- Implemented: `make test-env-up` removes stale test containers (fixed names) before `docker compose up`.
 10. Ensure all “real env” dependencies are reachable before expensive E2E runs
-	- Implemented: `local-test-env/healthcheck.sh` now also validates `vmselect-standalone` (`/select/0/prometheus`).
-	- Implemented: `local-test-env/test-all-scenarios.sh` now includes a `vmselect-standalone` scenario so `make test-integration` fails fast if it isn't reachable.
+	- Implemented: `local-test-env/testconfig healthcheck` now also validates `vmselect-standalone` (`/select/0/prometheus`).
+	- Implemented: `local-test-env/testconfig scenarios` now includes a `vmselect-standalone` scenario so `make test-integration` fails fast if it isn't reachable.
 
 ## Findings (prioritized)
 

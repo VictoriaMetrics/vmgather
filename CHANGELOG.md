@@ -18,7 +18,11 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - `make test-e2e` now defaults `E2E_REAL=1` and `LIVE_VM_URL` to the local Docker env, so "real" Playwright specs don't get skipped.
 - `make test-env-up` auto-recovers from Docker disk-full errors by running `docker system prune -af` and retrying.
 - `make test-env-full` now uses `make test-env-clean` instead of global `docker volume prune -f`, avoiding accidental cleanup of unrelated volumes.
-- `local-test-env/healthcheck.sh` now also validates `vmselect-standalone` readiness; integration scenarios include a standalone `vmselect` check.
+- Local test env healthcheck/scenarios now run via `local-test-env/testconfig` (shell scripts removed).
+- `make test-env-up` now removes stale test containers before `docker compose up` to avoid name conflicts.
+- Makefile now provides a `pre-push` target (full test-env cycle).
+- `local-test-env/testconfig healthcheck` now also validates `vmselect-standalone` readiness; integration scenarios include a standalone `vmselect` check.
+- Local test env healthcheck/scenarios are now implemented in Go (`local-test-env/testconfig healthcheck|scenarios`); removed repo shell scripts and added `make pre-push` as the local gate.
 
 ### Fixed
 - Frontend batching payload field now matches the backend contract: `custom_interval_seconds` (was `custom_interval_secs`).
@@ -119,8 +123,8 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 ## [v1.4.0] - 2025-12-03
 
 ### Added
-- Live discovery coverage against real VictoriaMetrics endpoints: integration (`live_discovery_test.go`) and E2E (`live-discovery.spec.js`) gated by `LIVE_VM_URL`, plus a healthcheck script to verify `vm_app_version` before tests.
-- Local test env healthcheck (`local-test-env/healthcheck.sh`) and published ports for single-node VM (`http://localhost:18428`), with quick-start docs updated.
+- Live discovery coverage against real VictoriaMetrics endpoints: integration (`live_discovery_test.go`) and E2E (`live-discovery.spec.js`) gated by `LIVE_VM_URL`, plus a healthcheck command to verify `vm_app_version` before tests.
+- Local test env healthcheck (`local-test-env/testconfig healthcheck`) and published ports for single-node VM (`http://localhost:18428`), with quick-start docs updated.
 
 ### Changed
 - CI integration job now runs live discovery with `LIVE_VM_URL=http://localhost:18428` and `-tags "integration realdiscovery"`.
@@ -141,7 +145,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Discovery failures caused by `/prometheus` base paths now fall back cleanly; missing metrics report a clear reason instead of generic 500.
 
 ### Testing
-- `./local-test-env/healthcheck.sh` validates `vm_app_version` availability on single and cluster endpoints.
+- `./local-test-env/testconfig healthcheck` validates `vm_app_version` availability on single and cluster endpoints.
 - `INTEGRATION_TEST=1 go test -tags "integration realdiscovery" ./tests/integration/...` (uses LIVE_VM_URL=http://localhost:18428).
 - `npm test` Playwright suite (92 specs; live discovery executed when `LIVE_VM_URL` is set).
 

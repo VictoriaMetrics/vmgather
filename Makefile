@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-llm build build-safe build-all clean fmt lint help test-env test-env-up test-env-down test-env-clean test-env-logs test-e2e test-all test-all-clean test-scenarios test-config-bootstrap docker-build docker-build-vmgather docker-build-vmimporter
+.PHONY: test test-fast test-llm build build-safe build-all clean fmt lint help pre-push test-env test-env-up test-env-down test-env-clean test-env-logs test-e2e test-all test-all-clean test-scenarios test-config-bootstrap docker-build docker-build-vmgather docker-build-vmimporter
 
 VERSION ?= $(shell git describe --tags --always --dirty)
 PKG_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "latest")
@@ -11,6 +11,7 @@ GO_VERSION ?= 1.22
 DOCKER_OUTPUT ?= type=docker
 DOCKER_COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo "docker compose" || echo "docker-compose")
 TEST_ENV_FILE := local-test-env/.env.dynamic
+TEST_ENV_CONTAINERS := vmsingle-noauth vmsingle-auth vmstorage-1 vmstorage-2 vmselect vmselect-standalone vmauth-single vmauth-cluster vmauth-export-test vminsert vmagent nginx-proxy test-data-generator
 
 # Docker registries and namespace (standard across VictoriaMetrics)
 # GHCR is handled by CI; local `make release` targets public hubs only.
@@ -382,7 +383,9 @@ lint:
 # =============================================================================
 
 # Build test config utility
-local-test-env/testconfig: local-test-env/config.go
+LOCAL_TEST_ENV_GO := $(wildcard local-test-env/*.go)
+
+local-test-env/testconfig: $(LOCAL_TEST_ENV_GO)
 	@cd local-test-env && go build -o testconfig .
 
 # Load and validate test configuration
@@ -409,6 +412,9 @@ test-env-full:
 	$(MAKE) test
 	$(MAKE) test-env-clean
 
+# Local pre-push safety check (kept in Makefile to avoid shell scripts)
+pre-push: test-env-full
+
 test-env-up: local-test-env/testconfig
 	@echo "================================================================================"
 	@echo "Starting Test Environment"
@@ -420,6 +426,8 @@ test-env-up: local-test-env/testconfig
 	fi
 	@cd local-test-env && ./testconfig bootstrap
 	@cd local-test-env && ./testconfig validate
+	@echo "Cleaning leftover test containers (if any)..."
+	@docker rm -f $(TEST_ENV_CONTAINERS) >/dev/null 2>&1 || true
 	@set -e; \
 		tmpfile="$$(mktemp)"; \
 		status=0; \
@@ -445,7 +453,7 @@ test-env-up: local-test-env/testconfig
 	@sleep 30
 	@echo ""
 	@echo "Running healthcheck..."
-	@cd local-test-env && ./healthcheck.sh
+	@cd local-test-env && ./testconfig healthcheck
 	@echo ""
 	@echo "[OK] Test environment is ready!"
 	@echo ""
@@ -488,10 +496,6 @@ test-integration: local-test-env/testconfig
 	@echo "================================================================================"
 	@echo "Integration Tests: Binary testing Docker environment"
 	@echo "================================================================================"
-	@if [ ! -f "local-test-env/test-all-scenarios.sh" ]; then \
-		echo "[ERROR] test-all-scenarios.sh not found"; \
-		exit 1; \
-	fi
 	@if ! docker ps | grep -q vmsingle-noauth; then \
 		echo "[ERROR] Docker test environment not running"; \
 		echo "Run 'make test-env-up' first"; \
@@ -499,7 +503,7 @@ test-integration: local-test-env/testconfig
 	fi
 	@set -e; \
 		eval "$$(cd local-test-env && ./testconfig env)"; \
-		cd local-test-env && ./test-all-scenarios.sh; \
+		cd local-test-env && ./testconfig scenarios; \
 		cd ..; \
 		INTEGRATION_TEST=1 LIVE_VM_URL="$$VM_SINGLE_NOAUTH_URL" go test -tags "integration realdiscovery" ./tests/integration/...
 
@@ -569,6 +573,9 @@ test-all-clean:
 		echo "================================================================================"; \
 		$(MAKE) --no-print-directory test-env-clean || true; \
 		exit $$status
+
+# Local gate before pushing changes.
+pre-push: test-all-clean
 
 # =============================================================================
 # FULL TEST SUITE

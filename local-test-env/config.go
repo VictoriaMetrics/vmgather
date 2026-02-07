@@ -309,6 +309,11 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("[OK] Wrote %s\n", envFile)
+	case "healthcheck":
+		if err := runHealthcheck(config); err != nil {
+			fmt.Fprintf(os.Stderr, "[healthcheck] ERROR: %v\n", err)
+			os.Exit(1)
+		}
 	case "json":
 		jsonStr, err := config.ToJSON()
 		if err != nil {
@@ -318,6 +323,12 @@ func main() {
 		fmt.Println(jsonStr)
 	case "env":
 		fmt.Println(config.ToEnv())
+	case "scenarios":
+		if err := runScenarios(config); err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("[OK] All scenarios passed")
 	case "validate":
 		// Validate configuration and exit with proper code
 		if err := validateConfig(config); err != nil {
@@ -326,7 +337,7 @@ func main() {
 		}
 		fmt.Println("[OK] Configuration is valid")
 	default:
-		fmt.Fprintf(os.Stderr, "Usage: %s [json|env|validate|bootstrap]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [json|env|validate|bootstrap|healthcheck|scenarios]\n", os.Args[0])
 		os.Exit(1)
 	}
 }
