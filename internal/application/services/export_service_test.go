@@ -676,8 +676,6 @@ func TestExportService_ProcessMetrics_ValidJSONL(t *testing.T) {
 }
 
 func TestExportService_ExecuteExportStreamsWithoutPrematureCancellation(t *testing.T) {
-	t.Parallel()
-
 	writeResult := make(chan error, 1)
 	metrics := []string{
 		`{"metric":{"__name__":"metric_one","job":"vmagent"},"values":[1],"timestamps":[1000]}`,
@@ -708,7 +706,8 @@ func TestExportService_ExecuteExportStreamsWithoutPrematureCancellation(t *testi
 	defer server.Close()
 
 	service := NewExportService(t.TempDir(), "test-version")
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	timeout := 5 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	config := domain.ExportConfig{
@@ -739,7 +738,7 @@ func TestExportService_ExecuteExportStreamsWithoutPrematureCancellation(t *testi
 		if writeErr != nil {
 			t.Fatalf("server write failed: %v", writeErr)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(timeout):
 		t.Fatal("server never finished writing export payload")
 	}
 }

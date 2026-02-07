@@ -6,16 +6,20 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 
 ### Added
 - Export wizard now lets you configure a separate batch window (auto/preset/custom seconds) independent of metric sampling step.
+- Makefile now provides `test-unit-full` for running unit tests without `-short`.
 
 ### Changed
 - Export batching payload is now built from the batch-window selector instead of forcing batching to match metric step.
 - Metric step selector now refreshes the batch-window hint to reflect the current recommendation.
 - Playwright E2E now starts a fresh `vmgather` web server by default (opt-in reuse via `PW_REUSE_EXISTING_SERVER=1`).
 - Makefile now provides `test-e2e` and `test-all` targets for running Playwright locally.
+- Makefile `test-full` now runs unit tests via `test-unit-full` (no `-short`).
+- `make test-e2e` now defaults `E2E_REAL=1` and `LIVE_VM_URL` to the local Docker env, so "real" Playwright specs don't get skipped.
 
 ### Fixed
 - Frontend batching payload field now matches the backend contract: `custom_interval_seconds` (was `custom_interval_secs`).
 - Makefile test targets now preserve `go test` exit codes (piped output no longer masks failures).
+- Flaky ExportService streaming unit test no longer times out under parallel load.
 - Data races fixed in async job workflows (export job manager and importer upload response snapshot); `make test-race` is now clean.
 - Release builds can now inject the correct runtime version via `-ldflags "-X main.version=..."` (both `vmgather` and `vmimporter`).
 - Streaming exports no longer fail due to a hard-coded 30s HTTP client timeout; request-scoped context timeouts control export duration.

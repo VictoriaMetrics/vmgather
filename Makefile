@@ -82,6 +82,7 @@ help:
 	@echo "TEST COMMANDS:"
 	@echo "  make test         - Run all tests (fast mode, no race detector)"
 	@echo "  make test-fast    - Run tests with -short flag (skip slow tests)"
+	@echo "  make test-unit-full - Run unit tests without -short"
 	@echo "  make test-full    - Run complete test suite with race detector"
 	@echo "  make test-llm     - Run tests with LLM-friendly structured output"
 	@echo "  make test-coverage - Generate HTML coverage report"
@@ -150,6 +151,22 @@ test-fast:
 		tmpfile="$$(mktemp)"; \
 		status=0; \
 		go test -short ./... >"$$tmpfile" 2>&1 || status=$$?; \
+		cat "$$tmpfile" | $(MAKE) --no-print-directory format-test-output; \
+		rm -f "$$tmpfile"; \
+		exit $$status
+	@echo ""
+	@$(MAKE) --no-print-directory test-summary
+
+# Full unit test suite (no -short)
+test-unit-full:
+	@echo "================================================================================"
+	@echo "TEST SUITE: Unit Full Mode (no -short)"
+	@echo "================================================================================"
+	@echo ""
+	@set -e; \
+		tmpfile="$$(mktemp)"; \
+		status=0; \
+		go test -coverprofile=coverage.out ./... >"$$tmpfile" 2>&1 || status=$$?; \
 		cat "$$tmpfile" | $(MAKE) --no-print-directory format-test-output; \
 		rm -f "$$tmpfile"; \
 		exit $$status
@@ -498,6 +515,9 @@ test-e2e:
 	@echo "[3/3] Running Playwright (workers=1)..."
 	@set -e; \
 		eval "$$(cd local-test-env && ./testconfig env)"; \
+		E2E_REAL="$${E2E_REAL:-1}"; \
+		LIVE_VM_URL="$${LIVE_VM_URL:-$$VM_SINGLE_NOAUTH_URL}"; \
+		export E2E_REAL LIVE_VM_URL; \
 		if [ -n "$$VMGATHER_PORT" ] && command -v lsof >/dev/null 2>&1; then \
 			pid="$$(lsof -tiTCP:$$VMGATHER_PORT -sTCP:LISTEN || true)"; \
 			if [ -n "$$pid" ]; then \
@@ -529,7 +549,7 @@ test-full:
 	@echo "================================================================================"
 	@echo ""
 	@echo "[1/3] Unit tests (without Docker)..."
-	@$(MAKE) test
+	@$(MAKE) test-unit-full
 	@echo ""
 	@echo "[2/3] Starting Docker test environment..."
 	@$(MAKE) test-env-down 2>/dev/null || true

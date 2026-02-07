@@ -16,23 +16,19 @@ This document is an internal engineering review of the `/Users/yu-key/VMexporter
 
 Baseline commands executed in this review cycle:
 
-- Unit tests (no `-short`): `go test -count=1 -coverprofile=coverage.out ./...`: PASS
-- Docker env bring-up: `COMPOSE_PROJECT_NAME=vmtest2 make test-env-up`: PASS
-- Integration suite: `COMPOSE_PROJECT_NAME=vmtest2 make test-integration`: PASS
-- Playwright E2E: `E2E_REAL=1 LIVE_VM_URL="$VM_SINGLE_NOAUTH_URL" make test-e2e`: PASS (102 passed / 0 skipped)
+- `COMPOSE_PROJECT_NAME=vmtest2 make test-all`: PASS (unit + integration + Playwright E2E; 102 passed / 0 skipped)
+- `make test-unit-full`: PASS
 - `make test-race`: PASS (earlier in cycle; previously exposed data races in `internal/server` and `internal/importer/server`)
 
 ## Full test baseline (current HEAD)
 
 This is the “everything” run requested (unit + integration + E2E) to establish a baseline.
 
-- Unit tests (no `-short`): `go test -count=1 -coverprofile=coverage.out ./...`: PASS
-- Integration tests (Docker): `COMPOSE_PROJECT_NAME=vmtest2 make test-env-up && COMPOSE_PROJECT_NAME=vmtest2 make test-integration`: PASS
-- Playwright E2E: `E2E_REAL=1 LIVE_VM_URL="$VM_SINGLE_NOAUTH_URL" make test-e2e`: PASS (102 passed / 0 skipped)
+- `COMPOSE_PROJECT_NAME=vmtest2 make test-all`: PASS (unit + integration + Playwright E2E; 102 passed / 0 skipped)
 
 Notes:
-- `make test-full` currently runs unit tests via `make test`, which uses `go test -short` (slow/advanced unit tests are skipped). The baseline above is the no-skip unit run.
-- Playwright unskips "real environment" specs only when `E2E_REAL=1` and `LIVE_VM_URL` are set.
+- `make test` runs `go test -short` (slow/advanced unit tests are skipped). Use `make test-unit-full` (or `make test-all`) for a no-skip unit run.
+- Playwright now defaults `E2E_REAL=1` and `LIVE_VM_URL=$VM_SINGLE_NOAUTH_URL` inside `make test-e2e`, so `make test-all` runs without skipped specs.
 - For the local Docker env, `VM_SINGLE_NOAUTH_URL` is available via `make test-config-env` (or `cd local-test-env && ./testconfig env`).
 
 ## Bugfix tracker (ordered)
@@ -53,7 +49,9 @@ Status legend: TODO -> IN PROGRESS -> DONE.
 12. [P1][DONE] Hard-coded 15 minute job timeout can kill legitimate exports
 13. [P2][DONE] `/api/fs/*` endpoints enlarge security surface (especially if bound to non-localhost)
 14. [P2][DONE] Debug/diagnostic logging is noisy by default
-15. [P2][TODO] Documentation inconsistencies (customer-facing confusion)
+15. [P1][DONE] Full-suite test targets were skipping coverage (`make test-full` ran unit tests with `-short`; Playwright skipped "real" specs). Added `test-unit-full` and updated `test-e2e` defaults so `make test-all` runs with 0 skips.
+16. [P1][DONE] Fix flaky `TestExportService_ExecuteExportStreamsWithoutPrematureCancellation` (too-tight 1s timeout + `t.Parallel`) so full local suite is stable.
+17. [P2][TODO] Documentation inconsistencies (customer-facing confusion)
 
 ## Test suite expansion and hardening plan
 
@@ -76,8 +74,9 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 7. Ensure Playwright `webServer` stays alive for full E2E run
    - Implemented: increased `webServer.timeout` to 10 minutes to prevent mid-run server termination and `net::ERR_CONNECTION_REFUSED` failures.
 8. Add a single-command local full-suite runner (including Playwright)
-   - Implemented: `make test-e2e` (builds `vmgather`, runs Playwright with `--workers=1`, and kills stale `vmgather -no-browser` server on `VMGATHER_PORT` if needed).
-   - Implemented: `make test-all` (runs `make test-full` and then `make test-e2e`).
+	- Implemented: `make test-e2e` (builds `vmgather`, runs Playwright with `--workers=1`, and kills stale `vmgather -no-browser` server on `VMGATHER_PORT` if needed).
+	- Implemented: `make test-unit-full` (unit tests without `-short`) and updated `make test-full` to use it.
+	- Implemented: `make test-all` (runs `make test-full` and then `make test-e2e`), now with Playwright defaults so the suite runs with 0 skipped specs against the local Docker env.
 
 ## Findings (prioritized)
 
@@ -236,7 +235,7 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 **Verification**
 - `make test-full`: PASS
 - `make test-race`: PASS
-- `cd tests/e2e && npx playwright test --workers=1`: PASS (99 passed / 3 skipped)
+- `make test-e2e`: PASS (102 passed / 0 skipped)
 
 ---
 
@@ -280,7 +279,7 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 
 **Verification**
 - `make test-full`: PASS
-- `cd tests/e2e && npx playwright test --workers=1`: PASS (99 passed / 3 skipped)
+- `make test-e2e`: PASS (102 passed / 0 skipped)
 
 ---
 
@@ -305,7 +304,7 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 **Verification**
 - `make test-full`: PASS
 - `make test-race`: PASS
-- `make test-e2e`: PASS (99 passed / 3 skipped)
+- `make test-e2e`: PASS (102 passed / 0 skipped)
 
 ---
 
@@ -335,7 +334,7 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 - `internal/server/server_test.go`: existing FS endpoint tests now set a loopback `RemoteAddr`, and new regression tests assert the 403 behavior for non-loopback callers.
 
 **Verification**
-- `make test-all`: PASS (includes unit/integration + Playwright E2E; 99 passed / 3 skipped)
+- `make test-all`: PASS (includes unit/integration + Playwright E2E; 102 passed / 0 skipped)
 
 ---
 
@@ -363,7 +362,7 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 **Verification**
 - `make test-full`: PASS
 - `make test-race`: PASS
-- `make test-e2e`: PASS (99 passed / 3 skipped)
+- `make test-e2e`: PASS (102 passed / 0 skipped)
 
 ---
 
