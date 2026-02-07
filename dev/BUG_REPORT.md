@@ -16,7 +16,7 @@ This document is an internal engineering review of the `/Users/yu-key/VMexporter
 
 Baseline commands executed in this review cycle:
 
-- `COMPOSE_PROJECT_NAME=vmtest2 make test-all`: PASS (unit + integration + Playwright E2E; 102 passed / 0 skipped)
+- `COMPOSE_PROJECT_NAME=vmtest2 make test-all-clean`: PASS (unit + integration + Playwright E2E; 102 passed / 0 skipped; auto-cleans Docker env + volumes)
 - `make test-unit-full`: PASS
 - `make test-race`: PASS (earlier in cycle; previously exposed data races in `internal/server` and `internal/importer/server`)
 
@@ -25,11 +25,13 @@ Baseline commands executed in this review cycle:
 This is the “everything” run requested (unit + integration + E2E) to establish a baseline.
 
 - `COMPOSE_PROJECT_NAME=vmtest2 make test-all`: PASS (unit + integration + Playwright E2E; 102 passed / 0 skipped)
+- `COMPOSE_PROJECT_NAME=vmtest2 make test-all-clean`: PASS (same as above, plus `docker compose down -v` cleanup)
 
 Notes:
 - `make test` runs `go test -short` (slow/advanced unit tests are skipped). Use `make test-unit-full` (or `make test-all`) for a no-skip unit run.
 - Playwright now defaults `E2E_REAL=1` and `LIVE_VM_URL=$VM_SINGLE_NOAUTH_URL` inside `make test-e2e`, so `make test-all` runs without skipped specs.
 - For the local Docker env, `VM_SINGLE_NOAUTH_URL` is available via `make test-config-env` (or `cd local-test-env && ./testconfig env`).
+- For OrbStack / CI where disk usage matters, prefer `make test-all-clean` to avoid accumulating test volumes.
 
 ## Bugfix tracker (ordered)
 
@@ -79,6 +81,9 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 	- Implemented: `make test-all` (runs `make test-full` and then `make test-e2e`), now with Playwright defaults so the suite runs with 0 skipped specs against the local Docker env.
 9. Make local Docker env startup more resilient on OrbStack
 	- Implemented: `make test-env-up` auto-detects "no space left on device" failures and runs `docker system prune -af` before retrying.
+10. Ensure all “real env” dependencies are reachable before expensive E2E runs
+	- Implemented: `local-test-env/healthcheck.sh` now also validates `vmselect-standalone` (`/select/0/prometheus`).
+	- Implemented: `local-test-env/test-all-scenarios.sh` now includes a `vmselect-standalone` scenario so `make test-integration` fails fast if it isn't reachable.
 
 ## Findings (prioritized)
 

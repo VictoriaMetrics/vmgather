@@ -7,6 +7,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 ### Added
 - Export wizard now lets you configure a separate batch window (auto/preset/custom seconds) independent of metric sampling step.
 - Makefile now provides `test-unit-full` for running unit tests without `-short`.
+- Makefile now provides `test-all-clean` for running the full suite and then cleaning the Docker test env + volumes (recommended for CI / OrbStack).
 
 ### Changed
 - Export batching payload is now built from the batch-window selector instead of forcing batching to match metric step.
@@ -16,6 +17,8 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Makefile `test-full` now runs unit tests via `test-unit-full` (no `-short`).
 - `make test-e2e` now defaults `E2E_REAL=1` and `LIVE_VM_URL` to the local Docker env, so "real" Playwright specs don't get skipped.
 - `make test-env-up` auto-recovers from Docker disk-full errors by running `docker system prune -af` and retrying.
+- `make test-env-full` now uses `make test-env-clean` instead of global `docker volume prune -f`, avoiding accidental cleanup of unrelated volumes.
+- `local-test-env/healthcheck.sh` now also validates `vmselect-standalone` readiness; integration scenarios include a standalone `vmselect` check.
 
 ### Fixed
 - Frontend batching payload field now matches the backend contract: `custom_interval_seconds` (was `custom_interval_secs`).

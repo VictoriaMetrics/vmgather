@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-llm build build-safe build-all clean fmt lint help test-env test-env-up test-env-down test-env-logs test-e2e test-all test-scenarios test-config-bootstrap docker-build docker-build-vmgather docker-build-vmimporter
+.PHONY: test test-fast test-llm build build-safe build-all clean fmt lint help test-env test-env-up test-env-down test-env-clean test-env-logs test-e2e test-all test-all-clean test-scenarios test-config-bootstrap docker-build docker-build-vmgather docker-build-vmimporter
 
 VERSION ?= $(shell git describe --tags --always --dirty)
 PKG_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "latest")
@@ -107,8 +107,10 @@ help:
 	@echo "  make test-integration  - Binary tests Docker environment (needs Docker)"
 	@echo "  make test-env-up       - Start test environment"
 	@echo "  make test-env-down     - Stop test environment"
+	@echo "  make test-env-clean    - Stop test environment and remove volumes"
 	@echo "  make test-e2e          - Run Playwright suite (requires test-env-up)"
 	@echo "  make test-all          - Everything: test-full + test-e2e"
+	@echo "  make test-all-clean    - Everything + cleanup (recommended for CI / OrbStack)"
 	@echo ""
 	@echo "FULL TEST SUITE:"
 	@echo "  make test-full         - Everything: unit + Docker scenarios"
@@ -402,11 +404,10 @@ test-config-json: local-test-env/testconfig
 
 # Full clean-slate test environment cycle (cleans up before and after)
 test-env-full:
-	$(MAKE) test-env-down
-	docker volume prune -f || true
+	$(MAKE) test-env-clean
 	$(MAKE) test-env-up
 	$(MAKE) test
-	$(MAKE) test-env-down
+	$(MAKE) test-env-clean
 
 test-env-up: local-test-env/testconfig
 	@echo "================================================================================"
@@ -556,6 +557,18 @@ test-e2e:
 
 # Everything: unit + docker scenarios + Playwright.
 test-all: test-full test-e2e
+
+# Everything + cleanup (CI / disk-constrained environments).
+test-all-clean:
+	@set -e; \
+		status=0; \
+		$(MAKE) --no-print-directory test-all || status=$$?; \
+		echo ""; \
+		echo "================================================================================"; \
+		echo "Cleaning Docker test environment (including volumes)..."; \
+		echo "================================================================================"; \
+		$(MAKE) --no-print-directory test-env-clean || true; \
+		exit $$status
 
 # =============================================================================
 # FULL TEST SUITE

@@ -143,6 +143,13 @@ test_endpoint \
     "none" \
     ""
 
+# Scenario 3b: Standalone vmselect (Tenant 0)
+test_endpoint \
+    "VMSelect standalone - Tenant 0" \
+    "$VMSELECT_STANDALONE_SELECT_TENANT_0" \
+    "none" \
+    ""
+
 # Scenario 7: Cluster via VMAuth - Tenant 0
 test_endpoint \
     "Cluster via VMAuth - Tenant 0" \
@@ -217,4 +224,3 @@ else
     echo -e "${RED}===============================================================================${NC}"
     exit 1
 fi
-
