@@ -731,6 +731,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	response := map[string]interface{}{
 		"export_id":     result.ExportID,
 		"archive_path":  result.ArchivePath,
+		"archive_name":  result.ArchiveName,
 		"archive_size":  result.ArchiveSizeBytes,
 		"metrics_count": result.MetricsExported,
 		"sha256":        result.SHA256,

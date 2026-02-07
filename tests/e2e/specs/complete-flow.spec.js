@@ -63,7 +63,8 @@ test.describe('Complete E2E Flow Tests', () => {
             metrics_count: 1566,
             archive_size: 1024000,
             sha256: 'abc123def456',
-            archive_path: '/tmp/export.zip'
+            archive_path: '/tmp/export.zip',
+            archive_name: 'export.zip'
           }
         })
       });
@@ -203,6 +204,26 @@ test.describe('Complete E2E Flow Tests', () => {
     // Verify Download button
     await expect(page.locator('button:has-text("Generate ZIP package")')).toBeVisible();
     await expect(page.locator('button:has-text("Start New Export")')).toBeVisible();
+
+    // Verify archive location is rendered and copy is available
+    const archivePath = page.locator('#archivePath');
+    await expect(archivePath).toHaveText('/tmp/export.zip');
+    await expect(page.locator('#copyArchivePathBtn')).toBeVisible();
+
+    // Copy archive path feedback (may fallback to execCommand in headless)
+    const copyBtn = page.locator('#copyArchivePathBtn');
+    await copyBtn.click();
+    await expect(copyBtn).toHaveText(/Copied|Copy failed/);
+
+    const downloadNameFromWindowsPath = await page.evaluate(() =>
+      window.getArchiveDownloadName({ archive_path: 'C\\\\tmp\\\\export.zip' })
+    );
+    expect(downloadNameFromWindowsPath).toBe('export.zip');
+
+    const downloadNameFromArchiveName = await page.evaluate(() =>
+      window.getArchiveDownloadName({ archive_path: '/tmp/export.zip', archive_name: 'nice.zip' })
+    );
+    expect(downloadNameFromArchiveName).toBe('nice.zip');
   });
 
   test('should validate time range on Step 2', async ({ page }) => {

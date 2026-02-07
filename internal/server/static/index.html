@@ -1533,13 +1533,19 @@
                         </div>
                         <h3 style="color: var(--success); margin-bottom: 20px; font-size: 24px;">Export Successful</h3>
 
-                        <div style="text-align: left; margin: 20px 0;">
-                            <p><strong>Export ID:</strong> <span id="exportId">-</span></p>
-                            <p><strong>Metrics Exported:</strong> <span id="metricsCount">-</span></p>
-                            <p><strong>Archive Size:</strong> <span id="archiveSize">-</span> KB</p>
-                            <p><strong>SHA256:</strong> <code id="archiveSha256"
-                                    style="font-size: 11px; word-break: break-all;">-</code></p>
-                        </div>
+	                        <div style="text-align: left; margin: 20px 0;">
+	                            <p><strong>Export ID:</strong> <span id="exportId">-</span></p>
+	                            <p><strong>Metrics Exported:</strong> <span id="metricsCount">-</span></p>
+	                            <p><strong>Archive Size:</strong> <span id="archiveSize">-</span> KB</p>
+	                            <p>
+	                                <strong>Saved at:</strong>
+	                                <code id="archivePath" style="font-size: 11px; word-break: break-all;">-</code>
+	                                <button type="button" class="btn-inline" id="copyArchivePathBtn"
+	                                    onclick="copyArchivePath()" style="margin-left: 6px;">Copy</button>
+	                            </p>
+	                            <p><strong>SHA256:</strong> <code id="archiveSha256"
+	                                    style="font-size: 11px; word-break: break-all;">-</code></p>
+	                        </div>
 
                         <button class="btn-success" onclick="downloadArchive()" id="downloadBtn"
                             style="width: 100%; margin: 20px 0; padding: 15px; font-size: 16px;">

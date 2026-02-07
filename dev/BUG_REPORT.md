@@ -387,6 +387,44 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 
 ---
 
+### P2: Export download UX (default location, visible path, robust filename)
+
+**Status**: DONE
+
+**Impact**
+- Users have trouble finding the generated ZIP bundle because the UI doesn't show where it was written on disk.
+- The download filename logic isn't Windows-safe: it used `archive_path.split('/')`, which breaks for `C:\...` paths.
+- Default export output directory was relative to the current working directory (`./exports`), which is surprising for GUI-first usage.
+
+**Evidence**
+- UI "Export Complete" step shows export ID/size/SHA but not the archive filesystem location:
+  - `internal/server/static/index.html` (Step 7 details block)
+  - `internal/server/static/app.js:3156` (`showExportResult` only renders ID/metrics/size/SHA).
+- Download code uses `split('/')`:
+  - `internal/server/static/app.js:3466` (pre-fix): `link.download = exportResult.archive_path.split('/').pop();`
+- CLI default output directory is `./exports`:
+  - `cmd/vmgather/main.go:30` (pre-fix): `-output` defaulted to `./exports`.
+
+**Implemented**
+- `internal/domain/types.go`: added `ExportResult.ArchiveName` (`archive_name`) to provide a canonical basename from the backend.
+- `internal/application/services/export_service.go`: set `ArchiveName` to `filepath.Base(archivePath)` in the export result.
+- `internal/server/server.go`: included `archive_name` in `/api/export` responses; async export status responses include it via `status.result`.
+- `internal/server/static/index.html`: Step 7 now shows `Saved at:` with a `Copy` button.
+- `internal/server/static/app.js`:
+  - render `archive_path` into Step 7 (`#archivePath`).
+  - added `copyArchivePath()` with Clipboard API + fallback and simple UI feedback.
+  - added `getArchiveDownloadName()` (uses `archive_name` if present; otherwise normalizes `\\` to `/`).
+- `cmd/vmgather/main.go`: if `-output` isn't set, default to `~/Downloads/vmgather` when `~/Downloads` exists; otherwise fall back to `./exports`.
+
+**Tests**
+- `cmd/vmgather/output_dir_test.go`: unit tests for default output directory selection.
+- `tests/e2e/specs/complete-flow.spec.js`: Step 7 asserts `Saved at:` is rendered, copy button feedback, and download-name helper handles Windows paths and `archive_name`.
+
+**Verification**
+- `COMPOSE_PROJECT_NAME=vmtest_downloadux_<ts> make test-all-clean`: PASS (unit + integration + Playwright E2E; 102 passed / 0 skipped; Docker env cleaned)
+
+---
+
 ### P2: Documentation inconsistencies (customer-facing confusion)
 
 **Issues**

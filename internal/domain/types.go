@@ -126,6 +126,7 @@ type ExportConfig struct {
 type ExportResult struct {
 	ExportID           string    `json:"export_id"`
 	ArchivePath        string    `json:"archive_path"`
+	ArchiveName        string    `json:"archive_name"`
 	ArchiveSizeBytes   int64     `json:"archive_size_bytes"`
 	MetricsExported    int       `json:"metrics_exported"`
 	TimeRange          TimeRange `json:"time_range"`

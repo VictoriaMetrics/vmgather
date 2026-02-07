@@ -24,6 +24,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - `local-test-env/testconfig healthcheck` now also validates `vmselect-standalone` readiness; integration scenarios include a standalone `vmselect` check.
 - Local Docker test environment compose file no longer uses the deprecated `version:` field, removing noisy Docker Compose warnings.
 - Documentation now starts with a mode quick choice and uses consistent VMSelect/tenant URL examples across README and the user guide.
+- Export output location is now more predictable by default: if `-output` isn't set, vmgather uses `~/Downloads/vmgather` when available (otherwise falls back to `./exports`).
 
 ### Fixed
 - Frontend batching payload field now matches the backend contract: `custom_interval_seconds` (was `custom_interval_secs`).
@@ -39,6 +40,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Export jobs are no longer canceled by a hard-coded 15-minute manager timeout; only explicit cancel and per-batch timeouts apply.
 - `/api/fs/*` endpoints now reject non-localhost requests, reducing the security surface when binding to `0.0.0.0`.
 - `/api/download` now blocks symlink escapes outside the export directory (prevents downloading files outside `-output` via symlink).
+- Export complete screen now shows where the archive was saved and offers a one-click "Copy" action; suggested download filenames are now Windows-safe via backend-provided `archive_name`.
 - Verbose request/diagnostic dumps are now printed only when `-debug` is enabled (`/api/validate`, `/api/discover`, `/api/sample`).
 - Obfuscation advanced sections (labels/preview) no longer auto-open by default; sample-loading errors and retries render consistently.
 - Playwright E2E no longer intermittently fails with `net::ERR_CONNECTION_REFUSED` on longer runs; the `webServer` timeout is increased to keep the server alive.

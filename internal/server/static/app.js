@@ -3165,11 +3165,69 @@ function showExportResult(data) {
     document.getElementById('metricsCount').textContent = (metricsValue || 0).toLocaleString();
     const archiveSizeValue = data.archive_size ?? data.archive_size_bytes ?? 0;
     document.getElementById('archiveSize').textContent = ((archiveSizeValue || 0) / 1024).toFixed(2);
+    const archivePathEl = document.getElementById('archivePath');
+    if (archivePathEl) {
+        archivePathEl.textContent = data.archive_path || '-';
+    }
     document.getElementById('archiveSha256').textContent = data.sha256 || 'N/A';
 
     // Render spoilers with sample data
     if (data.sample_data && data.sample_data.length > 0) {
         renderExportSpoilers(data.sample_data);
+    }
+}
+
+function getArchiveDownloadName(result) {
+    if (result && typeof result.archive_name === 'string' && result.archive_name.trim() !== '') {
+        return result.archive_name;
+    }
+    if (result && typeof result.archive_path === 'string' && result.archive_path.trim() !== '') {
+        return result.archive_path.replace(/\\/g, '/').split('/').pop();
+    }
+    return 'vmexport.zip';
+}
+
+async function copyArchivePath() {
+    const el = document.getElementById('archivePath');
+    const btn = document.getElementById('copyArchivePathBtn');
+    if (!el) {
+        return;
+    }
+    const text = (el.textContent || '').trim();
+    if (!text || text === '-') {
+        return;
+    }
+    const original = btn ? btn.textContent : '';
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+        } else {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.setAttribute('readonly', '');
+            ta.style.position = 'absolute';
+            ta.style.left = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+        }
+        if (btn) {
+            btn.textContent = 'Copied';
+            btn.disabled = true;
+            setTimeout(() => {
+                btn.textContent = original || 'Copy';
+                btn.disabled = false;
+            }, 1200);
+        }
+    } catch (err) {
+        console.error('Failed to copy archive path', err);
+        if (btn) {
+            btn.textContent = 'Copy failed';
+            setTimeout(() => {
+                btn.textContent = original || 'Copy';
+            }, 1500);
+        }
     }
 }
 
@@ -3457,15 +3515,17 @@ function downloadArchive() {
     // [SEARCH] DEBUG: Log download
     console.group('[DOWNLOAD]  Archive Download');
     console.log('[BUILD] Archive Path:', exportResult.archive_path);
-    console.log('[STATS] Archive Size:', (exportResult.archive_size / 1024).toFixed(2), 'KB');
+    const archiveSizeBytes = exportResult.archive_size ?? exportResult.archive_size_bytes ?? 0;
+    console.log('[STATS] Archive Size:', ((archiveSizeBytes || 0) / 1024).toFixed(2), 'KB');
     console.log('[SECURE] SHA256:', exportResult.sha256);
 
     // Create download link
     const link = document.createElement('a');
     link.href = '/api/download?path=' + encodeURIComponent(exportResult.archive_path);
-    link.download = exportResult.archive_path.split('/').pop();
+    link.download = getArchiveDownloadName(exportResult);
 
     console.log('[LINK] Download URL:', link.href);
+    console.log('[FILE] Download Name:', link.download);
     console.log('[OK] Initiating browser download');
     console.groupEnd();
 
