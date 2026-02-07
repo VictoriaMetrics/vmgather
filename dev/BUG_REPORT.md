@@ -10,7 +10,7 @@ This document is an internal engineering review of the `/Users/yu-key/VMexporter
 - Current branch: `feature/custom-mode-oneshot`
 - Baseline for comparison: `origin/main` (`42d8f0e`)
 - Local-only commits on top of `origin/main` exist (not pushed). See `git log origin/main..HEAD` for the exact list.
-- Working tree: clean (except this report file while editing)
+- Working tree: dirty (README.md, docs/user-guide.md, CHANGELOG.md, dev/BUG_REPORT.md)
 
 ## Validation executed locally
 
@@ -20,6 +20,7 @@ Baseline commands executed in this review cycle:
 - `COMPOSE_PROJECT_NAME=vmtest_baseline make test-all-clean`: PASS (same as above; confirms no-skip full suite still passes on current HEAD)
 - `COMPOSE_PROJECT_NAME=vmtest_shless3 make test-all-clean`: PASS (verifies Go-based healthcheck/scenarios and stale-container cleanup in test-env-up)
 - `COMPOSE_PROJECT_NAME=vmtest_shless4 make test-all-clean`: PASS (removes noisy Docker Compose warning about obsolete `version:` field)
+- `COMPOSE_PROJECT_NAME=vmtest_docs1 make test-all-clean`: PASS (docs consistency update validation; 102 passed / 0 skipped)
 - `make test-unit-full`: PASS
 - `make test-race`: PASS (earlier in cycle; previously exposed data races in `internal/server` and `internal/importer/server`)
 
@@ -32,6 +33,7 @@ This is the “everything” run requested (unit + integration + E2E) to establi
 - `COMPOSE_PROJECT_NAME=vmtest_baseline make test-all-clean`: PASS (same as above; also verifies auto-clean removes volumes/networks)
 - `COMPOSE_PROJECT_NAME=vmtest_shless3 make test-all-clean`: PASS (same as above; validates Go-based `testconfig` subcommands in the local test env)
 - `COMPOSE_PROJECT_NAME=vmtest_shless4 make test-all-clean`: PASS (same as above; confirms docker-compose warnings are gone)
+- `COMPOSE_PROJECT_NAME=vmtest_docs1 make test-all-clean`: PASS (same as above; validates docs consistency changes do not break full suite)
 
 Notes:
 - `make test` runs `go test -short` (slow/advanced unit tests are skipped). Use `make test-unit-full` (or `make test-all`) for a no-skip unit run.
@@ -59,7 +61,7 @@ Status legend: TODO -> IN PROGRESS -> DONE.
 14. [P2][DONE] Debug/diagnostic logging is noisy by default
 15. [P1][DONE] Full-suite test targets were skipping coverage (`make test-full` ran unit tests with `-short`; Playwright skipped "real" specs). Added `test-unit-full` and updated `test-e2e` defaults so `make test-all` runs with 0 skips.
 16. [P1][DONE] Fix flaky `TestExportService_ExecuteExportStreamsWithoutPrematureCancellation` (too-tight 1s timeout + `t.Parallel`) so full local suite is stable.
-17. [P2][TODO] Documentation inconsistencies (customer-facing confusion)
+17. [P2][DONE] Documentation consistency: add mode quick choice, align terminology (Cluster metrics / Selector-Query / CLI oneshot), and normalize VMSelect/tenant URL examples across README and user-guide.
 18. [P1][DONE] Remove `.sh` scripts from the repo (prefer Go + Makefile targets): migrate healthcheck/scenarios/pre-push into `local-test-env/testconfig` subcommands and Makefile targets.
 19. [P2][DONE] `make test-env-up` now removes stale test containers to avoid name conflicts across runs.
 20. [P3][DONE] Remove obsolete `version:` attribute from `local-test-env/docker-compose.test.yml` (avoids noisy Docker Compose warnings).
@@ -401,19 +403,10 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 
 ---
 
-## Documentation: “customer-first” simplification suggestions
+## Documentation: “customer-first” simplification notes (status)
 
-The docs are already fairly strong, but the first 30 seconds can be made even clearer by adding a single “Choose your workflow” table near the top of `README.md` and `docs/user-guide.md`.
-
-Suggested table (concept):
-
-- **Cluster metrics (UI)**: default support bundle for VictoriaMetrics components (vmagent/vmstorage/vminsert/vmselect/vmalert/vmsingle).
-- **Selector/Query (UI)**: advanced mode for targeted selectors or MetricsQL, plus optional per-job selection for selectors.
-- **Oneshot CLI (experimental)**: automation/testing; can stream JSONL to stdout (`-export-stdout`) for piping into scripts.
-- **VMImport (UI)**: replay a bundle back into VictoriaMetrics; use for reproducing issues or validating bundle contents.
-
-Also add one explicit security sentence:
-- “If you bind `-addr 0.0.0.0:...`, you expose the UI and API to the network; run behind a trusted network only.”
+- Implemented: “Mode quick choice” at the top of `README.md` and `docs/user-guide.md` (Cluster metrics / Selector-Query / CLI oneshot).
+- Optional follow-up (not yet requested): add a short VMImport pointer near the export bundle section.
 
 ## Maintainability (KISS/SOLID notes)
 

@@ -23,6 +23,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Makefile now provides a `pre-push` target (runs `make test-env-full`).
 - `local-test-env/testconfig healthcheck` now also validates `vmselect-standalone` readiness; integration scenarios include a standalone `vmselect` check.
 - Local Docker test environment compose file no longer uses the deprecated `version:` field, removing noisy Docker Compose warnings.
+- Documentation now starts with a mode quick choice and uses consistent VMSelect/tenant URL examples across README and the user guide.
 
 ### Fixed
 - Frontend batching payload field now matches the backend contract: `custom_interval_seconds` (was `custom_interval_secs`).
