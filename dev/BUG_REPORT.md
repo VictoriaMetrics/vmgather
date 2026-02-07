@@ -21,6 +21,7 @@ Baseline commands executed in this review cycle:
 - `COMPOSE_PROJECT_NAME=vmtest_shless3 make test-all-clean`: PASS (verifies Go-based healthcheck/scenarios and stale-container cleanup in test-env-up)
 - `COMPOSE_PROJECT_NAME=vmtest_shless4 make test-all-clean`: PASS (removes noisy Docker Compose warning about obsolete `version:` field)
 - `COMPOSE_PROJECT_NAME=vmtest_docs1 make test-all-clean`: PASS (docs consistency update validation; 102 passed / 0 skipped)
+- `COMPOSE_PROJECT_NAME=vmtest_symlink1 make test-all-clean`: PASS (harden `/api/download` against symlink escapes; 102 passed / 0 skipped)
 - `make test-unit-full`: PASS
 - `make test-race`: PASS (earlier in cycle; previously exposed data races in `internal/server` and `internal/importer/server`)
 
@@ -65,6 +66,7 @@ Status legend: TODO -> IN PROGRESS -> DONE.
 18. [P1][DONE] Remove `.sh` scripts from the repo (prefer Go + Makefile targets): migrate healthcheck/scenarios/pre-push into `local-test-env/testconfig` subcommands and Makefile targets.
 19. [P2][DONE] `make test-env-up` now removes stale test containers to avoid name conflicts across runs.
 20. [P3][DONE] Remove obsolete `version:` attribute from `local-test-env/docker-compose.test.yml` (avoids noisy Docker Compose warnings).
+21. [P2][DONE] Harden `/api/download` against symlink escapes: prevent downloading files outside `-output` via symlink inside the export directory.
 
 ## Test suite expansion and hardening plan
 

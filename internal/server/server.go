@@ -1298,6 +1298,29 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Block symlink escapes out of outputDir. This matters if outputDir contains symlinks or the requested file
+	// itself is a symlink pointing outside outputDir.
+	realOutputDir := absOutputDir
+	if resolved, err := filepath.EvalSymlinks(absOutputDir); err == nil {
+		realOutputDir = resolved
+	}
+	realOutputDir = filepath.Clean(realOutputDir)
+
+	realFilePath, err := filepath.EvalSymlinks(absFilePath)
+	if err != nil {
+		log.Printf("[ERROR] Failed to resolve file path symlinks: %v", err)
+		respondWithError(w, http.StatusBadRequest, "Invalid path")
+		return
+	}
+	realFilePath = filepath.Clean(realFilePath)
+
+	rel, err := filepath.Rel(realOutputDir, realFilePath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		log.Printf("[WARN] Blocked symlink escape attempt: %s (resolved: %s, allowed: %s)", filePath, realFilePath, realOutputDir)
+		respondWithError(w, http.StatusForbidden, "Access denied: file must be in export directory")
+		return
+	}
+
 	// Set headers for download
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+filepath.Base(absFilePath)+"\"")
