@@ -1,6 +1,6 @@
 # VMGather Code Review Bug Report
 
-Date: 2026-02-06
+Date: 2026-02-07
 
 This document is an internal engineering review of the `/Users/yu-key/VMexporter` workspace (upstream: `VictoriaMetrics/vmgather`).
 
@@ -16,18 +16,24 @@ This document is an internal engineering review of the `/Users/yu-key/VMexporter
 
 Baseline commands executed in this review cycle:
 
-- `make test-full`: PASS (unit + integration; Docker env is left running)
-- `go build -o vmgather ./cmd/vmgather`: PASS (used by Playwright `webServer` command)
-- `cd tests/e2e && npx playwright test --workers=1`: PASS (99 passed / 3 skipped)
-- `make test-race`: PASS (after fixes; previously exposed data races in `internal/server` and `internal/importer/server`)
+- Unit tests (no `-short`): `go test -count=1 -coverprofile=coverage.out ./...`: PASS
+- Docker env bring-up: `COMPOSE_PROJECT_NAME=vmtest2 make test-env-up`: PASS
+- Integration suite: `COMPOSE_PROJECT_NAME=vmtest2 make test-integration`: PASS
+- Playwright E2E: `E2E_REAL=1 LIVE_VM_URL="$VM_SINGLE_NOAUTH_URL" make test-e2e`: PASS (102 passed / 0 skipped)
+- `make test-race`: PASS (earlier in cycle; previously exposed data races in `internal/server` and `internal/importer/server`)
 
 ## Full test baseline (current HEAD)
 
 This is the “everything” run requested (unit + integration + E2E) to establish a baseline.
 
-- `make test-full`: PASS (unit + integration)
-- `make test-race`: PASS
-- `cd tests/e2e && npx playwright test --workers=1`: PASS (99 passed / 3 skipped)
+- Unit tests (no `-short`): `go test -count=1 -coverprofile=coverage.out ./...`: PASS
+- Integration tests (Docker): `COMPOSE_PROJECT_NAME=vmtest2 make test-env-up && COMPOSE_PROJECT_NAME=vmtest2 make test-integration`: PASS
+- Playwright E2E: `E2E_REAL=1 LIVE_VM_URL="$VM_SINGLE_NOAUTH_URL" make test-e2e`: PASS (102 passed / 0 skipped)
+
+Notes:
+- `make test-full` currently runs unit tests via `make test`, which uses `go test -short` (slow/advanced unit tests are skipped). The baseline above is the no-skip unit run.
+- Playwright unskips "real environment" specs only when `E2E_REAL=1` and `LIVE_VM_URL` are set.
+- For the local Docker env, `VM_SINGLE_NOAUTH_URL` is available via `make test-config-env` (or `cd local-test-env && ./testconfig env`).
 
 ## Bugfix tracker (ordered)
 
