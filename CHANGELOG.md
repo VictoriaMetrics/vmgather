@@ -18,11 +18,11 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - `make test-e2e` now defaults `E2E_REAL=1` and `LIVE_VM_URL` to the local Docker env, so "real" Playwright specs don't get skipped.
 - `make test-env-up` auto-recovers from Docker disk-full errors by running `docker system prune -af` and retrying.
 - `make test-env-full` now uses `make test-env-clean` instead of global `docker volume prune -f`, avoiding accidental cleanup of unrelated volumes.
-- Local test env healthcheck/scenarios now run via `local-test-env/testconfig` (shell scripts removed).
+- Local test env healthcheck/scenarios are now implemented in Go (`local-test-env/testconfig healthcheck|scenarios`) and invoked by Makefile (shell scripts removed).
 - `make test-env-up` now removes stale test containers before `docker compose up` to avoid name conflicts.
-- Makefile now provides a `pre-push` target (full test-env cycle).
+- Makefile now provides a `pre-push` target (runs `make test-all-clean`).
 - `local-test-env/testconfig healthcheck` now also validates `vmselect-standalone` readiness; integration scenarios include a standalone `vmselect` check.
-- Local test env healthcheck/scenarios are now implemented in Go (`local-test-env/testconfig healthcheck|scenarios`); removed repo shell scripts and added `make pre-push` as the local gate.
+- Local Docker test environment compose file no longer uses the deprecated `version:` field, removing noisy Docker Compose warnings.
 
 ### Fixed
 - Frontend batching payload field now matches the backend contract: `custom_interval_seconds` (was `custom_interval_secs`).

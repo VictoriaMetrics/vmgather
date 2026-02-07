@@ -19,6 +19,7 @@ Baseline commands executed in this review cycle:
 - `COMPOSE_PROJECT_NAME=vmtest2 make test-all-clean`: PASS (unit + integration + Playwright E2E; 102 passed / 0 skipped; auto-cleans Docker env + volumes)
 - `COMPOSE_PROJECT_NAME=vmtest_baseline make test-all-clean`: PASS (same as above; confirms no-skip full suite still passes on current HEAD)
 - `COMPOSE_PROJECT_NAME=vmtest_shless3 make test-all-clean`: PASS (verifies Go-based healthcheck/scenarios and stale-container cleanup in test-env-up)
+- `COMPOSE_PROJECT_NAME=vmtest_shless4 make test-all-clean`: PASS (removes noisy Docker Compose warning about obsolete `version:` field)
 - `make test-unit-full`: PASS
 - `make test-race`: PASS (earlier in cycle; previously exposed data races in `internal/server` and `internal/importer/server`)
 
@@ -30,6 +31,7 @@ This is the “everything” run requested (unit + integration + E2E) to establi
 - `COMPOSE_PROJECT_NAME=vmtest2 make test-all-clean`: PASS (same as above, plus `docker compose down -v` cleanup)
 - `COMPOSE_PROJECT_NAME=vmtest_baseline make test-all-clean`: PASS (same as above; also verifies auto-clean removes volumes/networks)
 - `COMPOSE_PROJECT_NAME=vmtest_shless3 make test-all-clean`: PASS (same as above; validates Go-based `testconfig` subcommands in the local test env)
+- `COMPOSE_PROJECT_NAME=vmtest_shless4 make test-all-clean`: PASS (same as above; confirms docker-compose warnings are gone)
 
 Notes:
 - `make test` runs `go test -short` (slow/advanced unit tests are skipped). Use `make test-unit-full` (or `make test-all`) for a no-skip unit run.
@@ -60,7 +62,7 @@ Status legend: TODO -> IN PROGRESS -> DONE.
 17. [P2][TODO] Documentation inconsistencies (customer-facing confusion)
 18. [P1][DONE] Remove `.sh` scripts from the repo (prefer Go + Makefile targets): migrate healthcheck/scenarios/pre-push into `local-test-env/testconfig` subcommands and Makefile targets.
 19. [P2][DONE] `make test-env-up` now removes stale test containers to avoid name conflicts across runs.
-20. [P3][TODO] Remove obsolete `version:` attribute from `local-test-env/docker-compose.test.yml` (avoids noisy Docker Compose warnings).
+20. [P3][DONE] Remove obsolete `version:` attribute from `local-test-env/docker-compose.test.yml` (avoids noisy Docker Compose warnings).
 
 ## Test suite expansion and hardening plan
 

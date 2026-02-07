@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Comprehensive VictoriaMetrics test environment
 # Covers all scenarios: single/cluster, auth/no-auth, multitenant, localhost/network
 
