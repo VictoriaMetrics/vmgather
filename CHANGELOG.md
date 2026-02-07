@@ -15,6 +15,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Makefile now provides `test-e2e` and `test-all` targets for running Playwright locally.
 - Makefile `test-full` now runs unit tests via `test-unit-full` (no `-short`).
 - `make test-e2e` now defaults `E2E_REAL=1` and `LIVE_VM_URL` to the local Docker env, so "real" Playwright specs don't get skipped.
+- `make test-env-up` auto-recovers from Docker disk-full errors by running `docker system prune -af` and retrying.
 
 ### Fixed
 - Frontend batching payload field now matches the backend contract: `custom_interval_seconds` (was `custom_interval_secs`).

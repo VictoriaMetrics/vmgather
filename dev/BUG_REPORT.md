@@ -77,6 +77,8 @@ Goal: make the test suite a reliable gate for iterative bug fixes (fast feedback
 	- Implemented: `make test-e2e` (builds `vmgather`, runs Playwright with `--workers=1`, and kills stale `vmgather -no-browser` server on `VMGATHER_PORT` if needed).
 	- Implemented: `make test-unit-full` (unit tests without `-short`) and updated `make test-full` to use it.
 	- Implemented: `make test-all` (runs `make test-full` and then `make test-e2e`), now with Playwright defaults so the suite runs with 0 skipped specs against the local Docker env.
+9. Make local Docker env startup more resilient on OrbStack
+	- Implemented: `make test-env-up` auto-detects "no space left on device" failures and runs `docker system prune -af` before retrying.
 
 ## Findings (prioritized)
 

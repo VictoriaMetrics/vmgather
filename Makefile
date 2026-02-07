@@ -419,7 +419,26 @@ test-env-up: local-test-env/testconfig
 	fi
 	@cd local-test-env && ./testconfig bootstrap
 	@cd local-test-env && ./testconfig validate
-	@$(DOCKER_COMPOSE) --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml up -d
+	@set -e; \
+		tmpfile="$$(mktemp)"; \
+		status=0; \
+		$(DOCKER_COMPOSE) --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml up -d >"$$tmpfile" 2>&1 || status=$$?; \
+		if [ "$$status" -eq 0 ]; then \
+			cat "$$tmpfile"; \
+		else \
+			cat "$$tmpfile"; \
+			if grep -qi "no space left on device" "$$tmpfile"; then \
+				echo ""; \
+				echo "[WARN] Docker reported 'no space left on device' while starting the test environment."; \
+				echo "       Running 'docker system prune -af' and retrying..."; \
+				docker system prune -af || true; \
+				$(DOCKER_COMPOSE) --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml up -d; \
+			else \
+				rm -f "$$tmpfile"; \
+				exit "$$status"; \
+			fi; \
+		fi; \
+		rm -f "$$tmpfile"
 	@echo ""
 	@echo "Waiting for services to be ready (30 seconds)..."
 	@sleep 30
