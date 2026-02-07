@@ -20,7 +20,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - `make test-env-full` now uses `make test-env-clean` instead of global `docker volume prune -f`, avoiding accidental cleanup of unrelated volumes.
 - Local test env healthcheck/scenarios are now implemented in Go (`local-test-env/testconfig healthcheck|scenarios`) and invoked by Makefile (shell scripts removed).
 - `make test-env-up` now removes stale test containers before `docker compose up` to avoid name conflicts.
-- Makefile now provides a `pre-push` target (runs `make test-all-clean`).
+- Makefile now provides a `pre-push` target (runs `make test-env-full`).
 - `local-test-env/testconfig healthcheck` now also validates `vmselect-standalone` readiness; integration scenarios include a standalone `vmselect` check.
 - Local Docker test environment compose file no longer uses the deprecated `version:` field, removing noisy Docker Compose warnings.
 
