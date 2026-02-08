@@ -17,6 +17,7 @@ This document is an internal engineering review of the `/Users/yu-key/VMexporter
 Baseline commands executed in this review cycle:
 
 - `make test-all-clean`: PASS (unit + integration + Playwright E2E; 103 passed / 0 skipped; auto-cleans Docker env + volumes; 2026-02-08)
+- `make manual-vmgather-daemon-up`: PASS (macOS `launchd`; `http://localhost:8080` stays up across terminal closes and auto-restarts; 2026-02-08)
 - `COMPOSE_PROJECT_NAME=vmtest2 make test-all-clean`: PASS (unit + integration + Playwright E2E; 102 passed / 0 skipped; auto-cleans Docker env + volumes)
 - `COMPOSE_PROJECT_NAME=vmtest_baseline make test-all-clean`: PASS (same as above; confirms no-skip full suite still passes on current HEAD)
 - `COMPOSE_PROJECT_NAME=vmtest_shless3 make test-all-clean`: PASS (verifies Go-based healthcheck/scenarios and stale-container cleanup in test-env-up)
@@ -69,6 +70,7 @@ Status legend: TODO -> IN PROGRESS -> DONE.
 20. [P3][DONE] Remove obsolete `version:` attribute from `local-test-env/docker-compose.test.yml` (avoids noisy Docker Compose warnings).
 21. [P2][DONE] Harden `/api/download` against symlink escapes: prevent downloading files outside `-output` via symlink inside the export directory.
 22. [P1][DONE] `Test Connection` can hang indefinitely on the `/metrics` host check (no timeout). Bounded it via `AbortController` and added a Playwright regression test.
+23. [P2][DONE] Manual testing stability: provide a persistent `vmgather` UI daemon (macOS `launchd`) so `http://localhost:8080` stays up across terminal closes; expose `make manual-vmgather-daemon-*` targets backed by Go tooling (no `.sh` scripts).
 
 ## Test suite expansion and hardening plan
 

@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-llm build build-safe build-all clean fmt lint help pre-push test-env test-env-up test-env-down test-env-clean test-env-logs test-e2e test-all test-all-clean test-scenarios test-config-bootstrap docker-build docker-build-vmgather docker-build-vmimporter manual-env-up manual-env-down manual-env-clean manual-env-logs
+.PHONY: test test-fast test-llm build build-safe build-all clean fmt lint help pre-push test-env test-env-up test-env-down test-env-clean test-env-logs test-e2e test-all test-all-clean test-scenarios test-config-bootstrap docker-build docker-build-vmgather docker-build-vmimporter manual-env-up manual-env-down manual-env-clean manual-env-logs manual-vmgather-up manual-vmgather-down manual-vmgather-daemon-up manual-vmgather-daemon-down manual-vmgather-daemon-status manual-vmgather-daemon-logs
 
 VERSION ?= $(shell git describe --tags --always --dirty)
 PKG_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "latest")
@@ -605,6 +605,19 @@ manual-vmgather-down:
 			echo "[ERROR] Refusing to kill pid=$$pid (not vmgather): $$cmd"; \
 			exit 1; \
 		fi
+
+# Persistent vmgather UI (macOS launchd; survives terminal closes and auto-restarts on crash)
+manual-vmgather-daemon-up: local-test-env/testconfig
+	@cd local-test-env && ./testconfig ui-daemon install
+
+manual-vmgather-daemon-down: local-test-env/testconfig
+	@cd local-test-env && ./testconfig ui-daemon uninstall
+
+manual-vmgather-daemon-status: local-test-env/testconfig
+	@cd local-test-env && ./testconfig ui-daemon status
+
+manual-vmgather-daemon-logs: local-test-env/testconfig
+	@cd local-test-env && ./testconfig ui-daemon logs
 
 # Integration tests: binary tests Docker environment
 test-integration: local-test-env/testconfig
