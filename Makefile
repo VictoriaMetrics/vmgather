@@ -362,6 +362,46 @@ clean:
 
 docker-build: docker-build-vmgather docker-build-vmimporter
 
+docker-build-vmgather:
+	@set -e; \
+		platforms="$(PLATFORMS)"; \
+		platform="$${platforms%%,*}"; \
+		if [ "$$platform" != "$$platforms" ]; then \
+			echo "[INFO] docker-build loads a single-platform image; using $$platform from PLATFORMS=$$platforms"; \
+		fi; \
+		echo "Building Docker image $(DOCKER_NAMESPACE)/vmgather:local ($$platform)"; \
+		docker buildx build \
+			--platform "$$platform" \
+			--build-arg GO_VERSION=$(GO_VERSION) \
+			--label "org.opencontainers.image.source=https://github.com/VictoriaMetrics/vmgather" \
+			--label "org.opencontainers.image.vendor=VictoriaMetrics" \
+			--label "org.opencontainers.image.version=$(PKG_TAG)" \
+			--label "org.opencontainers.image.created=$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+			-f build/docker/Dockerfile.vmgather \
+			--tag $(DOCKER_NAMESPACE)/vmgather:local \
+			--output $(DOCKER_OUTPUT) \
+			.
+
+docker-build-vmimporter:
+	@set -e; \
+		platforms="$(PLATFORMS)"; \
+		platform="$${platforms%%,*}"; \
+		if [ "$$platform" != "$$platforms" ]; then \
+			echo "[INFO] docker-build loads a single-platform image; using $$platform from PLATFORMS=$$platforms"; \
+		fi; \
+		echo "Building Docker image $(DOCKER_NAMESPACE)/vmimporter:local ($$platform)"; \
+		docker buildx build \
+			--platform "$$platform" \
+			--build-arg GO_VERSION=$(GO_VERSION) \
+			--label "org.opencontainers.image.source=https://github.com/VictoriaMetrics/vmgather" \
+			--label "org.opencontainers.image.vendor=VictoriaMetrics" \
+			--label "org.opencontainers.image.version=$(PKG_TAG)" \
+			--label "org.opencontainers.image.created=$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+			-f build/docker/Dockerfile.vmimporter \
+			--tag $(DOCKER_NAMESPACE)/vmimporter:local \
+			--output $(DOCKER_OUTPUT) \
+			.
+
 
 
 # Format code
