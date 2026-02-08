@@ -447,15 +447,13 @@ test-config-bootstrap: local-test-env/testconfig
 test-config-json: local-test-env/testconfig
 	@cd local-test-env && ./testconfig json
 
-# Full clean-slate test environment cycle (cleans up before and after)
+# Legacy clean-slate test environment cycle (cleans up before and after).
+# Keep this target for debugging; `pre-push` is defined later and runs the full suite.
 test-env-full:
 	$(MAKE) test-env-clean
 	$(MAKE) test-env-up
 	$(MAKE) test
 	$(MAKE) test-env-clean
-
-# Local pre-push safety check (kept in Makefile to avoid shell scripts)
-pre-push: test-env-full
 
 test-env-up: local-test-env/testconfig
 	@echo "================================================================================"

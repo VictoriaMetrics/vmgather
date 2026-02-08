@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -553,34 +554,53 @@ func TestVMService_DiscoverComponents_IgnoresInvalidMetrics(t *testing.T) {
 	}
 }
 
+type closeTrackingBody struct {
+	closed chan struct{}
+}
+
+// No content is needed; the test only cares about Close().
+func (b *closeTrackingBody) Read(p []byte) (int, error) { return 0, io.EOF }
+
+func (b *closeTrackingBody) Close() error {
+	select {
+	case <-b.closed:
+	default:
+		close(b.closed)
+	}
+	return nil
+}
+
+type exportRoundTripper struct {
+	t    *testing.T
+	body *closeTrackingBody
+}
+
+func (rt *exportRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method != http.MethodPost {
+		rt.t.Errorf("method=%q; want %q", r.Method, http.MethodPost)
+	}
+	if r.URL.Path != "/api/v1/export" {
+		rt.t.Errorf("path=%q; want %q", r.URL.Path, "/api/v1/export")
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       rt.body,
+		Request:    r,
+	}, nil
+}
+
 func TestCheckExportAPI_ClosesResponseBodyOnSuccess(t *testing.T) {
-	bodyClosed := make(chan struct{}, 1)
+	body := &closeTrackingBody{closed: make(chan struct{})}
+	rt := &exportRoundTripper{t: t, body: body}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/export" {
-			http.NotFound(w, r)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
-
-		select {
-		case <-r.Context().Done():
-			select {
-			case bodyClosed <- struct{}{}:
-			default:
-			}
-		case <-time.After(2 * time.Second):
-			// If the client doesn't close the response body, it will keep the request open.
-		}
-	}))
-	defer server.Close()
-
-	service := NewVMService().(*vmServiceImpl)
+	service := &vmServiceImpl{
+		clientFactory: func(conn domain.VMConnection) *vm.Client {
+			return vm.NewClientWithTransport(conn, rt)
+		},
+	}
 	conn := domain.VMConnection{
-		URL:  server.URL,
+		URL:  "http://example.com",
 		Auth: domain.AuthConfig{Type: domain.AuthTypeNone},
 	}
 
@@ -589,7 +609,7 @@ func TestCheckExportAPI_ClosesResponseBodyOnSuccess(t *testing.T) {
 	}
 
 	select {
-	case <-bodyClosed:
+	case <-body.closed:
 		return
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected CheckExportAPI to close the export response body on success")

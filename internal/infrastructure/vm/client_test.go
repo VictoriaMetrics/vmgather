@@ -30,7 +30,7 @@ func TestNewClient(t *testing.T) {
 	}
 
 	if client.httpClient.Timeout != 0 {
-		t.Errorf("httpClient.Timeout = %s, want 0", client.httpClient.Timeout)
+		t.Errorf("httpClient.Timeout = %v, want 0", client.httpClient.Timeout)
 	}
 
 	if client.conn.URL != conn.URL {

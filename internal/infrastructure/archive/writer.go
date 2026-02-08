@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
@@ -28,6 +30,39 @@ func NewWriter(outputDir string) *Writer {
 	return &Writer{
 		outputDir: outputDir,
 	}
+}
+
+func validateExportID(exportID string) error {
+	if strings.TrimSpace(exportID) == "" {
+		return fmt.Errorf("export ID cannot be empty")
+	}
+	// Prevent path traversal / accidental subdirs via export ID.
+	if strings.ContainsAny(exportID, `/\`) {
+		return fmt.Errorf("export ID must not contain path separators")
+	}
+	if runtime.GOOS == "windows" && isWindowsReservedName(exportID) {
+		return fmt.Errorf("export ID is a reserved name on Windows")
+	}
+	return nil
+}
+
+func isWindowsReservedName(name string) bool {
+	// Windows treats these names as reserved even with extensions, and ignores
+	// trailing dots/spaces in path components.
+	trimmed := strings.TrimRight(name, ". ")
+	upper := strings.ToUpper(trimmed)
+	switch upper {
+	case "CON", "PRN", "AUX", "NUL":
+		return true
+	}
+	if len(upper) == 4 {
+		prefix := upper[:3]
+		suffix := upper[3]
+		if (prefix == "COM" || prefix == "LPT") && suffix >= '1' && suffix <= '9' {
+			return true
+		}
+	}
+	return false
 }
 
 // ArchiveMetadata contains metadata about the export
@@ -66,6 +101,10 @@ func (w *Writer) CreateArchive(
 	metricsReader io.Reader,
 	metadata ArchiveMetadata,
 ) (archivePath string, sha256sum string, err error) {
+	if err := validateExportID(exportID); err != nil {
+		return "", "", err
+	}
+
 	// Generate archive filename
 	timestamp := time.Now().Format("20060102_150405")
 	archiveName := fmt.Sprintf("vmexport_%s_%s.zip", exportID, timestamp)

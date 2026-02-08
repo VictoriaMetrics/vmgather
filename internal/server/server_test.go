@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -193,6 +194,10 @@ func TestServer_HandleGetSample_ResponseFormat(t *testing.T) {
 }
 
 func TestHandleExportStart_StagingPermissionDenied(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows: chmod-based dir permissions don't reliably block writes")
+	}
+
 	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)

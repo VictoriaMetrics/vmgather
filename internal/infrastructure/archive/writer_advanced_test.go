@@ -404,6 +404,12 @@ func TestWriter_DiskSpaceHandling(t *testing.T) {
 
 // TestWriter_InvalidOutputDirectory tests error handling for invalid directories
 func TestWriter_InvalidOutputDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	parentFile := filepath.Join(tmpDir, "not-a-dir")
+	if err := os.WriteFile(parentFile, []byte("x"), 0o600); err != nil {
+		t.Fatalf("failed to create parent file: %v", err)
+	}
+
 	tests := []struct {
 		name        string
 		outputDir   string
@@ -411,10 +417,10 @@ func TestWriter_InvalidOutputDirectory(t *testing.T) {
 		description string
 	}{
 		{
-			name:        "nonexistent_parent",
-			outputDir:   "/nonexistent/parent/dir",
+			name:        "parent_is_file",
+			outputDir:   filepath.Join(parentFile, "child"),
 			shouldFail:  true,
-			description: "Parent directory doesn't exist",
+			description: "Parent path is a file, not a directory",
 		},
 		{
 			name:        "empty_path",

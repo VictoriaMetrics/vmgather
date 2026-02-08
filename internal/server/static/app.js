@@ -596,12 +596,6 @@ function analyzeVmUrl(rawUrl) {
         return { valid: false, message: 'Hostname must be localhost, IP, or DNS name' };
     }
 
-    // Prefer IPv4 loopback to avoid IPv6-only refusals
-    if (parsedUrl.hostname === 'localhost') {
-        parsedUrl.hostname = '127.0.0.1';
-        candidate = candidate.replace('localhost', '127.0.0.1');
-    }
-
     return {
         valid: true,
         url: parsedUrl,
@@ -1165,7 +1159,7 @@ async function testConnection() {
             ? `<div style="margin-top: 8px; font-size: 12px; color: #555;"><strong>Final endpoint:</strong> ${lastValidationFinalEndpoint}</div>`
             : '';
 
-        result.innerHTML = `
+        const errorBoxHtml = `
             <div class="error-message">
                 [FAIL] ${errorMsg}
                 ${errorDetails ? `<div style="margin-top: 8px; font-size: 13px;">${errorDetails}</div>` : ''}
@@ -1178,6 +1172,15 @@ async function testConnection() {
                 </div>
             </div>
         `;
+
+        // Keep validation steps visible on errors, since they contain useful context
+        // (parsed URL, attempts, and final endpoint). Fall back to replacing the
+        // result only when the steps container isn't available.
+        if (stepsContainer && stepsContainer.isConnected) {
+            stepsContainer.insertAdjacentHTML('beforeend', errorBoxHtml);
+        } else {
+            result.innerHTML = errorBoxHtml;
+        }
         connectionValid = false;
         nextBtn.disabled = true;
     } finally {
@@ -1218,7 +1221,9 @@ function parseVMUrl(rawUrl) {
     } else if (sanitizedPath && sanitizedPath !== '/') {
         apiBasePath = `${sanitizedPath}/prometheus`;
     } else {
-        apiBasePath = '/prometheus';
+        // No path provided. Don't guess the base path here; let the backend
+        // probe the endpoint (vmsingle vs vmselect) and pick the right one.
+        apiBasePath = '';
     }
 
     return {

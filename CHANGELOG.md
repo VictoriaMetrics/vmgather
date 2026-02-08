@@ -22,7 +22,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Local test env healthcheck/scenarios are now implemented in Go (`local-test-env/testconfig healthcheck|scenarios`) and invoked by Makefile (shell scripts removed).
 - `make test-env-up` now uses isolated compose project names and stops the previously started test project (stored in `local-test-env/.compose-project.test`), avoiding name conflicts and stale-network flakes on OrbStack.
 - Local Docker test environment no longer sets fixed `container_name` values and uses tmpfs-backed storage for VM data, preventing disk/volume issues on repeated runs.
-- Makefile now provides a `pre-push` target (runs `make test-env-full`).
+- Makefile now provides a `pre-push` target (runs `make test-all-clean`).
 - `local-test-env/testconfig healthcheck` now also validates `vmselect-standalone` readiness; integration scenarios include a standalone `vmselect` check.
 - Local Docker test environment compose file no longer uses the deprecated `version:` field, removing noisy Docker Compose warnings.
 - Documentation now starts with a mode quick choice and uses consistent VMSelect/tenant URL examples across README and the user guide.
