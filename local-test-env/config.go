@@ -341,11 +341,6 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println("[OK] All scenarios passed")
-	case "ui-daemon":
-		if err := runUIDaemon(os.Args[2:]); err != nil {
-			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
-			os.Exit(1)
-		}
 	case "validate":
 		// Validate configuration and exit with proper code
 		if err := validateConfig(config); err != nil {
@@ -354,7 +349,7 @@ func main() {
 		}
 		fmt.Println("[OK] Configuration is valid")
 	default:
-		fmt.Fprintf(os.Stderr, "Usage: %s [json|env|validate|bootstrap|healthcheck|scenarios|ui-daemon]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [json|env|validate|bootstrap|healthcheck|scenarios]\n", os.Args[0])
 		os.Exit(1)
 	}
 }

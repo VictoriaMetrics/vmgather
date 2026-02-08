@@ -9,7 +9,6 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Makefile now provides `test-unit-full` for running unit tests without `-short`.
 - Makefile now provides `test-all-clean` for running the full suite and then cleaning the Docker test env + volumes (recommended for CI / OrbStack).
 - Makefile now provides `manual-env-up/down/clean/logs` for stable local manual testing against a Docker VM stack.
-- Makefile now provides `manual-vmgather-daemon-up/down/status/logs` for a persistent local UI on macOS (`launchd`; survives terminal closes and auto-restarts).
 
 ### Changed
 - Export batching payload is now built from the batch-window selector instead of forcing batching to match metric step.
