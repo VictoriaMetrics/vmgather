@@ -69,7 +69,7 @@ Status legend: TODO -> IN PROGRESS -> DONE.
 20. [P3][DONE] Remove obsolete `version:` attribute from `local-test-env/docker-compose.test.yml` (avoids noisy Docker Compose warnings).
 21. [P2][DONE] Harden `/api/download` against symlink escapes: prevent downloading files outside `-output` via symlink inside the export directory.
 22. [P1][DONE] `Test Connection` can hang indefinitely on the `/metrics` host check (no timeout). Bounded it via `AbortController` and added a Playwright regression test.
-23. [P2][DONE] CI "Docker Images (smoke)" doesn't build anything: `make docker-build PLATFORMS=linux/amd64` is a no-op (no recipes for `docker-build-vmgather` / `docker-build-vmimporter`). This is also true on `origin/main`. Fix is prepared on branch `codex/fix-docker-build-smoke` (adds the missing Makefile targets + ignores `.cache/` in `.dockerignore`).
+23. [P2][DONE] CI "Docker Images (smoke)" doesn't build anything: `make docker-build PLATFORMS=linux/amd64` is a no-op (no recipes for `docker-build-vmgather` / `docker-build-vmimporter`). This is also true on `origin/main`. Fixed by adding missing Makefile targets + ignoring `.cache/` in `.dockerignore` (`make docker-build` now builds local `:local` images via `buildx`).
 
 ## Test suite expansion and hardening plan
 
