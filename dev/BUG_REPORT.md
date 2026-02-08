@@ -10,12 +10,13 @@ This document is an internal engineering review of the `/Users/yu-key/VMexporter
 - Current branch: `feature/custom-mode-oneshot`
 - Baseline for comparison: `origin/main` (`42d8f0e`)
 - Local-only commits on top of `origin/main` exist (not pushed). See `git log origin/main..HEAD` for the exact list.
-- Working tree: dirty (README.md, docs/user-guide.md, CHANGELOG.md, dev/BUG_REPORT.md)
+- Working tree: dirty (`.gitignore`, `Makefile`, `local-test-env/config.go`, `local-test-env/docker-compose.test.yml`, `local-test-env/project.go`, `internal/server/static/app.js`, `tests/e2e/specs/ui-regressions.spec.js`, `dev/BUG_REPORT.md`)
 
 ## Validation executed locally
 
 Baseline commands executed in this review cycle:
 
+- `make test-all-clean`: PASS (unit + integration + Playwright E2E; 103 passed / 0 skipped; auto-cleans Docker env + volumes; 2026-02-08)
 - `COMPOSE_PROJECT_NAME=vmtest2 make test-all-clean`: PASS (unit + integration + Playwright E2E; 102 passed / 0 skipped; auto-cleans Docker env + volumes)
 - `COMPOSE_PROJECT_NAME=vmtest_baseline make test-all-clean`: PASS (same as above; confirms no-skip full suite still passes on current HEAD)
 - `COMPOSE_PROJECT_NAME=vmtest_shless3 make test-all-clean`: PASS (verifies Go-based healthcheck/scenarios and stale-container cleanup in test-env-up)
@@ -67,6 +68,7 @@ Status legend: TODO -> IN PROGRESS -> DONE.
 19. [P2][DONE] `make test-env-up` now removes stale test containers to avoid name conflicts across runs.
 20. [P3][DONE] Remove obsolete `version:` attribute from `local-test-env/docker-compose.test.yml` (avoids noisy Docker Compose warnings).
 21. [P2][DONE] Harden `/api/download` against symlink escapes: prevent downloading files outside `-output` via symlink inside the export directory.
+22. [P1][DONE] `Test Connection` can hang indefinitely on the `/metrics` host check (no timeout). Bounded it via `AbortController` and added a Playwright regression test.
 
 ## Test suite expansion and hardening plan
 

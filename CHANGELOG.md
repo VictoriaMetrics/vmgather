@@ -8,6 +8,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Export wizard now lets you configure a separate batch window (auto/preset/custom seconds) independent of metric sampling step.
 - Makefile now provides `test-unit-full` for running unit tests without `-short`.
 - Makefile now provides `test-all-clean` for running the full suite and then cleaning the Docker test env + volumes (recommended for CI / OrbStack).
+- Makefile now provides `manual-env-up/down/clean/logs` for stable local manual testing against a Docker VM stack.
 
 ### Changed
 - Export batching payload is now built from the batch-window selector instead of forcing batching to match metric step.
@@ -19,7 +20,8 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - `make test-env-up` auto-recovers from Docker disk-full errors by running `docker system prune -af` and retrying.
 - `make test-env-full` now uses `make test-env-clean` instead of global `docker volume prune -f`, avoiding accidental cleanup of unrelated volumes.
 - Local test env healthcheck/scenarios are now implemented in Go (`local-test-env/testconfig healthcheck|scenarios`) and invoked by Makefile (shell scripts removed).
-- `make test-env-up` now removes stale test containers before `docker compose up` to avoid name conflicts.
+- `make test-env-up` now uses isolated compose project names and stops the previously started test project (stored in `local-test-env/.compose-project.test`), avoiding name conflicts and stale-network flakes on OrbStack.
+- Local Docker test environment no longer sets fixed `container_name` values and uses tmpfs-backed storage for VM data, preventing disk/volume issues on repeated runs.
 - Makefile now provides a `pre-push` target (runs `make test-env-full`).
 - `local-test-env/testconfig healthcheck` now also validates `vmselect-standalone` readiness; integration scenarios include a standalone `vmselect` check.
 - Local Docker test environment compose file no longer uses the deprecated `version:` field, removing noisy Docker Compose warnings.
@@ -44,6 +46,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Verbose request/diagnostic dumps are now printed only when `-debug` is enabled (`/api/validate`, `/api/discover`, `/api/sample`).
 - Obfuscation advanced sections (labels/preview) no longer auto-open by default; sample-loading errors and retries render consistently.
 - Playwright E2E no longer intermittently fails with `net::ERR_CONNECTION_REFUSED` on longer runs; the `webServer` timeout is increased to keep the server alive.
+- Connection test no longer hangs indefinitely during host reachability precheck; the `/metrics` probe is bounded and always proceeds to backend validation.
 - Race-mode tests are now more stable; resume job tests no longer flake under `make test-race`.
 
 ## [v1.7.0] - 2026-01-23

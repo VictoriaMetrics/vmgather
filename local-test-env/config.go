@@ -309,6 +309,18 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("[OK] Wrote %s\n", envFile)
+	case "project":
+		action := "get"
+		if len(os.Args) > 2 {
+			action = strings.TrimSpace(os.Args[2])
+		}
+		reset := action == "reset" || action == "new"
+		name, err := getOrCreateProjectName(reset)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(name)
 	case "healthcheck":
 		if err := runHealthcheck(config); err != nil {
 			fmt.Fprintf(os.Stderr, "[healthcheck] ERROR: %v\n", err)
@@ -389,12 +401,20 @@ func bootstrapEnvFile(path string) error {
 		if val := os.Getenv(item.key); val != "" {
 			port, err := strconv.Atoi(val)
 			if err == nil {
-				if portAvailable(host, port) {
+				if !used[port] && portAvailable(host, port) {
 					env[item.key] = strconv.Itoa(port)
 					used[port] = true
 					continue
 				}
 			}
+		}
+
+		// Prefer deterministic default ports when available. This makes the manual UX much simpler
+		// (e.g. vmgather on :8080) and keeps the env file stable across restarts.
+		if !used[item.defaultPort] && portAvailable(host, item.defaultPort) {
+			env[item.key] = strconv.Itoa(item.defaultPort)
+			used[item.defaultPort] = true
+			continue
 		}
 
 		port, err := pickFreePort(host, used)
@@ -417,12 +437,20 @@ func bootstrapEnvFile(path string) error {
 }
 
 func portAvailable(host string, port int) bool {
-	addr := net.JoinHostPort(host, strconv.Itoa(port))
-	listener, err := net.Listen("tcp", addr)
-	if err != nil {
-		return false
+	// Docker publishes ports on both IPv4 and IPv6. Checking only "localhost" may bind to ::1 and
+	// miss an IPv4 conflict (or vice versa). For local usage, check both loopback families.
+	hosts := []string{host}
+	if host == "" || strings.EqualFold(host, "localhost") || host == "127.0.0.1" || host == "::1" {
+		hosts = []string{"127.0.0.1", "::1"}
 	}
-	_ = listener.Close()
+	for _, h := range hosts {
+		addr := net.JoinHostPort(h, strconv.Itoa(port))
+		listener, err := net.Listen("tcp", addr)
+		if err != nil {
+			return false
+		}
+		_ = listener.Close()
+	}
 	return true
 }
 

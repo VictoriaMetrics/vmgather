@@ -51,6 +51,7 @@ temp/
 
 # Log files  
 *.log
+screenlog.*
 
 # Backup files
 *.bak
@@ -60,3 +61,6 @@ temp/
 reports/
 local-test-env/testconfig
 local-test-env/.env.dynamic
+local-test-env/.env.manual
+local-test-env/.compose-project
+local-test-env/.compose-project.*

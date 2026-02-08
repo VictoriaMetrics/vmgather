@@ -997,14 +997,31 @@ async function testConnection() {
 
         try {
             // Try to reach the host
-            const hostCheck = await fetch(config.url + '/metrics', {
+            // Best-effort check: bound the wait so the UI can't hang on slow TCP timeouts.
+            const hostCheckTimeoutMs = 3000;
+            let timeoutId;
+            let controller;
+            if (typeof AbortController !== 'undefined') {
+                controller = new AbortController();
+                timeoutId = setTimeout(() => controller.abort(), hostCheckTimeoutMs);
+            }
+
+            const fetchOpts = {
                 method: 'HEAD',
                 mode: 'no-cors', // Allow cross-origin for basic connectivity check
                 cache: 'no-cache'
-            }).catch(() => null);
+            };
+            if (controller) {
+                fetchOpts.signal = controller.signal;
+            }
 
-            updateStep(step2, '[OK]', 'Host is reachable', 'success');
-            console.log('[OK] Step 2: Host reachable');
+            await fetch(config.url + '/metrics', fetchOpts).catch(() => null);
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+
+            updateStep(step2, '[OK]', `Host check complete (<=${Math.round(hostCheckTimeoutMs / 1000)}s)`, 'success');
+            console.log('[OK] Step 2: Host check complete');
         } catch (e) {
             // Even if CORS fails, it means host is reachable
             updateStep(step2, '[OK]', 'Host is reachable (CORS protected)', 'success');
