@@ -35,6 +35,8 @@ func runScenarios(cfg *TestConfig) error {
 	fmt.Println()
 
 	httpClient := &http.Client{Timeout: defaultRequestTimeout}
+	scenarioTimeout := 20 * time.Second
+	scenarioInterval := 1 * time.Second
 
 	passed := 0
 	failed := 0
@@ -45,10 +47,7 @@ func runScenarios(cfg *TestConfig) error {
 		fmt.Printf("[%d] Testing: %s\n", total, sc.name)
 		fmt.Printf("    URL: %s\n", sc.endpoint)
 
-		ctx, cancel := context.WithTimeout(context.Background(), defaultRequestTimeout)
-		_, _, err := doVMQuery(ctx, httpClient, sc.endpoint, sc.auth, "vm_app_version")
-		cancel()
-		if err != nil {
+		if err := doVMQueryWithRetry(httpClient, sc.endpoint, sc.auth, "vm_app_version", scenarioTimeout, scenarioInterval); err != nil {
 			fmt.Printf("    [FAIL] %v\n\n", err)
 			failed++
 			continue
@@ -71,6 +70,37 @@ func runScenarios(cfg *TestConfig) error {
 		return fmt.Errorf("%d scenario(s) failed", failed)
 	}
 	return nil
+}
+
+func doVMQueryWithRetry(httpClient *http.Client, endpoint string, auth *AuthConfig, query string, timeout time.Duration, interval time.Duration) error {
+	if endpoint == "" {
+		return fmt.Errorf("endpoint is empty")
+	}
+	if timeout <= 0 {
+		timeout = 20 * time.Second
+	}
+	if interval <= 0 {
+		interval = 1 * time.Second
+	}
+
+	var lastErr error
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), defaultRequestTimeout)
+		_, _, err := doVMQuery(ctx, httpClient, endpoint, auth, query)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		if err != nil {
+			lastErr = err
+		}
+		time.Sleep(interval)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("query failed within %s at %s (last error: %v)", timeout, endpoint, lastErr)
+	}
+	return fmt.Errorf("query failed within %s at %s", timeout, endpoint)
 }
 
 func scenariosFromConfig(cfg *TestConfig) []scenario {
