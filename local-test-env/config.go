@@ -349,7 +349,7 @@ func main() {
 		}
 		fmt.Println("[OK] Configuration is valid")
 	default:
-		fmt.Fprintf(os.Stderr, "Usage: %s [json|env|validate|bootstrap|healthcheck|scenarios]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [json|env|validate|bootstrap|healthcheck|scenarios|project]\n", os.Args[0])
 		os.Exit(1)
 	}
 }

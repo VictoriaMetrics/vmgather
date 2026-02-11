@@ -644,7 +644,10 @@ func TestVMService_EstimateQueries_EscapeJobRegex(t *testing.T) {
 	if _, err := service.countInstances(context.Background(), client, jobs, tr); err != nil {
 		t.Fatalf("countInstances failed: %v", err)
 	}
-	_ = service.estimateJobMetrics(context.Background(), client, jobs, tr)
+	jobMetrics := service.estimateJobMetrics(context.Background(), client, jobs, tr)
+	if jobMetrics == nil {
+		t.Fatalf("estimateJobMetrics returned nil map")
+	}
 
 	want := []string{
 		`count({job=~"job\.1|job\|2"})`,

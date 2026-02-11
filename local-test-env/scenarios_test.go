@@ -53,3 +53,37 @@ func TestDoVMQueryWithRetry_RetriesOnTransientError(t *testing.T) {
 		t.Fatalf("expected at least 2 attempts, got %d", calls)
 	}
 }
+
+type contextBlockingRoundTripper struct{}
+
+func (rt *contextBlockingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	<-req.Context().Done()
+	return nil, req.Context().Err()
+}
+
+func TestDoVMQueryWithRetry_HonorsOverallTimeout(t *testing.T) {
+	httpClient := &http.Client{
+		Timeout:   700 * time.Millisecond,
+		Transport: &contextBlockingRoundTripper{},
+	}
+
+	start := time.Now()
+	err := doVMQueryWithRetry(
+		httpClient,
+		"http://example.com",
+		&AuthConfig{Type: "none"},
+		"vm_app_version",
+		120*time.Millisecond,
+		25*time.Millisecond,
+	)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	// The loop should cap request timeout by remaining time and finish close to
+	// caller timeout, not http client/default request timeout.
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("retry loop exceeded caller timeout window: elapsed=%v", elapsed)
+	}
+}

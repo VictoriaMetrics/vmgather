@@ -85,8 +85,18 @@ func doVMQueryWithRetry(httpClient *http.Client, endpoint string, auth *AuthConf
 
 	var lastErr error
 	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), defaultRequestTimeout)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+
+		requestTimeout := defaultRequestTimeout
+		if remaining < requestTimeout {
+			requestTimeout = remaining
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 		_, _, err := doVMQuery(ctx, httpClient, endpoint, auth, query)
 		cancel()
 		if err == nil {
@@ -95,7 +105,16 @@ func doVMQueryWithRetry(httpClient *http.Client, endpoint string, auth *AuthConf
 		if err != nil {
 			lastErr = err
 		}
-		time.Sleep(interval)
+
+		remaining = time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		sleepFor := interval
+		if remaining < sleepFor {
+			sleepFor = remaining
+		}
+		time.Sleep(sleepFor)
 	}
 	if lastErr != nil {
 		return fmt.Errorf("query failed within %s at %s (last error: %v)", timeout, endpoint, lastErr)
