@@ -11,6 +11,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
+)
+
+const (
+	fallbackPortRangeStart = 20000
+	fallbackPortRangeEnd   = 45000
 )
 
 // TestConfig holds all test environment URLs and credentials
@@ -370,6 +376,7 @@ func bootstrapEnvFile(path string) error {
 	}
 
 	host := getEnvOrDefault("VM_TEST_HOST", "localhost")
+	preferDefaultPorts := getEnvOrDefault("VMGATHER_PREFER_DEFAULT_PORTS", "1") != "0"
 	env := make(map[string]string)
 
 	portKeys := []struct {
@@ -411,7 +418,7 @@ func bootstrapEnvFile(path string) error {
 
 		// Prefer deterministic default ports when available. This makes the manual UX much simpler
 		// (e.g. vmgather on :8080) and keeps the env file stable across restarts.
-		if !used[item.defaultPort] && portAvailable(host, item.defaultPort) {
+		if preferDefaultPorts && !used[item.defaultPort] && portAvailable(host, item.defaultPort) {
 			env[item.key] = strconv.Itoa(item.defaultPort)
 			used[item.defaultPort] = true
 			continue
@@ -455,27 +462,23 @@ func portAvailable(host string, port int) bool {
 }
 
 func pickFreePort(host string, used map[int]bool) (int, error) {
-	for i := 0; i < 50; i++ {
-		listener, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
-		if err != nil {
-			return 0, err
-		}
-		_, portStr, err := net.SplitHostPort(listener.Addr().String())
-		_ = listener.Close()
-		if err != nil {
-			continue
-		}
-		port, err := strconv.Atoi(portStr)
-		if err != nil {
-			continue
-		}
+	span := fallbackPortRangeEnd - fallbackPortRangeStart + 1
+	if span <= 0 {
+		return 0, fmt.Errorf("invalid fallback port range %d..%d", fallbackPortRangeStart, fallbackPortRangeEnd)
+	}
+	startOffset := (time.Now().Nanosecond() + os.Getpid()) % span
+	for i := 0; i < span; i++ {
+		port := fallbackPortRangeStart + ((startOffset + i) % span)
 		if used[port] {
+			continue
+		}
+		if !portAvailable(host, port) {
 			continue
 		}
 		used[port] = true
 		return port, nil
 	}
-	return 0, fmt.Errorf("unable to find free port after multiple attempts")
+	return 0, fmt.Errorf("unable to find free port in range %d..%d", fallbackPortRangeStart, fallbackPortRangeEnd)
 }
 
 func writeEnvFile(path string, env map[string]string) error {

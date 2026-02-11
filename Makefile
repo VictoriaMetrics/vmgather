@@ -464,8 +464,6 @@ test-env-up: local-test-env/testconfig
 		echo "This directory is gitignored. Please ensure you have it locally."; \
 		exit 1; \
 	fi
-	@cd local-test-env && ./testconfig bootstrap
-	@cd local-test-env && ./testconfig validate
 	@echo "Starting Docker test environment (isolated compose project)..."
 	@set -e; \
 		prev_proj="$$(cd local-test-env && VMGATHER_PROJECT_FILE=$(TEST_ENV_PROJECT_FILE_TEST) ./testconfig project 2>/dev/null || true)"; \
@@ -478,6 +476,10 @@ test-env-up: local-test-env/testconfig
 		max_attempts=3; \
 		while [ "$$attempt" -lt "$$max_attempts" ]; do \
 			attempt=$$((attempt+1)); \
+			echo "  [INFO] bootstrapping dynamic ports (attempt $$attempt/$$max_attempts)"; \
+			rm -f "$(TEST_ENV_FILE)"; \
+			(cd local-test-env && VMGATHER_PREFER_DEFAULT_PORTS=0 ./testconfig bootstrap); \
+			(cd local-test-env && ./testconfig validate); \
 			proj="$$(cd local-test-env && VMGATHER_PROJECT_FILE=$(TEST_ENV_PROJECT_FILE_TEST) VMGATHER_PROJECT_PREFIX=vmtest ./testconfig project reset)"; \
 			echo "  [INFO] compose project: $$proj (attempt $$attempt/$$max_attempts)"; \
 			tmpfile="$$(mktemp)"; \
@@ -489,23 +491,33 @@ test-env-up: local-test-env/testconfig
 				started=1; \
 				break; \
 			fi; \
-			if grep -qi "no space left on device" "$$tmpfile"; then \
-				echo ""; \
-				echo "[WARN] Docker reported 'no space left on device'. Running cleanup and retrying..."; \
-				docker builder prune -af || true; \
-				docker system prune -af || true; \
+				if grep -qi "no space left on device" "$$tmpfile"; then \
+					echo ""; \
+					echo "[WARN] Docker reported 'no space left on device'. Running cleanup and retrying..."; \
+					$(DOCKER_COMPOSE) -p "$$proj" --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml down -v >/dev/null 2>&1 || true; \
+					docker builder prune -af || true; \
+					docker system prune -af || true; \
+					rm -f "$$tmpfile"; \
+					continue; \
+				fi; \
+				if grep -qi "already exists in network" "$$tmpfile"; then \
+					echo ""; \
+					echo "[WARN] Docker network has stale endpoints. Retrying with a new compose project..."; \
+					$(DOCKER_COMPOSE) -p "$$proj" --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml down >/dev/null 2>&1 || true; \
+					rm -f "$$tmpfile"; \
+					continue; \
+				fi; \
+				if grep -Eqi "port is already allocated|ports are not available|bind for .* failed|address already in use" "$$tmpfile"; then \
+					echo ""; \
+					echo "[WARN] Docker reported a host port conflict. Re-picking ports and retrying..."; \
+					$(DOCKER_COMPOSE) -p "$$proj" --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml down >/dev/null 2>&1 || true; \
+					rm -f "$$tmpfile"; \
+					continue; \
+				fi; \
+				$(DOCKER_COMPOSE) -p "$$proj" --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml down >/dev/null 2>&1 || true; \
 				rm -f "$$tmpfile"; \
-				continue; \
-			fi; \
-			if grep -qi "already exists in network" "$$tmpfile"; then \
-				echo ""; \
-				echo "[WARN] Docker network has stale endpoints. Retrying with a new compose project..."; \
-				rm -f "$$tmpfile"; \
-				continue; \
-			fi; \
-			rm -f "$$tmpfile"; \
-			exit "$$status"; \
-		done; \
+				exit "$$status"; \
+			done; \
 		if [ "$$started" -ne 1 ]; then \
 			echo "[ERROR] Failed to start the Docker test environment after $$max_attempts attempts"; \
 			exit 1; \
@@ -565,17 +577,63 @@ manual-env-up: local-test-env/testconfig
 	@echo "================================================================================"
 	@echo "Starting Manual Test Environment"
 	@echo "================================================================================"
-	@cd local-test-env && VMGATHER_ENV_FILE=.env.manual ./testconfig bootstrap
-	@cd local-test-env && VMGATHER_ENV_FILE=.env.manual ./testconfig validate
 	@set -e; \
 		prev_proj="$$(cd local-test-env && VMGATHER_PROJECT_FILE=$(TEST_ENV_PROJECT_FILE_MANUAL) ./testconfig project 2>/dev/null || true)"; \
 		if [ -n "$$prev_proj" ]; then \
 			echo "  [INFO] stopping existing compose project: $$prev_proj"; \
 			$(DOCKER_COMPOSE) -p "$$prev_proj" --env-file $(MANUAL_ENV_FILE) -f local-test-env/docker-compose.test.yml down >/dev/null 2>&1 || true; \
 		fi; \
-		proj="$$(cd local-test-env && VMGATHER_ENV_FILE=.env.manual VMGATHER_PROJECT_FILE=$(TEST_ENV_PROJECT_FILE_MANUAL) VMGATHER_PROJECT_PREFIX=vmmanual ./testconfig project reset)"; \
-		echo "  [INFO] compose project: $$proj"; \
-		$(DOCKER_COMPOSE) -p "$$proj" --env-file $(MANUAL_ENV_FILE) -f local-test-env/docker-compose.test.yml up -d; \
+		started=0; \
+		attempt=0; \
+		max_attempts=3; \
+		while [ "$$attempt" -lt "$$max_attempts" ]; do \
+			attempt=$$((attempt+1)); \
+			echo "  [INFO] bootstrapping dynamic ports (attempt $$attempt/$$max_attempts)"; \
+			rm -f "$(MANUAL_ENV_FILE)"; \
+			(cd local-test-env && VMGATHER_ENV_FILE=.env.manual VMGATHER_PREFER_DEFAULT_PORTS=0 ./testconfig bootstrap); \
+			(cd local-test-env && VMGATHER_ENV_FILE=.env.manual ./testconfig validate); \
+			proj="$$(cd local-test-env && VMGATHER_ENV_FILE=.env.manual VMGATHER_PROJECT_FILE=$(TEST_ENV_PROJECT_FILE_MANUAL) VMGATHER_PROJECT_PREFIX=vmmanual ./testconfig project reset)"; \
+			echo "  [INFO] compose project: $$proj (attempt $$attempt/$$max_attempts)"; \
+			tmpfile="$$(mktemp)"; \
+			status=0; \
+			$(DOCKER_COMPOSE) -p "$$proj" --env-file $(MANUAL_ENV_FILE) -f local-test-env/docker-compose.test.yml up -d >"$$tmpfile" 2>&1 || status=$$?; \
+			cat "$$tmpfile"; \
+			if [ "$$status" -eq 0 ]; then \
+				rm -f "$$tmpfile"; \
+				started=1; \
+				break; \
+			fi; \
+			if grep -qi "no space left on device" "$$tmpfile"; then \
+				echo ""; \
+				echo "[WARN] Docker reported 'no space left on device'. Running cleanup and retrying..."; \
+				$(DOCKER_COMPOSE) -p "$$proj" --env-file $(MANUAL_ENV_FILE) -f local-test-env/docker-compose.test.yml down -v >/dev/null 2>&1 || true; \
+				docker builder prune -af || true; \
+				docker system prune -af || true; \
+				rm -f "$$tmpfile"; \
+				continue; \
+			fi; \
+			if grep -qi "already exists in network" "$$tmpfile"; then \
+				echo ""; \
+				echo "[WARN] Docker network has stale endpoints. Retrying with a new compose project..."; \
+				$(DOCKER_COMPOSE) -p "$$proj" --env-file $(MANUAL_ENV_FILE) -f local-test-env/docker-compose.test.yml down >/dev/null 2>&1 || true; \
+				rm -f "$$tmpfile"; \
+				continue; \
+			fi; \
+			if grep -Eqi "port is already allocated|ports are not available|bind for .* failed|address already in use" "$$tmpfile"; then \
+				echo ""; \
+				echo "[WARN] Docker reported a host port conflict. Re-picking ports and retrying..."; \
+				$(DOCKER_COMPOSE) -p "$$proj" --env-file $(MANUAL_ENV_FILE) -f local-test-env/docker-compose.test.yml down >/dev/null 2>&1 || true; \
+				rm -f "$$tmpfile"; \
+				continue; \
+			fi; \
+			$(DOCKER_COMPOSE) -p "$$proj" --env-file $(MANUAL_ENV_FILE) -f local-test-env/docker-compose.test.yml down >/dev/null 2>&1 || true; \
+			rm -f "$$tmpfile"; \
+			exit "$$status"; \
+		done; \
+		if [ "$$started" -ne 1 ]; then \
+			echo "[ERROR] Failed to start the Docker manual environment after $$max_attempts attempts"; \
+			exit 1; \
+		fi; \
 		echo ""; \
 		echo "Waiting for services to be ready (30 seconds)..."; \
 		sleep 30; \
