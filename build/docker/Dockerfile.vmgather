@@ -6,8 +6,9 @@ COPY . .
 RUN apk add --no-cache git build-base && \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /out/vmgather ./cmd/vmgather
 
-FROM gcr.io/distroless/base-debian12
-WORKDIR /app
+FROM gcr.io/distroless/base-debian12:nonroot
+WORKDIR /tmp
 COPY --from=builder /out/vmgather /usr/local/bin/vmgather
+USER 65532:65532
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/vmgather","-addr","0.0.0.0:8080"]

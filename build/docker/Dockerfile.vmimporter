@@ -6,8 +6,9 @@ COPY . .
 RUN apk add --no-cache git build-base && \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /out/vmimporter ./cmd/vmimporter
 
-FROM gcr.io/distroless/base-debian12
-WORKDIR /app
+FROM gcr.io/distroless/base-debian12:nonroot
+WORKDIR /tmp
 COPY --from=builder /out/vmimporter /usr/local/bin/vmimporter
+USER 65532:65532
 EXPOSE 8081
 ENTRYPOINT ["/usr/local/bin/vmimporter","-addr","0.0.0.0:8081"]
