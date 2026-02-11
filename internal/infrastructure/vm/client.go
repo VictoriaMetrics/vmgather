@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
@@ -45,6 +46,8 @@ type Result struct {
 
 // ErrMissingTenantPath indicates vmselect URL is missing /select/<tenant>/prometheus
 var ErrMissingTenantPath = errors.New("vmselect requires /select/<tenant>/prometheus")
+
+var insecureTLSWarnOnce sync.Once
 
 // HintForError returns a human-friendly hint for common VM connection errors
 func HintForError(err error) string {
@@ -89,7 +92,10 @@ func NewClient(conn domain.VMConnection) *Client {
 
 	// Handle TLS verification skip
 	if conn.SkipTLSVerify {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		insecureTLSWarnOnce.Do(func() {
+			log.Printf("[WARN] TLS certificate verification is disabled for VictoriaMetrics requests (target=%s). Use only in trusted lab/dev environments.", connectionTargetForLog(conn))
+		})
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec G402 -- explicit user opt-in via skip_tls_verify
 	}
 
 	return &Client{
@@ -302,6 +308,20 @@ func classifyResponseError(statusCode int, body string) error {
 		return fmt.Errorf("%w: %s", ErrMissingTenantPath, trimmed)
 	}
 	return fmt.Errorf("unexpected status code %d: %s", statusCode, trimmed)
+}
+
+func connectionTargetForLog(conn domain.VMConnection) string {
+	target := conn.FullApiUrl
+	if target == "" {
+		target = conn.URL
+		if conn.ApiBasePath != "" {
+			target += conn.ApiBasePath
+		}
+	}
+	if target == "" {
+		return "unknown-target"
+	}
+	return redactURL(target)
 }
 
 // redactURL removes sensitive information from URL for logging

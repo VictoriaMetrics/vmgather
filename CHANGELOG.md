@@ -15,6 +15,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Documentation and test examples now use env-based auth placeholders instead of static password-like strings to reduce false positives in secret scanners.
 - Added secret-scanning hardening with a repo-level `.gitleaks.toml` allowlist for generated artifacts plus a CI `secret-scan` job (`gitleaks` + verified `trufflehog`) in `.github/workflows/security.yml`.
 - Runtime container images now define explicit `HEALTHCHECK` probes (`/api/health`) for `vmgather` and `vmimporter` via a minimal static `container-healthcheck` binary.
+- `skip_tls_verify` mode now emits explicit runtime warnings (in both exporter and importer paths) with redacted endpoints to reduce accidental insecure usage in production.
 
 ## [v1.8.0] - 2026-02-11
 

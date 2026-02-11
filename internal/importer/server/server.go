@@ -206,10 +206,11 @@ type metricLine struct {
 
 // Server handles VMImport UI and API endpoints.
 type Server struct {
-	version    string
-	httpClient *http.Client
-	jobs       map[string]*importJob
-	jobsMu     sync.RWMutex
+	version             string
+	httpClient          *http.Client
+	jobs                map[string]*importJob
+	jobsMu              sync.RWMutex
+	insecureTLSWarnOnce sync.Once
 }
 
 func NewServer(version string) *Server {
@@ -224,12 +225,29 @@ func NewServer(version string) *Server {
 	}
 }
 
-func (s *Server) withInsecure(insecure bool) *http.Client {
+func (s *Server) withInsecure(insecure bool, endpoint string) *http.Client {
 	if !insecure {
 		return s.httpClient
 	}
+	s.insecureTLSWarnOnce.Do(func() {
+		log.Printf("[WARN] vmimporter is using skip_tls_verify for endpoint %s. Use only in trusted lab/dev environments.", redactURLForLog(endpoint))
+	})
 	transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} // #nosec G402 - intentional for air-gapped envs
 	return &http.Client{Timeout: importerHTTPTimeout, Transport: transport}
+}
+
+func redactURLForLog(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return "unknown-endpoint"
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "invalid-url"
+	}
+	if _, hasPassword := u.User.Password(); hasPassword {
+		u.User = url.UserPassword(u.User.Username(), "xxxxx")
+	}
+	return u.String()
 }
 
 func (s *Server) Router() http.Handler {
@@ -1203,7 +1221,7 @@ func (s *Server) postImportChunk(ctx context.Context, cfg uploadConfig, importUR
 	applyTenantHeaders(req, cfg)
 	applyAuthHeaders(req, cfg)
 
-	client := s.withInsecure(cfg.SkipTLSVerify)
+	client := s.withInsecure(cfg.SkipTLSVerify, importURL)
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, "", fmt.Errorf("remote import failed: %w", err)
@@ -1335,7 +1353,7 @@ func (s *Server) verifyImport(ctx context.Context, cfg uploadConfig, summary imp
 		applyTenantHeaders(req, cfg)
 		applyAuthHeaders(req, cfg)
 
-		client := s.withInsecure(cfg.SkipTLSVerify)
+		client := s.withInsecure(cfg.SkipTLSVerify, seriesURL)
 		resp, err := client.Do(req)
 		if err != nil {
 			lastErr = err.Error()
@@ -1432,7 +1450,7 @@ func (s *Server) pingEndpoint(ctx context.Context, cfg uploadConfig) error {
 	}
 	applyTenantHeaders(req, cfg)
 	applyAuthHeaders(req, cfg)
-	client := s.withInsecure(cfg.SkipTLSVerify)
+	client := s.withInsecure(cfg.SkipTLSVerify, importURL)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("dial failed: %w", err)
@@ -1464,7 +1482,7 @@ func (s *Server) retentionCutoff(ctx context.Context, cfg uploadConfig) int64 {
 		applyTenantHeaders(req, cfg)
 		applyAuthHeaders(req, cfg)
 
-		client := s.withInsecure(cfg.SkipTLSVerify)
+		client := s.withInsecure(cfg.SkipTLSVerify, parsed.String())
 		resp, err := client.Do(req)
 		if err == nil {
 			defer func() { _ = resp.Body.Close() }()
@@ -1498,7 +1516,7 @@ func (s *Server) retentionCutoff(ctx context.Context, cfg uploadConfig) int64 {
 	applyTenantHeaders(req, cfg)
 	applyAuthHeaders(req, cfg)
 
-	client := s.withInsecure(cfg.SkipTLSVerify)
+	client := s.withInsecure(cfg.SkipTLSVerify, parsed.String())
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("[WARN] retentionCutoff: failed to fetch /metrics: %v", err)
