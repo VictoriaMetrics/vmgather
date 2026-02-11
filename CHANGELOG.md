@@ -10,6 +10,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Docker publish targets now emit max-mode provenance and SBOM attestations (`--provenance=mode=max --sbom=true`) for release images.
 - Docker builder/runtime base images are now pinned by digest in both Dockerfiles for deterministic builds and reduced supply-chain drift from mutable tags.
 - Docker builder stages no longer install extra Alpine build packages (`git`, `build-base`), reducing build-time supply-chain surface while keeping `CGO_ENABLED=0` static binaries.
+- Added a dedicated GitHub Actions security workflow (`.github/workflows/security.yml`) with `govulncheck`, `hadolint`, and `trivy` gates for Dockerfile misconfig and image CVEs.
 
 ## [v1.8.0] - 2026-02-11
 
