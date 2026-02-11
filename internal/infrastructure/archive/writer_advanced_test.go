@@ -53,21 +53,30 @@ func TestWriter_CrossPlatformPaths(t *testing.T) {
 			shouldWork:  true,
 			description: "ID with dots (should work on all platforms)",
 		},
-	}
-
-	// Platform-specific tests
-	if runtime.GOOS == "windows" {
-		tests = append(tests, struct {
-			name        string
-			exportID    string
-			shouldWork  bool
-			description string
-		}{
-			name:        "windows_reserved",
-			exportID:    "CON", // Reserved name on Windows
+		{
+			name:        "windows_reserved_name_is_allowed_with_prefix",
+			exportID:    "CON",
+			shouldWork:  true,
+			description: "Reserved bare name is safe once prefixed in archive filename",
+		},
+		{
+			name:        "invalid_colon",
+			exportID:    "export:123",
 			shouldWork:  false,
-			description: "Windows reserved name",
-		})
+			description: "Colon is invalid for cross-platform filenames",
+		},
+		{
+			name:        "invalid_asterisk",
+			exportID:    "export*123",
+			shouldWork:  false,
+			description: "Asterisk is invalid for cross-platform filenames",
+		},
+		{
+			name:        "invalid_control_character",
+			exportID:    "export\t123",
+			shouldWork:  false,
+			description: "Control characters are invalid in filenames",
+		},
 	}
 
 	for _, tt := range tests {

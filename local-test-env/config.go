@@ -18,6 +18,7 @@ import (
 const (
 	fallbackPortRangeStart = 20000
 	fallbackPortRangeEnd   = 45000
+	defaultTestHost        = "127.0.0.1"
 )
 
 // TestConfig holds all test environment URLs and credentials
@@ -97,8 +98,8 @@ type AuthConfig struct {
 // DefaultConfig returns default test configuration
 func DefaultConfig() *TestConfig {
 	loadEnvFileIfExists(getEnvOrDefault("VMGATHER_ENV_FILE", ".env.dynamic"))
-	// Use localhost by default, can be overridden via env vars
-	host := getEnvOrDefault("VM_TEST_HOST", "localhost")
+	// Use explicit IPv4 loopback by default to avoid ::1 resolution differences across hosts.
+	host := getEnvOrDefault("VM_TEST_HOST", defaultTestHost)
 	vmGatherPort := getEnvIntOrDefault("VMGATHER_PORT", 8080)
 	vmSingleNoAuthPort := getEnvIntOrDefault("VM_SINGLE_NOAUTH_PORT", 18428)
 	vmAuthSinglePort := getEnvIntOrDefault("VM_AUTH_SINGLE_PORT", 8427)
@@ -193,7 +194,7 @@ func (c *TestConfig) ToJSON() (string, error) {
 // ToEnv exports configuration as environment variables (shell format)
 func (c *TestConfig) ToEnv() string {
 	vmGatherPort := getEnvIntOrDefault("VMGATHER_PORT", 8080)
-	vmGatherAddr := getEnvOrDefault("VMGATHER_ADDR", fmt.Sprintf("localhost:%d", vmGatherPort))
+	vmGatherAddr := getEnvOrDefault("VMGATHER_ADDR", fmt.Sprintf("%s:%d", defaultTestHost, vmGatherPort))
 	if parsed, err := url.Parse(c.VMGatherURL); err == nil && parsed.Host != "" {
 		vmGatherAddr = parsed.Host
 	}
@@ -376,7 +377,7 @@ func bootstrapEnvFile(path string) error {
 		return errors.New("env file path is empty")
 	}
 
-	host := getEnvOrDefault("VM_TEST_HOST", "localhost")
+	host := getEnvOrDefault("VM_TEST_HOST", defaultTestHost)
 	preferDefaultPorts := getEnvOrDefault("VMGATHER_PREFER_DEFAULT_PORTS", "1") != "0"
 	env := make(map[string]string)
 

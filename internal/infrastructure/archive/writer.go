@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -40,29 +39,17 @@ func validateExportID(exportID string) error {
 	if strings.ContainsAny(exportID, `/\`) {
 		return fmt.Errorf("export ID must not contain path separators")
 	}
-	if runtime.GOOS == "windows" && isWindowsReservedName(exportID) {
-		return fmt.Errorf("export ID is a reserved name on Windows")
+	// Keep archive filename safe across all platforms (not only on the current runtime OS).
+	// Windows forbids these characters in filenames.
+	if strings.ContainsAny(exportID, `<>:"|?*`) {
+		return fmt.Errorf("export ID contains invalid filename characters")
 	}
-	return nil
-}
-
-func isWindowsReservedName(name string) bool {
-	// Windows treats these names as reserved even with extensions, and ignores
-	// trailing dots/spaces in path components.
-	trimmed := strings.TrimRight(name, ". ")
-	upper := strings.ToUpper(trimmed)
-	switch upper {
-	case "CON", "PRN", "AUX", "NUL":
-		return true
-	}
-	if len(upper) == 4 {
-		prefix := upper[:3]
-		suffix := upper[3]
-		if (prefix == "COM" || prefix == "LPT") && suffix >= '1' && suffix <= '9' {
-			return true
+	for _, r := range exportID {
+		if r < 32 || r == 127 {
+			return fmt.Errorf("export ID contains control characters")
 		}
 	}
-	return false
+	return nil
 }
 
 // ArchiveMetadata contains metadata about the export

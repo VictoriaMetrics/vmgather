@@ -10,6 +10,41 @@ import (
 	"testing"
 )
 
+func TestDefaultConfigUsesIPv4LoopbackByDefault(t *testing.T) {
+	t.Setenv("VMGATHER_ENV_FILE", filepath.Join(t.TempDir(), ".env.missing"))
+	t.Setenv("VM_TEST_HOST", "")
+
+	cfg := DefaultConfig()
+	if !strings.Contains(cfg.VMGatherURL, "127.0.0.1:") {
+		t.Fatalf("expected VMGatherURL to use 127.0.0.1 by default, got %q", cfg.VMGatherURL)
+	}
+	if !strings.Contains(cfg.VMSingleNoAuth.URL, "127.0.0.1:") {
+		t.Fatalf("expected VMSingleNoAuth URL to use 127.0.0.1 by default, got %q", cfg.VMSingleNoAuth.URL)
+	}
+	if !strings.Contains(cfg.VMSelectStandalone.SelectTenant0, "127.0.0.1:") {
+		t.Fatalf("expected VMSelect standalone URL to use 127.0.0.1 by default, got %q", cfg.VMSelectStandalone.SelectTenant0)
+	}
+}
+
+func TestBootstrapEnvFileUsesIPv4LoopbackByDefault(t *testing.T) {
+	t.Setenv("VM_TEST_HOST", "")
+	tmpFile := filepath.Join(t.TempDir(), ".env.dynamic")
+	if err := bootstrapEnvFile(tmpFile); err != nil {
+		t.Fatalf("bootstrapEnvFile returned error: %v", err)
+	}
+
+	values := readEnvFile(t, tmpFile)
+	for _, key := range []string{"VMGATHER_URL", "VM_SINGLE_NOAUTH_URL", "VMSELECT_STANDALONE_URL"} {
+		val, ok := values[key]
+		if !ok {
+			t.Fatalf("expected %s in generated env file", key)
+		}
+		if !strings.Contains(val, "127.0.0.1:") {
+			t.Fatalf("expected %s to use 127.0.0.1, got %q", key, val)
+		}
+	}
+}
+
 func TestPickFreePortUsesFallbackRange(t *testing.T) {
 	t.Parallel()
 
@@ -96,4 +131,26 @@ func TestShouldIgnoreListenErrorDoesNotHideRealConflict(t *testing.T) {
 	if shouldIgnoreListenError("::1", err) {
 		t.Fatalf("must not ignore address already in use for IPv6 host")
 	}
+}
+
+func readEnvFile(t *testing.T, path string) map[string]string {
+	t.Helper()
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed reading env file %s: %v", path, err)
+	}
+
+	values := make(map[string]string)
+	for _, line := range strings.Split(string(content), "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		values[parts[0]] = parts[1]
+	}
+	return values
 }
