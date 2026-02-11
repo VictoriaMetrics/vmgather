@@ -38,6 +38,11 @@ func runHealthcheck(cfg *TestConfig) error {
 	if err := waitForFreshVMAppVersion(httpClient, cfg.VMAuthExport.URL, modernAuth, timeout, interval); err != nil {
 		return err
 	}
+	// Custom selector integration tests depend on vmagent having already scraped and remote-written
+	// "test1" samples. Wait for that explicitly to avoid startup race flakes in CI.
+	if err := waitForSelectorSeries(httpClient, cfg.VMSingleNoAuth.URL, `{job="test1"}`, timeout, interval); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -63,4 +68,31 @@ func waitForFreshVMAppVersion(httpClient *http.Client, endpoint string, auth *Au
 		time.Sleep(interval)
 	}
 	return fmt.Errorf("vm_app_version not found within %s at %s", timeout, endpoint)
+}
+
+func waitForSelectorSeries(httpClient *http.Client, endpoint string, selector string, timeout time.Duration, interval time.Duration) error {
+	if endpoint == "" {
+		return fmt.Errorf("endpoint is empty")
+	}
+	if selector == "" {
+		return fmt.Errorf("selector is empty")
+	}
+
+	query := fmt.Sprintf("count(%s)", selector)
+	fmt.Printf("[healthcheck] waiting for selector data (%s) at %s\n", selector, endpoint)
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), defaultRequestTimeout)
+		resp, _, err := doVMQuery(ctx, httpClient, endpoint, nil, query)
+		cancel()
+		if err == nil {
+			if count, ok := extractVMQueryValueFloat(resp); ok && count > 0 {
+				fmt.Printf("[healthcheck] selector data ready (%s count=%.0f) at %s\n", selector, count, endpoint)
+				return nil
+			}
+		}
+		time.Sleep(interval)
+	}
+	return fmt.Errorf("selector data not found within %s for %s at %s", timeout, selector, endpoint)
 }
