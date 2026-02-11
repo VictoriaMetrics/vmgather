@@ -17,7 +17,7 @@ Docker Compose stack that mirrors common VictoriaMetrics deployments for integra
 | Component | Purpose | Ports / credentials |
 | --- | --- | --- |
 | VMSingle (no auth) | Baseline VictoriaMetrics single-node | `http://localhost:18428` |
-| VMSingle + VMAuth | Tests Basic Auth and VMAuth headers | `http://localhost:8427`, user `monitoring-read`, pass `secret-password-123` |
+| VMSingle + VMAuth | Tests Basic Auth and VMAuth headers | `http://localhost:8427`, user `monitoring-read`, pass from env `VM_SINGLE_AUTH_PASS` |
 | VMCluster | vmselect/vmstorage/vminsert trio | vmselect `:8481`, vminsert `:8480`, vmstorage `:8482/:8483` |
 | VMSelect standalone | vmselect backed by a single vmstorage | `http://localhost:8491` |
 | VMCluster + VMAuth | Emulates VictoriaMetrics Managed (`/rw/prometheus` and `/r/prometheus`) | `http://localhost:8426/<tenant>/rw/prometheus` |
@@ -57,7 +57,7 @@ curl http://localhost:18428/api/v1/query?query=up
 
 ### Scenario 2 – VMSingle behind VMAuth
 ```bash
-curl -u monitoring-read:secret-password-123 \
+curl -u "monitoring-read:${VM_SINGLE_AUTH_PASS}" \
   http://localhost:8427/api/v1/query?query=up
 ```
 
@@ -73,7 +73,7 @@ curl http://localhost:8491/select/0/prometheus/api/v1/query?query=up
 
 ### Scenario 4 – VMCluster + VMAuth (Managed-style)
 ```bash
-curl -u monitoring-rw:secret-password-123 \
+curl -u "monitoring-rw:${VM_CLUSTER_VMAUTH_RW_PASS}" \
   http://localhost:8426/1011/rw/prometheus/api/v1/query?query=up
 ```
 

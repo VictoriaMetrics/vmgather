@@ -12,6 +12,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Docker builder stages no longer install extra Alpine build packages (`git`, `build-base`), reducing build-time supply-chain surface while keeping `CGO_ENABLED=0` static binaries.
 - Added a dedicated GitHub Actions security workflow (`.github/workflows/security.yml`) with `govulncheck`, `hadolint`, and `trivy` gates for Dockerfile misconfig and image CVEs.
 - HTTP servers now set explicit hardening timeouts (`ReadHeaderTimeout`, `ReadTimeout`, `WriteTimeout`, `IdleTimeout`) in both `vmgather` and `vmimporter`.
+- Documentation and test examples now use env-based auth placeholders instead of static password-like strings to reduce false positives in secret scanners.
 
 ## [v1.8.0] - 2026-02-11
 
