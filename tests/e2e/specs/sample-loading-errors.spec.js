@@ -220,10 +220,10 @@ test.describe('Sample Loading - Error Handling', () => {
     const errorBox = page.locator('#advancedLabels .error-message');
     await expect(errorBox).toBeVisible({ timeout: 10000 });
 
-	    // Click retry
-	    const retryButton = errorBox.locator('button:has-text("Retry")');
-	    await expect(retryButton).toBeVisible({ timeout: 10000 });
-	    await retryButton.evaluate(button => button.click());
+    // Click retry
+    const retryButton = errorBox.locator('button:has-text("Retry")');
+    await expect(retryButton).toBeVisible({ timeout: 10000 });
+    await retryButton.click();
 
     // Wait for success - labels should appear
     await page.waitForSelector('#advancedLabels .label-item', { timeout: 10000 });

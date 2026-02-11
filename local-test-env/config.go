@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -454,11 +455,30 @@ func portAvailable(host string, port int) bool {
 		addr := net.JoinHostPort(h, strconv.Itoa(port))
 		listener, err := net.Listen("tcp", addr)
 		if err != nil {
+			if shouldIgnoreListenError(h, err) {
+				continue
+			}
 			return false
 		}
 		_ = listener.Close()
 	}
 	return true
+}
+
+func shouldIgnoreListenError(host string, err error) bool {
+	if host != "::1" || err == nil {
+		return false
+	}
+	if errors.Is(err, syscall.EAFNOSUPPORT) ||
+		errors.Is(err, syscall.EPROTONOSUPPORT) ||
+		errors.Is(err, syscall.EADDRNOTAVAIL) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "address family not supported") ||
+		strings.Contains(msg, "protocol not supported") ||
+		strings.Contains(msg, "cannot assign requested address") ||
+		strings.Contains(msg, "can't assign requested address")
 }
 
 func pickFreePort(host string, used map[int]bool) (int, error) {

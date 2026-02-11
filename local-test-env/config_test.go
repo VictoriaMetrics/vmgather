@@ -1,10 +1,12 @@
 package main
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -72,5 +74,26 @@ func TestBootstrapEnvFileDisableDefaultPorts(t *testing.T) {
 	}
 	if vmGatherPort < fallbackPortRangeStart || vmGatherPort > fallbackPortRangeEnd {
 		t.Fatalf("expected VMGATHER_PORT in fallback range %d..%d, got %d", fallbackPortRangeStart, fallbackPortRangeEnd, vmGatherPort)
+	}
+}
+
+func TestShouldIgnoreListenErrorForIPv6Unavailable(t *testing.T) {
+	t.Parallel()
+
+	err := &net.OpError{Err: syscall.EAFNOSUPPORT}
+	if !shouldIgnoreListenError("::1", err) {
+		t.Fatalf("expected shouldIgnoreListenError to ignore IPv6 family unsupported error")
+	}
+	if shouldIgnoreListenError("127.0.0.1", err) {
+		t.Fatalf("must not ignore IPv6-specific error for IPv4 host")
+	}
+}
+
+func TestShouldIgnoreListenErrorDoesNotHideRealConflict(t *testing.T) {
+	t.Parallel()
+
+	err := &net.OpError{Err: syscall.EADDRINUSE}
+	if shouldIgnoreListenError("::1", err) {
+		t.Fatalf("must not ignore address already in use for IPv6 host")
 	}
 }
