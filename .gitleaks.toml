@@ -1,0 +1,13 @@
+title = "vmgather gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated outputs and local security scan artifacts"
+paths = [
+  '''^dev/security-scan-artifacts/''',
+  '''^dist/''',
+  '''^tmp/''',
+  '''^coverage\.out$'''
+]

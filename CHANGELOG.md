@@ -13,6 +13,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Added a dedicated GitHub Actions security workflow (`.github/workflows/security.yml`) with `govulncheck`, `hadolint`, and `trivy` gates for Dockerfile misconfig and image CVEs.
 - HTTP servers now set explicit hardening timeouts (`ReadHeaderTimeout`, `ReadTimeout`, `WriteTimeout`, `IdleTimeout`) in both `vmgather` and `vmimporter`.
 - Documentation and test examples now use env-based auth placeholders instead of static password-like strings to reduce false positives in secret scanners.
+- Added secret-scanning hardening with a repo-level `.gitleaks.toml` allowlist for generated artifacts plus a CI `secret-scan` job (`gitleaks` + verified `trufflehog`) in `.github/workflows/security.yml`.
 
 ## [v1.8.0] - 2026-02-11
 

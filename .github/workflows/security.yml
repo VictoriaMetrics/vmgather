@@ -28,6 +28,22 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
 
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run gitleaks
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work zricethezav/gitleaks:v8.24.2 \
+            detect --source . --no-git --config .gitleaks.toml --redact
+
+      - name: Run trufflehog (verified only)
+        run: |
+          docker run --rm -v "$PWD:/work" trufflesecurity/trufflehog:3.93.3 \
+            git file:///work --results=verified --fail
+
   dockerfile-lint:
     name: Dockerfile Lint
     runs-on: ubuntu-latest
