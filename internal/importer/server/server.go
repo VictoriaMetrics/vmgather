@@ -244,8 +244,10 @@ func redactURLForLog(raw string) string {
 	if err != nil {
 		return "invalid-url"
 	}
-	if _, hasPassword := u.User.Password(); hasPassword {
-		u.User = url.UserPassword(u.User.Username(), "xxxxx")
+	if u.User != nil {
+		if _, hasPassword := u.User.Password(); hasPassword {
+			u.User = url.UserPassword(u.User.Username(), "xxxxx")
+		}
 	}
 	return u.String()
 }

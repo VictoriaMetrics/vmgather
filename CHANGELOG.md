@@ -11,12 +11,19 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Docker builder/runtime base images are now pinned by digest in both Dockerfiles for deterministic builds and reduced supply-chain drift from mutable tags.
 - Docker builder stages no longer install extra Alpine build packages (`git`, `build-base`), reducing build-time supply-chain surface while keeping `CGO_ENABLED=0` static binaries.
 - Added a dedicated GitHub Actions security workflow (`.github/workflows/security.yml`) with `govulncheck`, `hadolint`, and `trivy` gates for Dockerfile misconfig and image CVEs.
+- Docker builder stages now consolidate sequential `RUN` steps in both Dockerfiles to satisfy `hadolint` `DL3059` and keep the lint gate stable.
+- Makefile now provides `security-check` (local CI-equivalent security gate: `govulncheck`, `gitleaks`, verified `trufflehog`, `hadolint`, `trivy` config/image), and `pre-push` now runs both `test-all-clean` and `security-check`.
 - HTTP servers now set explicit hardening timeouts (`ReadHeaderTimeout`, `ReadTimeout`, `WriteTimeout`, `IdleTimeout`) in both `vmgather` and `vmimporter`.
 - Documentation and test examples now use env-based auth placeholders instead of static password-like strings to reduce false positives in secret scanners.
 - Added secret-scanning hardening with a repo-level `.gitleaks.toml` allowlist for generated artifacts plus a CI `secret-scan` job (`gitleaks` + verified `trufflehog`) in `.github/workflows/security.yml`.
+- Security workflow action references are now pinned to immutable commit SHAs, and `govulncheck` is pinned to `v1.1.4` for reproducible scans.
 - Runtime container images now define explicit `HEALTHCHECK` probes (`/api/health`) for `vmgather` and `vmimporter` via a minimal static `container-healthcheck` binary.
 - `skip_tls_verify` mode now emits explicit runtime warnings (in both exporter and importer paths) with redacted endpoints to reduce accidental insecure usage in production.
 - TLS client configs now enforce `MinVersion: tls.VersionTLS12` where explicitly constructed; local test compose project suffix generation switched from `math/rand` to `crypto/rand` to satisfy high-severity SAST findings.
+
+### Fixed
+- `redactURLForLog` in importer now safely handles endpoints without user info (prevents potential nil-pointer panic during warning logs).
+- `vmimporter` HTTP server no longer applies a global `ReadTimeout` that could abort large bundle uploads mid-transfer.
 
 ## [v1.8.0] - 2026-02-11
 

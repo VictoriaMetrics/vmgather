@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-llm build build-safe build-all clean fmt lint help pre-push test-env test-env-up test-env-down test-env-clean test-env-logs test-e2e test-all test-all-clean test-scenarios test-config-bootstrap docker-build docker-build-vmgather docker-build-vmimporter manual-env-up manual-env-down manual-env-clean manual-env-logs
+.PHONY: test test-fast test-llm build build-safe build-all clean fmt lint help pre-push test-env test-env-up test-env-down test-env-clean test-env-logs test-e2e test-all test-all-clean test-scenarios test-config-bootstrap docker-build docker-build-vmgather docker-build-vmimporter manual-env-up manual-env-down manual-env-clean manual-env-logs security-check security-check-go security-check-secrets security-check-dockerfile security-check-images
 
 VERSION ?= $(shell git describe --tags --always --dirty)
 PKG_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "latest")
@@ -8,6 +8,7 @@ PLATFORMS ?= linux/amd64,linux/arm64,linux/arm
 
 # Go version for build
 GO_VERSION ?= 1.25.7
+GOVULNCHECK_VERSION ?= v1.1.4
 DOCKER_OUTPUT ?= type=docker
 DOCKER_COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo "docker compose" || echo "docker-compose")
 TEST_ENV_FILE := local-test-env/.env.dynamic
@@ -118,6 +119,8 @@ help:
 	@echo "  make test-e2e          - Run Playwright suite (requires test-env-up)"
 	@echo "  make test-all          - Everything: test-full + test-e2e"
 	@echo "  make test-all-clean    - Everything + cleanup (recommended for CI / OrbStack)"
+	@echo "  make security-check    - Run CI-equivalent security checks locally"
+	@echo "  make pre-push          - Full local gate: test-all-clean + security-check"
 	@echo ""
 	@echo "FULL TEST SUITE:"
 	@echo "  make test-full         - Everything: unit + Docker scenarios"
@@ -781,8 +784,48 @@ test-all-clean:
 		$(MAKE) --no-print-directory test-env-clean || true; \
 		exit $$status
 
+# Local mirror of `.github/workflows/security.yml`.
+security-check: security-check-go security-check-secrets security-check-dockerfile security-check-images
+
+security-check-go:
+	@echo "================================================================================"
+	@echo "Security Check: govulncheck"
+	@echo "================================================================================"
+	@docker run --rm -v "$$PWD:/work" -w /work golang:$(GO_VERSION)-alpine@sha256:f6751d823c26342f9506c03797d2527668d095b0a15f1862cddb4d927a7a4ced sh -ec '\
+		go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION); \
+		$$(go env GOPATH)/bin/govulncheck ./...'
+
+security-check-secrets:
+	@echo "================================================================================"
+	@echo "Security Check: secret scanning (gitleaks + trufflehog verified)"
+	@echo "================================================================================"
+	@docker run --rm -v "$$PWD:/work" -w /work zricethezav/gitleaks:v8.24.2 \
+		detect --source . --no-git --config .gitleaks.toml --redact
+	@docker run --rm -v "$$PWD:/work" trufflesecurity/trufflehog:3.93.3 \
+		git file:///work --results=verified --fail
+
+security-check-dockerfile:
+	@echo "================================================================================"
+	@echo "Security Check: Dockerfile lint + misconfig"
+	@echo "================================================================================"
+	@docker run --rm -i hadolint/hadolint:v2.12.0 < build/docker/Dockerfile.vmgather
+	@docker run --rm -i hadolint/hadolint:v2.12.0 < build/docker/Dockerfile.vmimporter
+	@docker run --rm -v "$$PWD:/work" -w /work aquasec/trivy:0.65.0 \
+		config --severity HIGH,CRITICAL --exit-code 1 build/docker/Dockerfile.vmgather
+	@docker run --rm -v "$$PWD:/work" -w /work aquasec/trivy:0.65.0 \
+		config --severity HIGH,CRITICAL --exit-code 1 build/docker/Dockerfile.vmimporter
+
+security-check-images: docker-build
+	@echo "================================================================================"
+	@echo "Security Check: container image scan"
+	@echo "================================================================================"
+	@docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.65.0 \
+		image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 $(DOCKER_NAMESPACE)/vmgather:local
+	@docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.65.0 \
+		image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 $(DOCKER_NAMESPACE)/vmimporter:local
+
 # Local gate before pushing changes.
-pre-push: test-all-clean
+pre-push: test-all-clean security-check
 
 # =============================================================================
 # FULL TEST SUITE
