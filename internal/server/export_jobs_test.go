@@ -165,20 +165,68 @@ func TestExportJobManagerCancelJob(t *testing.T) {
 	}
 }
 
+type deadlineProbeExportService struct {
+	hasDeadlineCh chan bool
+}
+
+func (s *deadlineProbeExportService) ExecuteExport(ctx context.Context, config domain.ExportConfig) (*domain.ExportResult, error) {
+	_, ok := ctx.Deadline()
+	s.hasDeadlineCh <- ok
+	return &domain.ExportResult{ExportID: "deadline-probe"}, nil
+}
+
+func TestExportJobManagerDoesNotSetJobContextDeadlineByDefault(t *testing.T) {
+	svc := &deadlineProbeExportService{
+		hasDeadlineCh: make(chan bool, 1),
+	}
+	manager := NewExportJobManager(svc)
+
+	cfg := domain.ExportConfig{
+		TimeRange: domain.TimeRange{
+			Start: time.Now().Add(-time.Minute),
+			End:   time.Now(),
+		},
+		StagingFile: "/tmp/job-no-deadline.partial",
+	}
+
+	if _, err := manager.StartJob(context.Background(), "job-no-deadline", cfg); err != nil {
+		t.Fatalf("unexpected error starting job: %v", err)
+	}
+
+	select {
+	case ok := <-svc.hasDeadlineCh:
+		if ok {
+			t.Fatal("expected no context deadline by default, but deadline was set")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for export service to be called")
+	}
+}
+
 type resumeExportService struct {
 	mu      sync.Mutex
 	configs []domain.ExportConfig
+	blockCh chan struct{}
 }
 
 func (r *resumeExportService) ExecuteExport(ctx context.Context, config domain.ExportConfig) (*domain.ExportResult, error) {
 	r.mu.Lock()
 	r.configs = append(r.configs, config)
 	r.mu.Unlock()
-	return &domain.ExportResult{ExportID: "resume"}, nil
+
+	if r.blockCh == nil {
+		return &domain.ExportResult{ExportID: "resume"}, nil
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-r.blockCh:
+		return &domain.ExportResult{ExportID: "resume"}, nil
+	}
 }
 
 func TestResumeJobUsesSameStagingAndOffset(t *testing.T) {
-	service := &resumeExportService{}
+	service := &resumeExportService{blockCh: make(chan struct{})}
 	manager := NewExportJobManager(service)
 
 	cfg := domain.ExportConfig{
@@ -190,17 +238,31 @@ func TestResumeJobUsesSameStagingAndOffset(t *testing.T) {
 		Batching:    domain.BatchSettings{Enabled: true},
 	}
 
-	if _, err := manager.StartJob(context.Background(), "job-resume", cfg); err != nil {
+	status, err := manager.StartJob(context.Background(), "job-resume", cfg)
+	if err != nil {
 		t.Fatalf("start job failed: %v", err)
 	}
-	// Simulate partial progress and cancellation
+
+	// Cancel and wait until the manager marks the job as canceled, so we don't race with the job goroutine.
+	if err := manager.CancelJob(status.ID); err != nil {
+		t.Fatalf("cancel failed: %v", err)
+	}
+	deadlineCancel := time.Now().Add(2 * time.Second)
+	for {
+		if s, ok := manager.GetStatus(status.ID); ok && s.State == JobCanceled {
+			break
+		}
+		if time.Now().After(deadlineCancel) {
+			t.Fatal("timeout waiting for canceled state")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Simulate partial progress before resume.
 	manager.mu.Lock()
 	job := manager.jobs["job-resume"]
-	job.status.State = JobCanceled
 	job.status.CompletedBatches = 2
 	job.status.MetricsProcessed = 42
-	job.resumeFrom = 2
-	job.config.ResumeFromBatch = 2
 	manager.mu.Unlock()
 
 	resumed, err := manager.ResumeJob(context.Background(), "job-resume")
@@ -234,4 +296,124 @@ func TestResumeJobUsesSameStagingAndOffset(t *testing.T) {
 		t.Fatalf("expected staging file %s, got %s", cfg.StagingFile, lastCfg.StagingFile)
 	}
 	service.mu.Unlock()
+
+	close(service.blockCh)
+}
+
+type resumableProgressExportService struct {
+	mu           sync.Mutex
+	calls        int
+	totalBatches int
+	cancelAfter  int
+}
+
+func (s *resumableProgressExportService) ExecuteExport(ctx context.Context, config domain.ExportConfig) (*domain.ExportResult, error) {
+	s.mu.Lock()
+	s.calls++
+	callNum := s.calls
+	s.mu.Unlock()
+
+	startIdx := config.ResumeFromBatch
+	for batchIndex := startIdx; batchIndex < s.totalBatches; batchIndex++ {
+		services.ReportBatchProgress(ctx, services.BatchProgress{
+			BatchIndex:   batchIndex + 1,
+			TotalBatches: s.totalBatches,
+			TimeRange:    config.TimeRange,
+			Metrics:      1,
+			Duration:     10 * time.Millisecond,
+		})
+		time.Sleep(5 * time.Millisecond)
+		if callNum == 1 && (batchIndex+1) == s.cancelAfter {
+			return nil, context.Canceled
+		}
+	}
+	return &domain.ExportResult{ExportID: "resume-progress", MetricsExported: s.totalBatches}, nil
+}
+
+func TestResumeJobDoesNotDoubleCountBatches(t *testing.T) {
+	service := &resumableProgressExportService{
+		totalBatches: 4,
+		cancelAfter:  2,
+	}
+	manager := NewExportJobManager(service)
+
+	now := time.Now()
+	cfg := domain.ExportConfig{
+		TimeRange: domain.TimeRange{
+			Start: now.Add(-20 * time.Minute),
+			End:   now,
+		},
+		Batching:    domain.BatchSettings{Enabled: true},
+		StagingFile: "/tmp/job-resume-progress.partial",
+	}
+
+	status, err := manager.StartJob(context.Background(), "job-resume-progress", cfg)
+	if err != nil {
+		t.Fatalf("failed to start job: %v", err)
+	}
+
+	// Wait for the job to become canceled at the configured checkpoint.
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for canceled status")
+		default:
+			if s, ok := manager.GetStatus(status.ID); ok && s.State == JobCanceled {
+				if s.CompletedBatches != 2 {
+					t.Fatalf("expected 2 completed batches before resume, got %d", s.CompletedBatches)
+				}
+				goto resume
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+resume:
+	if _, err := manager.ResumeJob(context.Background(), status.ID); err != nil {
+		t.Fatalf("resume failed: %v", err)
+	}
+
+	// Wait for completion after resume.
+	deadline = time.After(2 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for resumed job completion")
+		default:
+			if s, ok := manager.GetStatus(status.ID); ok && s.State == JobCompleted {
+				if s.CompletedBatches != 4 {
+					t.Fatalf("expected 4 completed batches after resume, got %d", s.CompletedBatches)
+				}
+				if s.MetricsProcessed != 4 {
+					t.Fatalf("expected 4 metrics processed, got %d", s.MetricsProcessed)
+				}
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+func TestExportJobManagerCleanupRemovesCanceledJobsAfterRetention(t *testing.T) {
+	manager := NewExportJobManager(&fakeExportService{})
+	manager.retention = 1 * time.Second
+
+	completedAt := time.Now().Add(-2 * time.Second)
+	job := &exportJob{
+		status: &ExportJobStatus{
+			ID:          "job-canceled",
+			State:       JobCanceled,
+			CompletedAt: &completedAt,
+		},
+	}
+
+	manager.mu.Lock()
+	manager.jobs[job.status.ID] = job
+	manager.cleanupLocked(time.Now())
+	manager.mu.Unlock()
+
+	if _, ok := manager.GetStatus(job.status.ID); ok {
+		t.Fatalf("expected canceled job to be removed after retention")
+	}
 }

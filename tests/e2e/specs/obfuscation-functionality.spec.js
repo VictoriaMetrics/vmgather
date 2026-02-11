@@ -221,13 +221,16 @@ test.describe('Obfuscation Functionality', () => {
         await page.check('#enableObfuscation');
         await page.waitForSelector('#obfuscationOptions', { state: 'visible' });
 
-        await page.locator('#obfuscationOptions details summary').first().click();
+        const advancedDetails = page.locator('#advancedLabelsDetails');
+        await advancedDetails.evaluate(el => { el.open = true; });
+        await page.waitForSelector('#advancedLabels .obf-label-checkbox[data-label="pod"]', { timeout: 15000 });
+        await page.waitForSelector('#advancedLabels .obf-label-checkbox[data-label="namespace"]', { timeout: 15000 });
 
         // Deselect default labels, select pod and namespace only
         await page.locator('.obf-label-checkbox[data-label="instance"]').uncheck();
         await page.locator('.obf-label-checkbox[data-label="job"]').uncheck();
-        await page.locator('.obf-label-checkbox[data-label="pod"]').check();
-        await page.locator('.obf-label-checkbox[data-label="namespace"]').check();
+        await page.locator('#advancedLabels .obf-label-checkbox[data-label="pod"]').check();
+        await page.locator('#advancedLabels .obf-label-checkbox[data-label="namespace"]').check();
 
         // Verify config - backend only supports instance and job
         await page.evaluate(() => {
@@ -364,10 +367,10 @@ test.describe('Obfuscation Functionality', () => {
         await expect.poll(async () => await page.evaluate(() => window.__vm_samples_version || 0), { timeout: 10000 }).toBeGreaterThan(versionAfterCheck);
         await expect(preview).toContainText('777.777.1.1:8428');
 
-        const advancedSummary = page.locator('#obfuscationOptions details').first().locator('summary');
-        await advancedSummary.click();
+        const advancedDetails = page.locator('#advancedLabelsDetails');
+        await advancedDetails.evaluate(el => { el.open = true; });
 
-        const podCheckbox = page.locator('.obf-label-checkbox[data-label="pod"]');
+        const podCheckbox = page.locator('#advancedLabels .obf-label-checkbox[data-label="pod"]');
         await podCheckbox.scrollIntoViewIfNeeded();
         await podCheckbox.check();
         await expect(preview).toContainText('pod-1');

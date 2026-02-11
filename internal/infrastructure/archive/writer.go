@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
@@ -28,6 +29,27 @@ func NewWriter(outputDir string) *Writer {
 	return &Writer{
 		outputDir: outputDir,
 	}
+}
+
+func validateExportID(exportID string) error {
+	if strings.TrimSpace(exportID) == "" {
+		return fmt.Errorf("export ID cannot be empty")
+	}
+	// Prevent path traversal / accidental subdirs via export ID.
+	if strings.ContainsAny(exportID, `/\`) {
+		return fmt.Errorf("export ID must not contain path separators")
+	}
+	// Keep archive filename safe across all platforms (not only on the current runtime OS).
+	// Windows forbids these characters in filenames.
+	if strings.ContainsAny(exportID, `<>:"|?*`) {
+		return fmt.Errorf("export ID contains invalid filename characters")
+	}
+	for _, r := range exportID {
+		if r < 32 || r == 127 {
+			return fmt.Errorf("export ID contains control characters")
+		}
+	}
+	return nil
 }
 
 // ArchiveMetadata contains metadata about the export
@@ -66,6 +88,10 @@ func (w *Writer) CreateArchive(
 	metricsReader io.Reader,
 	metadata ArchiveMetadata,
 ) (archivePath string, sha256sum string, err error) {
+	if err := validateExportID(exportID); err != nil {
+		return "", "", err
+	}
+
 	// Generate archive filename
 	timestamp := time.Now().Format("20060102_150405")
 	archiveName := fmt.Sprintf("vmexport_%s_%s.zip", exportID, timestamp)

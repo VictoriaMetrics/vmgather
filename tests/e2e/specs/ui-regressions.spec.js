@@ -1,4 +1,5 @@
 const { test, expect } = require('@playwright/test');
+const http = require('http');
 
 async function navigateToStep3(page) {
   await page.goto('/');
@@ -47,6 +48,58 @@ test.describe('UI regressions', () => {
     await step3.locator('#vmUrl').fill('https://this-aint-no\\\\invalid-url');
     await expect(step3.locator('#vmUrlHint')).toHaveText(/[FAIL]/);
     await expect(step3.locator('#testConnectionBtn')).toBeDisabled();
+  });
+
+  test('Bug #22: host check cannot hang Test Connection', async ({ page }) => {
+    const step3 = await navigateToStep3(page);
+
+    const server = http.createServer((req, res) => {
+      if (req.method === 'HEAD' && req.url === '/metrics') {
+        // Deliberately delay the response so the UI host check would hang without a timeout.
+        setTimeout(() => {
+          res.statusCode = 200;
+          res.end();
+        }, 10_000);
+        return;
+      }
+
+      res.statusCode = 404;
+      res.end();
+    });
+
+    await new Promise((resolve, reject) => {
+      server.listen(0, '127.0.0.1', err => (err ? reject(err) : resolve()));
+    });
+
+    try {
+      const address = server.address();
+      const port = address && typeof address === 'object' ? address.port : null;
+      expect(port).not.toBeNull();
+
+      await step3.locator('#vmUrl').fill(`http://127.0.0.1:${port}`);
+
+      await page.route('/api/validate', async route => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            is_victoria_metrics: true,
+            version: 'v1.95.0',
+            components: 1,
+            vm_components: ['vmsingle'],
+          }),
+        });
+      });
+
+      await step3.locator('#testConnectionBtn').click();
+
+      // The host check is best-effort, but it must not hang the UI.
+      await expect(step3.locator('#validationSteps')).toContainText('Host check complete', { timeout: 4500 });
+      await page.waitForSelector('#step3Next:enabled');
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
   });
 
   test('Cluster selection error references Step 5', async ({ page }) => {

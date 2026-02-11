@@ -17,7 +17,8 @@ import (
 	importer "github.com/VictoriaMetrics/vmgather/internal/importer/server"
 )
 
-const version = "0.1.0"
+// Overridable at build time via: -ldflags "-X main.version=<value>"
+var version = "dev"
 
 func main() {
 	addr := flag.String("addr", "0.0.0.0:8081", "HTTP server address")

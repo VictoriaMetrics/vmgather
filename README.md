@@ -9,19 +9,20 @@ vmgather collects VictoriaMetrics internal metrics, obfuscates sensitive data, a
 3. [Quick start](#quick-start)
 4. [VMImport companion](#vmimport-companion)
 5. [Documentation set](#documentation-set)
-6. [Usage workflow](#usage-workflow)
-7. [Privacy & obfuscation](#privacy--obfuscation)
-8. [Testing matrix](#testing-matrix)
-9. [Build & release](#build--release)
-10. [Contributing](#contributing)
-11. [Security](#security)
-12. [License & support](#license--support)
+6. [Mode quick choice](#mode-quick-choice)
+7. [Usage workflow](#usage-workflow)
+8. [Privacy & obfuscation](#privacy--obfuscation)
+9. [Testing matrix](#testing-matrix)
+10. [Build & release](#build--release)
+11. [Contributing](#contributing)
+12. [Security](#security)
+13. [License & support](#license--support)
 
 ## Highlights
 
 - **Single binary UI** – embedded web interfaces for both exporter and importer with VictoriaMetrics-style wizards.
 - **Automatic discovery** – exporter detects vmagent, vmstorage, vminsert, vmselect, vmalert, and vmsingle instances.
-- **Custom query mode** – collect any selector or MetricsQL query, with optional per-job target selection for selectors.
+- **Selector/Query (custom mode)** – collect any selector or MetricsQL query, with optional per-job target selection for selectors.
 - **Deterministic obfuscation** – configurable anonymisation for IPs, jobs, tenants, and custom labels, applied to samples and exports.
 - **Disk-safe staging** – exporter streams batches to a chosen directory so partial files survive crashes or manual interrupts.
 - **Adjustable metric cadence** – choose 30s/1m/5m dedup steps per export or override explicitly.
@@ -91,6 +92,12 @@ cd vmgather
 make build
 ./vmgather
 ```
+
+## Mode quick choice
+
+1. **Cluster metrics (wizard)** – start `./vmgather`, choose **Cluster metrics** on Step 1, then follow the 6-step wizard.
+2. **Selector / Query (custom mode)** – start `./vmgather`, choose **Selector / Query**, paste a selector or MetricsQL, optionally pick jobs.
+3. **CLI oneshot** – run `./vmgather -oneshot -oneshot-config ./export.json` (add `-export-stdout` to stream JSONL).
 
 ### Official Images
 The latest release is automatically published to:
@@ -173,7 +180,7 @@ The UI exposes the same health endpoint (`/api/health`) as vmgather for containe
 
 Exporter
 1. Start the binary – the UI auto-detects an open port.
-2. **Select mode** – cluster metrics (default) or selector/query collection.
+2. **Choose mode** – Cluster metrics (wizard) or Selector / Query (custom mode).
 3. **Connect** to VictoriaMetrics single, cluster, or managed endpoints (`vmselect`, `vmagent`, VMAuth, MaaS paths).
 4. **Define selector/query** in custom mode (auto-detected selector vs MetricsQL).
 5. **Preview** metrics via sampling API calls (selector mode adds per-job target selection).
@@ -197,7 +204,7 @@ Example:
 Sample `export.json`:
 ```json
 {
-  "connection": { "url": "http://localhost:52104", "auth": { "type": "none" } },
+  "connection": { "url": "http://localhost:18428", "auth": { "type": "none" } },
   "time_range": { "start": "2026-01-23T12:00:00Z", "end": "2026-01-23T13:00:00Z" },
   "mode": "custom",
   "query_type": "selector",

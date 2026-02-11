@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -193,24 +194,28 @@ func (s *Server) handleValidateConnection(w http.ResponseWriter, r *http.Request
 	}
 
 	// DEBUG: Log connection details
-	log.Printf("Validating connection:")
-	log.Printf("  URL: %s", req.Connection.URL)
-	log.Printf("  ApiBasePath: %s", req.Connection.ApiBasePath)
-	log.Printf("  TenantId: %s", req.Connection.TenantId)
-	log.Printf("  IsMultitenant: %v", req.Connection.IsMultitenant)
-	log.Printf("  FullApiUrl: %s", req.Connection.FullApiUrl)
-	log.Printf("  Auth Type: %s", req.Connection.Auth.Type)
-	log.Printf("  Has Username: %v", req.Connection.Auth.Username != "")
-	log.Printf("  Has Password: %v", req.Connection.Auth.Password != "")
-	log.Printf("  Has Token: %v", req.Connection.Auth.Token != "")
-	log.Printf("  Has Header: %v", req.Connection.Auth.HeaderName != "")
+	if s.debug {
+		log.Printf("Validating connection:")
+		log.Printf("  URL: %s", req.Connection.URL)
+		log.Printf("  ApiBasePath: %s", req.Connection.ApiBasePath)
+		log.Printf("  TenantId: %s", req.Connection.TenantId)
+		log.Printf("  IsMultitenant: %v", req.Connection.IsMultitenant)
+		log.Printf("  FullApiUrl: %s", req.Connection.FullApiUrl)
+		log.Printf("  Auth Type: %s", req.Connection.Auth.Type)
+		log.Printf("  Has Username: %v", req.Connection.Auth.Username != "")
+		log.Printf("  Has Password: %v", req.Connection.Auth.Password != "")
+		log.Printf("  Has Token: %v", req.Connection.Auth.Token != "")
+		log.Printf("  Has Header: %v", req.Connection.Auth.HeaderName != "")
+	}
 
 	// Try a simple query to validate connection
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
 	query := "vm_app_version"
-	log.Printf("Executing query: %s", query)
+	if s.debug {
+		log.Printf("Executing query: %s", query)
+	}
 
 	candidates := buildValidateCandidates(req.Connection)
 	attempts := make([]validateAttempt, 0, len(candidates))
@@ -375,11 +380,13 @@ func (s *Server) handleDiscoverComponents(w http.ResponseWriter, r *http.Request
 	}
 
 	// DEBUG: Log discovery request
-	log.Printf("🔎 Component Discovery:")
-	log.Printf("  Time Range: %s to %s", request.TimeRange.Start.Format(time.RFC3339), request.TimeRange.End.Format(time.RFC3339))
-	log.Printf("  URL: %s", request.Connection.URL)
-	log.Printf("  Tenant ID: %s", request.Connection.TenantId)
-	log.Printf("  Multitenant: %v", request.Connection.IsMultitenant)
+	if s.debug {
+		log.Printf("🔎 Component Discovery:")
+		log.Printf("  Time Range: %s to %s", request.TimeRange.Start.Format(time.RFC3339), request.TimeRange.End.Format(time.RFC3339))
+		log.Printf("  URL: %s", request.Connection.URL)
+		log.Printf("  Tenant ID: %s", request.Connection.TenantId)
+		log.Printf("  Multitenant: %v", request.Connection.IsMultitenant)
+	}
 
 	// Discover components using VM service
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -423,8 +430,10 @@ func (s *Server) handleDiscoverComponents(w http.ResponseWriter, r *http.Request
 	for _, comp := range components {
 		componentTypes[comp.Component]++
 	}
-	log.Printf("[OK] Discovery complete: %d components found", len(components))
-	log.Printf("  Component types: %v", componentTypes)
+	if s.debug {
+		log.Printf("[OK] Discovery complete: %d components found", len(components))
+		log.Printf("  Component types: %v", componentTypes)
+	}
 
 	// Return discovered components
 	w.Header().Set("Content-Type", "application/json")
@@ -568,12 +577,14 @@ func (s *Server) handleGetSample(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// DEBUG: Log sample request
-	log.Printf("Sample Metrics Request:")
-	log.Printf("  Components: %v", req.Config.Components)
-	log.Printf("  Jobs: %v", req.Config.Jobs)
-	log.Printf("  Mode: %s", req.Config.Mode)
-	log.Printf("  QueryType: %s", req.Config.QueryType)
-	log.Printf("  Limit: %d", req.Limit)
+	if s.debug {
+		log.Printf("Sample Metrics Request:")
+		log.Printf("  Components: %v", req.Config.Components)
+		log.Printf("  Jobs: %v", req.Config.Jobs)
+		log.Printf("  Mode: %s", req.Config.Mode)
+		log.Printf("  QueryType: %s", req.Config.QueryType)
+		log.Printf("  Limit: %d", req.Limit)
+	}
 
 	// Get sample metrics using VM service
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -595,10 +606,12 @@ func (s *Server) handleGetSample(w http.ResponseWriter, r *http.Request) {
 	// Apply label dropping (always) + obfuscation (when enabled)
 	if req.Config.Obfuscation.Enabled || len(req.Config.Obfuscation.DropLabels) > 0 {
 		if req.Config.Obfuscation.Enabled {
-			log.Printf("🔒 Applying obfuscation to samples (instance: %v, job: %v, custom labels: %v)",
-				req.Config.Obfuscation.ObfuscateInstance,
-				req.Config.Obfuscation.ObfuscateJob,
-				req.Config.Obfuscation.CustomLabels)
+			if s.debug {
+				log.Printf("🔒 Applying obfuscation to samples (instance: %v, job: %v, custom labels: %v)",
+					req.Config.Obfuscation.ObfuscateInstance,
+					req.Config.Obfuscation.ObfuscateJob,
+					req.Config.Obfuscation.CustomLabels)
+			}
 		}
 		samples = s.obfuscateSamples(samples, req.Config.Obfuscation)
 	}
@@ -614,8 +627,10 @@ func (s *Server) handleGetSample(w http.ResponseWriter, r *http.Request) {
 	for label := range uniqueLabels {
 		labelList = append(labelList, label)
 	}
-	log.Printf("[OK] Sample retrieval complete: %d samples", len(samples))
-	log.Printf("  Unique labels: %v", labelList)
+	if s.debug {
+		log.Printf("[OK] Sample retrieval complete: %d samples", len(samples))
+		log.Printf("  Unique labels: %v", labelList)
+	}
 
 	// Convert samples to response format with 'name' field for frontend compatibility
 	sampleData := make([]map[string]interface{}, 0, len(samples))
@@ -716,6 +731,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	response := map[string]interface{}{
 		"export_id":     result.ExportID,
 		"archive_path":  result.ArchivePath,
+		"archive_name":  result.ArchiveName,
 		"archive_size":  result.ArchiveSizeBytes,
 		"metrics_count": result.MetricsExported,
 		"sha256":        result.SHA256,
@@ -981,9 +997,31 @@ func canCreateDirectory(path string) bool {
 	return false
 }
 
+func isLoopbackRemoteAddr(remoteAddr string) bool {
+	if remoteAddr == "" {
+		return false
+	}
+
+	host := remoteAddr
+	if h, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		host = h
+	}
+
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
+}
+
 func (s *Server) handleListDirectory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if !isLoopbackRemoteAddr(r.RemoteAddr) {
+		respondWithError(w, http.StatusForbidden, "This endpoint is only available from localhost")
 		return
 	}
 
@@ -1066,6 +1104,11 @@ func (s *Server) handleListDirectory(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCheckDirectory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		respondWithError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if !isLoopbackRemoteAddr(r.RemoteAddr) {
+		respondWithError(w, http.StatusForbidden, "This endpoint is only available from localhost")
 		return
 	}
 
@@ -1253,6 +1296,29 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 	if info.IsDir() {
 		respondWithError(w, http.StatusBadRequest, "Cannot download a directory")
+		return
+	}
+
+	// Block symlink escapes out of outputDir. This matters if outputDir contains symlinks or the requested file
+	// itself is a symlink pointing outside outputDir.
+	realOutputDir := absOutputDir
+	if resolved, err := filepath.EvalSymlinks(absOutputDir); err == nil {
+		realOutputDir = resolved
+	}
+	realOutputDir = filepath.Clean(realOutputDir)
+
+	realFilePath, err := filepath.EvalSymlinks(absFilePath)
+	if err != nil {
+		log.Printf("[ERROR] Failed to resolve file path symlinks: %v", err)
+		respondWithError(w, http.StatusBadRequest, "Invalid path")
+		return
+	}
+	realFilePath = filepath.Clean(realFilePath)
+
+	rel, err := filepath.Rel(realOutputDir, realFilePath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		log.Printf("[WARN] Blocked symlink escape attempt: %s (resolved: %s, allowed: %s)", filePath, realFilePath, realOutputDir)
+		respondWithError(w, http.StatusForbidden, "Access denied: file must be in export directory")
 		return
 	}
 

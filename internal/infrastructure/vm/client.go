@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -62,10 +63,28 @@ type ExportedMetric struct {
 
 // NewClient creates a new VictoriaMetrics client
 func NewClient(conn domain.VMConnection) *Client {
+	// Prefer IPv4 for localhost, since Docker/OrbStack port-forwards are often bound
+	// only to 127.0.0.1 and not to ::1. This prevents flaky "dial tcp [::1]:PORT:
+	// connect: connection refused" errors when users provide http://localhost:PORT.
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+
 	transport := &http.Transport{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 100,
 		IdleConnTimeout:     90 * time.Second,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, _, err := net.SplitHostPort(addr)
+			if err == nil && host == "localhost" {
+				// Try IPv4 first, then fall back to the default dialer behavior.
+				if c, err := dialer.DialContext(ctx, "tcp4", addr); err == nil {
+					return c, nil
+				}
+			}
+			return dialer.DialContext(ctx, network, addr)
+		},
 	}
 
 	// Handle TLS verification skip
@@ -76,10 +95,21 @@ func NewClient(conn domain.VMConnection) *Client {
 	return &Client{
 		httpClient: &http.Client{
 			Transport: transport,
-			Timeout:   30 * time.Second,
 		},
 		conn: conn,
 	}
+}
+
+// NewClientWithTransport creates a new client with a custom transport.
+//
+// This is primarily used for deterministic unit tests, where callers want to
+// intercept requests without spinning up a real HTTP server.
+func NewClientWithTransport(conn domain.VMConnection, transport http.RoundTripper) *Client {
+	c := NewClient(conn)
+	if transport != nil {
+		c.httpClient.Transport = transport
+	}
+	return c
 }
 
 // Query executes an instant PromQL query

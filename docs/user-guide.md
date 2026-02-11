@@ -5,11 +5,12 @@ Official walkthrough for the VictoriaMetrics metrics export wizard.
 ## Contents
 
 1. [Before you start](#before-you-start)
-2. [Launch and connection](#launch-and-connection)
-3. [Wizard steps](#wizard-steps)
-4. [Export bundle](#export-bundle)
-5. [Troubleshooting](#troubleshooting)
-6. [Support](#support)
+2. [Mode quick choice](#mode-quick-choice)
+3. [Launch and connection](#launch-and-connection)
+4. [Wizard steps](#wizard-steps)
+5. [Export bundle](#export-bundle)
+6. [Troubleshooting](#troubleshooting)
+7. [Support](#support)
 
 ## Before you start
 
@@ -18,17 +19,24 @@ Official walkthrough for the VictoriaMetrics metrics export wizard.
 - Ensure you have reachability to your VictoriaMetrics endpoints (single, cluster, VMAuth, or managed).
 - Have credentials ready for tenants that require authentication.
 
+## Mode quick choice
+
+1. **Cluster metrics (wizard)** – run `./vmgather`, choose **Cluster metrics** on Step 1, then follow the 6-step wizard.
+2. **Selector / Query (custom mode)** – run `./vmgather`, choose **Selector / Query**, paste a selector or MetricsQL, optionally pick jobs.
+3. **CLI oneshot** – run `./vmgather -oneshot -oneshot-config ./export.json` (add `-export-stdout` to stream JSONL).
+
 ## Launch and connection
 
-1. Run the binary for your platform (`./vmgather-vX.Y.Z-linux-amd64`, `vmgather-vX.Y.Z-windows-amd64.exe`, etc.).
+1. Run the binary for your platform (`./vmgather-vX.Y.Z-linux-amd64`, `./vmgather-vX.Y.Z-windows-amd64.exe`, etc.).
 2. The application opens a browser window at `http://localhost:8080` (auto-switches to a free port if 8080 is taken).
-3. The landing page shows the wizard with the current step highlighted (6 steps for cluster mode, 6/7 for custom mode depending on selector vs MetricsQL).
+3. The landing page shows the wizard with the current step highlighted (6 steps for Cluster metrics, 6/7 for Selector / Query depending on selector vs MetricsQL).
 
 ### Supported target URLs
 
-- VMSingle: `https://vm.example.com:18428`
-- VMCluster (tenant 0): `https://vmselect.example.com:8481/select/0/prometheus`
-- VMCluster + VMAuth: `https://vmauth.example.com/select/0/prometheus`
+- VMSingle (local): `http://localhost:18428`
+- VMSelect (cluster, tenant 0): `https://vmselect.example.com/select/0/prometheus`
+- VMSelect (cluster, tenant 1011): `https://vmselect.example.com/select/1011/prometheus`
+- VMAuth (cluster proxy): `https://vmauth.example.com`
 - VictoriaMetrics Managed / MaaS: `https://<tenant>.victoriametrics.cloud/<tenant-id>/rw/prometheus`
 
 ### Authentication
@@ -41,7 +49,7 @@ Official walkthrough for the VictoriaMetrics metrics export wizard.
 ## Wizard steps
 
 ### Step 1 – Welcome & mode
-- Choose **Cluster metrics** (default) or **Selector / Query** mode. Mode can only be switched on Step 1.
+- Choose **Cluster metrics** (default) or **Selector / Query** (custom mode). Mode can only be switched on Step 1.
 
 ### Cluster metrics flow (6 steps)
 | Step | Description |
@@ -76,7 +84,7 @@ Run a single export and stream JSONL to stdout:
 Minimal `export.json` example:
 ```json
 {
-  "connection": { "url": "http://localhost:52104", "auth": { "type": "none" } },
+  "connection": { "url": "http://localhost:18428", "auth": { "type": "none" } },
   "time_range": { "start": "2026-01-23T12:00:00Z", "end": "2026-01-23T13:00:00Z" },
   "mode": "custom",
   "query_type": "metricsql",
@@ -132,7 +140,7 @@ Importer UI mirrors the exporter wizard but is tailored for replaying vmgather b
 
 ## Steps
 
-1. **Connection**: enter the target import endpoint (`http://localhost:18428`, `https://vm.example.com/1234/prometheus`, `/select/0/prometheus`, etc.), optional Tenant / Account ID, and auth (None/Basic/Bearer/Header). Test Connection must be green.
+1. **Connection**: enter the target import endpoint (`http://localhost:18428`, `https://vmselect.example.com/select/0/prometheus`, `https://vm.example.com/1234/prometheus`, etc.), optional Tenant / Account ID, and auth (None/Basic/Bearer/Header). Test Connection must be green.
 2. **Bundle**: drop a vmgather bundle (`.jsonl` or `.zip`). Preflight starts automatically:
    - validates JSONL structure and values,
    - reads time range (UTC),

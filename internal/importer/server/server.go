@@ -364,6 +364,8 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	job := s.newJob(uploadedBytes)
 	s.storeJob(job)
 
+	// Snapshot the queued job before starting async execution to avoid races under -race.
+	jobSnapshot := snapshotJob(job)
 	go s.runImportJob(context.Background(), job, cfg, tempPath, header.Filename, importURL, queryURL, 0)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -372,7 +374,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		Job   importJob `json:"job"`
 	}{
 		JobID: job.ID,
-		Job:   snapshotJob(job),
+		Job:   jobSnapshot,
 	})
 }
 

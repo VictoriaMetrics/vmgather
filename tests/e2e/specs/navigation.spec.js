@@ -114,8 +114,8 @@ test.describe('Navigation Tests', () => {
     await page.locator('.step.active button.btn-primary:has-text("Next")').click();
     await page.waitForTimeout(300);
     
-    // Click Last 3h preset
-    const preset3h = page.locator('button.preset-btn:has-text("Last 3h")');
+    // Click Last 3 h preset
+    const preset3h = page.locator('button.preset-btn:has-text("Last 3 h")');
     await preset3h.click();
     
     // Check that active class is set

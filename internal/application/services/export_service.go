@@ -194,6 +194,7 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 	result := &domain.ExportResult{
 		ExportID:           exportID,
 		ArchivePath:        archivePath,
+		ArchiveName:        filepath.Base(archivePath),
 		ArchiveSizeBytes:   archiveSize,
 		MetricsExported:    metricsCount,
 		TimeRange:          config.TimeRange,

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -550,5 +551,123 @@ func TestVMService_DiscoverComponents_IgnoresInvalidMetrics(t *testing.T) {
 	// Should only have 1 valid component
 	if len(componentMap) != 1 {
 		t.Errorf("expected 1 component after filtering, got %d", len(componentMap))
+	}
+}
+
+type closeTrackingBody struct {
+	closed chan struct{}
+}
+
+// No content is needed; the test only cares about Close().
+func (b *closeTrackingBody) Read(p []byte) (int, error) { return 0, io.EOF }
+
+func (b *closeTrackingBody) Close() error {
+	select {
+	case <-b.closed:
+	default:
+		close(b.closed)
+	}
+	return nil
+}
+
+type exportRoundTripper struct {
+	t    *testing.T
+	body *closeTrackingBody
+}
+
+func (rt *exportRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method != http.MethodPost {
+		rt.t.Errorf("method=%q; want %q", r.Method, http.MethodPost)
+	}
+	if r.URL.Path != "/api/v1/export" {
+		rt.t.Errorf("path=%q; want %q", r.URL.Path, "/api/v1/export")
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       rt.body,
+		Request:    r,
+	}, nil
+}
+
+func TestCheckExportAPI_ClosesResponseBodyOnSuccess(t *testing.T) {
+	body := &closeTrackingBody{closed: make(chan struct{})}
+	rt := &exportRoundTripper{t: t, body: body}
+
+	service := &vmServiceImpl{
+		clientFactory: func(conn domain.VMConnection) *vm.Client {
+			return vm.NewClientWithTransport(conn, rt)
+		},
+	}
+	conn := domain.VMConnection{
+		URL:  "http://example.com",
+		Auth: domain.AuthConfig{Type: domain.AuthTypeNone},
+	}
+
+	if ok := service.CheckExportAPI(context.Background(), conn); !ok {
+		t.Fatal("expected CheckExportAPI=true on 200 OK response")
+	}
+
+	select {
+	case <-body.closed:
+		return
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected CheckExportAPI to close the export response body on success")
+	}
+}
+
+func TestVMService_EstimateQueries_EscapeJobRegex(t *testing.T) {
+	queries := make(chan string, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/query" {
+			http.NotFound(w, r)
+			return
+		}
+		queries <- r.URL.Query().Get("query")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
+	}))
+	defer server.Close()
+
+	client := vm.NewClient(domain.VMConnection{
+		URL:  server.URL,
+		Auth: domain.AuthConfig{Type: domain.AuthTypeNone},
+	})
+	service := NewVMService().(*vmServiceImpl)
+	tr := domain.TimeRange{Start: time.Now().Add(-time.Hour), End: time.Now()}
+	jobs := []string{"job.1", "job|2"}
+
+	if _, err := service.estimateComponentMetrics(context.Background(), client, jobs, tr); err != nil {
+		t.Fatalf("estimateComponentMetrics failed: %v", err)
+	}
+	if _, err := service.countInstances(context.Background(), client, jobs, tr); err != nil {
+		t.Fatalf("countInstances failed: %v", err)
+	}
+	jobMetrics := service.estimateJobMetrics(context.Background(), client, jobs, tr)
+	if jobMetrics == nil {
+		t.Fatalf("estimateJobMetrics returned nil map")
+	}
+
+	want := []string{
+		`count({job=~"job\.1|job\|2"})`,
+		`count(count by (instance) ({job=~"job\.1|job\|2"}))`,
+		`count by (job) ({job=~"job\.1|job\|2"})`,
+	}
+
+	got := make([]string, 0, len(want))
+	for i := 0; i < len(want); i++ {
+		select {
+		case q := <-queries:
+			got = append(got, q)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for query %d", i+1)
+		}
+	}
+
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("query %d mismatch:\n got: %q\nwant: %q", i+1, got[i], want[i])
+		}
 	}
 }

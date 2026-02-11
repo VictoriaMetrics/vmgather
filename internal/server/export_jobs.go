@@ -106,7 +106,9 @@ func (m *ExportJobManager) StartJob(ctx context.Context, jobID string, config do
 		ObfuscationEnabled: config.Obfuscation.Enabled,
 	}
 
-	jobCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	// Export execution is already governed by per-request/per-batch timeouts inside the export service.
+	// Do not apply a fixed hard deadline here, since large exports can legitimately take hours.
+	jobCtx, cancel := context.WithCancel(context.Background())
 	job := &exportJob{status: status, cancel: cancel, config: config}
 
 	m.mu.Lock()
@@ -117,11 +119,12 @@ func (m *ExportJobManager) StartJob(ctx context.Context, jobID string, config do
 	}
 	m.jobs[jobID] = job
 	m.activeJobs++
+	statusSnapshot := status.clone()
 	m.mu.Unlock()
 
 	go m.runJob(jobCtx, jobID, config)
 
-	return status.clone(), nil
+	return statusSnapshot, nil
 }
 
 func (m *ExportJobManager) GetStatus(jobID string) (*ExportJobStatus, bool) {
@@ -155,7 +158,7 @@ func (m *ExportJobManager) ResumeJob(ctx context.Context, jobID string) (*Export
 	if m.activeJobs >= m.maxConcurrentJobs {
 		return nil, fmt.Errorf("maximum concurrent exports reached (%d)", m.maxConcurrentJobs)
 	}
-	jobCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	jobCtx, cancel := context.WithCancel(context.Background())
 	job.cancel = cancel
 	job.config = cfg
 	job.resumeFrom = resumeFrom
@@ -178,7 +181,10 @@ func (m *ExportJobManager) ResumeJob(ctx context.Context, jobID string) (*Export
 func (m *ExportJobManager) runJob(ctx context.Context, jobID string, config domain.ExportConfig) {
 	baseBatches := 0
 	baseMetrics := 0
-	if job, ok := m.jobs[jobID]; ok {
+	m.mu.RLock()
+	job, ok := m.jobs[jobID]
+	m.mu.RUnlock()
+	if ok {
 		baseBatches = job.resumeFrom
 		baseMetrics = job.baseMetrics
 	}
@@ -261,9 +267,15 @@ func (m *ExportJobManager) updateBatch(jobID string, progress services.BatchProg
 		job.status.TotalBatches = progress.TotalBatches
 	}
 
-	job.status.CompletedBatches = baseBatches + progress.BatchIndex
+	if progress.BatchIndex > job.status.CompletedBatches {
+		job.status.CompletedBatches = progress.BatchIndex
+	}
 	if job.status.TotalBatches > 0 {
-		job.status.Progress = float64(job.status.CompletedBatches) / float64(job.status.TotalBatches)
+		p := float64(job.status.CompletedBatches) / float64(job.status.TotalBatches)
+		if p > 1.0 {
+			p = 1.0
+		}
+		job.status.Progress = p
 	}
 
 	if baseMetrics > 0 && job.status.MetricsProcessed < baseMetrics {
@@ -274,7 +286,11 @@ func (m *ExportJobManager) updateBatch(jobID string, progress services.BatchProg
 	job.durationTotal += progress.Duration
 
 	if job.status.CompletedBatches > 0 {
-		avg := job.durationTotal.Seconds() / float64(job.status.CompletedBatches)
+		observedBatches := job.status.CompletedBatches - baseBatches
+		if observedBatches <= 0 {
+			observedBatches = job.status.CompletedBatches
+		}
+		avg := job.durationTotal.Seconds() / float64(observedBatches)
 		job.status.AverageBatchSeconds = avg
 
 		remaining := job.status.TotalBatches - job.status.CompletedBatches
@@ -339,7 +355,7 @@ func (m *ExportJobManager) CancelJob(jobID string) error {
 
 func (m *ExportJobManager) cleanupLocked(now time.Time) {
 	for id, job := range m.jobs {
-		if job.status.State == JobCompleted || job.status.State == JobFailed {
+		if job.status.State == JobCompleted || job.status.State == JobFailed || job.status.State == JobCanceled {
 			if job.status.CompletedAt != nil && now.Sub(*job.status.CompletedAt) > m.retention {
 				delete(m.jobs, id)
 			}

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
@@ -21,14 +22,13 @@ import (
 	"github.com/VictoriaMetrics/vmgather/internal/server"
 )
 
-const (
-	version = "1.4.1"
-)
+// Overridable at build time via: -ldflags "-X main.version=<value>"
+var version = "dev"
 
 func main() {
 	// Parse flags
 	addr := flag.String("addr", "localhost:8080", "HTTP server address")
-	outputDir := flag.String("output", "./exports", "Export output directory")
+	outputDirFlag := flag.String("output", "", "Export output directory")
 	noBrowser := flag.Bool("no-browser", false, "Don't open browser automatically")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	oneshot := flag.Bool("oneshot", false, "Run a single export and exit (experimental)")
@@ -37,6 +37,11 @@ func main() {
 	flag.Parse()
 
 	log.Printf("vmgather v%s starting...", version)
+
+	outputDir := *outputDirFlag
+	if outputDir == "" {
+		outputDir = defaultOutputDir()
+	}
 
 	if *exportStdout && !*oneshot {
 		log.Fatal("export-stdout is only supported with -oneshot")
@@ -62,7 +67,7 @@ func main() {
 			return
 		}
 
-		result, err := services.NewExportService(*outputDir, version).ExecuteExport(ctx, cfg)
+		result, err := services.NewExportService(outputDir, version).ExecuteExport(ctx, cfg)
 		if err != nil {
 			log.Fatalf("oneshot export failed: %v", err)
 		}
@@ -81,7 +86,7 @@ func main() {
 	}
 
 	// Create HTTP server
-	srv := server.NewServer(*outputDir, version, *debug)
+	srv := server.NewServer(outputDir, version, *debug)
 	httpServer := &http.Server{
 		Addr:    finalAddr,
 		Handler: srv.Router(),
@@ -117,6 +122,24 @@ func main() {
 	}
 
 	log.Println("Server stopped")
+}
+
+func defaultOutputDir() string {
+	return defaultOutputDirWith(os.UserHomeDir, os.Stat)
+}
+
+func defaultOutputDirWith(userHomeDir func() (string, error), stat func(string) (os.FileInfo, error)) string {
+	homeDir, _ := userHomeDir()
+	if homeDir == "" {
+		return "./exports"
+	}
+
+	downloadsDir := filepath.Join(homeDir, "Downloads")
+	if info, err := stat(downloadsDir); err == nil && info.IsDir() {
+		return filepath.Join(downloadsDir, "vmgather")
+	}
+
+	return "./exports"
 }
 
 func loadExportConfig(path string) (domain.ExportConfig, error) {

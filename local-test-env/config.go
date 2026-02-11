@@ -11,6 +11,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
+)
+
+const (
+	fallbackPortRangeStart = 20000
+	fallbackPortRangeEnd   = 45000
+	defaultTestHost        = "127.0.0.1"
 )
 
 // TestConfig holds all test environment URLs and credentials
@@ -90,8 +98,8 @@ type AuthConfig struct {
 // DefaultConfig returns default test configuration
 func DefaultConfig() *TestConfig {
 	loadEnvFileIfExists(getEnvOrDefault("VMGATHER_ENV_FILE", ".env.dynamic"))
-	// Use localhost by default, can be overridden via env vars
-	host := getEnvOrDefault("VM_TEST_HOST", "localhost")
+	// Use explicit IPv4 loopback by default to avoid ::1 resolution differences across hosts.
+	host := getEnvOrDefault("VM_TEST_HOST", defaultTestHost)
 	vmGatherPort := getEnvIntOrDefault("VMGATHER_PORT", 8080)
 	vmSingleNoAuthPort := getEnvIntOrDefault("VM_SINGLE_NOAUTH_PORT", 18428)
 	vmAuthSinglePort := getEnvIntOrDefault("VM_AUTH_SINGLE_PORT", 8427)
@@ -186,7 +194,7 @@ func (c *TestConfig) ToJSON() (string, error) {
 // ToEnv exports configuration as environment variables (shell format)
 func (c *TestConfig) ToEnv() string {
 	vmGatherPort := getEnvIntOrDefault("VMGATHER_PORT", 8080)
-	vmGatherAddr := getEnvOrDefault("VMGATHER_ADDR", fmt.Sprintf("localhost:%d", vmGatherPort))
+	vmGatherAddr := getEnvOrDefault("VMGATHER_ADDR", fmt.Sprintf("%s:%d", defaultTestHost, vmGatherPort))
 	if parsed, err := url.Parse(c.VMGatherURL); err == nil && parsed.Host != "" {
 		vmGatherAddr = parsed.Host
 	}
@@ -309,6 +317,23 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("[OK] Wrote %s\n", envFile)
+	case "project":
+		action := "get"
+		if len(os.Args) > 2 {
+			action = strings.TrimSpace(os.Args[2])
+		}
+		reset := action == "reset" || action == "new"
+		name, err := getOrCreateProjectName(reset)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(name)
+	case "healthcheck":
+		if err := runHealthcheck(config); err != nil {
+			fmt.Fprintf(os.Stderr, "[healthcheck] ERROR: %v\n", err)
+			os.Exit(1)
+		}
 	case "json":
 		jsonStr, err := config.ToJSON()
 		if err != nil {
@@ -318,6 +343,12 @@ func main() {
 		fmt.Println(jsonStr)
 	case "env":
 		fmt.Println(config.ToEnv())
+	case "scenarios":
+		if err := runScenarios(config); err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("[OK] All scenarios passed")
 	case "validate":
 		// Validate configuration and exit with proper code
 		if err := validateConfig(config); err != nil {
@@ -326,7 +357,7 @@ func main() {
 		}
 		fmt.Println("[OK] Configuration is valid")
 	default:
-		fmt.Fprintf(os.Stderr, "Usage: %s [json|env|validate|bootstrap]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [json|env|validate|bootstrap|healthcheck|scenarios|project]\n", os.Args[0])
 		os.Exit(1)
 	}
 }
@@ -346,7 +377,8 @@ func bootstrapEnvFile(path string) error {
 		return errors.New("env file path is empty")
 	}
 
-	host := getEnvOrDefault("VM_TEST_HOST", "localhost")
+	host := getEnvOrDefault("VM_TEST_HOST", defaultTestHost)
+	preferDefaultPorts := getEnvOrDefault("VMGATHER_PREFER_DEFAULT_PORTS", "1") != "0"
 	env := make(map[string]string)
 
 	portKeys := []struct {
@@ -378,12 +410,20 @@ func bootstrapEnvFile(path string) error {
 		if val := os.Getenv(item.key); val != "" {
 			port, err := strconv.Atoi(val)
 			if err == nil {
-				if portAvailable(host, port) {
+				if !used[port] && portAvailable(host, port) {
 					env[item.key] = strconv.Itoa(port)
 					used[port] = true
 					continue
 				}
 			}
+		}
+
+		// Prefer deterministic default ports when available. This makes the manual UX much simpler
+		// (e.g. vmgather on :8080) and keeps the env file stable across restarts.
+		if preferDefaultPorts && !used[item.defaultPort] && portAvailable(host, item.defaultPort) {
+			env[item.key] = strconv.Itoa(item.defaultPort)
+			used[item.defaultPort] = true
+			continue
 		}
 
 		port, err := pickFreePort(host, used)
@@ -406,37 +446,60 @@ func bootstrapEnvFile(path string) error {
 }
 
 func portAvailable(host string, port int) bool {
-	addr := net.JoinHostPort(host, strconv.Itoa(port))
-	listener, err := net.Listen("tcp", addr)
-	if err != nil {
-		return false
+	// Docker publishes ports on both IPv4 and IPv6. Checking only "localhost" may bind to ::1 and
+	// miss an IPv4 conflict (or vice versa). For local usage, check both loopback families.
+	hosts := []string{host}
+	if host == "" || strings.EqualFold(host, "localhost") || host == "127.0.0.1" || host == "::1" {
+		hosts = []string{"127.0.0.1", "::1"}
 	}
-	_ = listener.Close()
+	for _, h := range hosts {
+		addr := net.JoinHostPort(h, strconv.Itoa(port))
+		listener, err := net.Listen("tcp", addr)
+		if err != nil {
+			if shouldIgnoreListenError(h, err) {
+				continue
+			}
+			return false
+		}
+		_ = listener.Close()
+	}
 	return true
 }
 
+func shouldIgnoreListenError(host string, err error) bool {
+	if host != "::1" || err == nil {
+		return false
+	}
+	if errors.Is(err, syscall.EAFNOSUPPORT) ||
+		errors.Is(err, syscall.EPROTONOSUPPORT) ||
+		errors.Is(err, syscall.EADDRNOTAVAIL) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "address family not supported") ||
+		strings.Contains(msg, "protocol not supported") ||
+		strings.Contains(msg, "cannot assign requested address") ||
+		strings.Contains(msg, "can't assign requested address")
+}
+
 func pickFreePort(host string, used map[int]bool) (int, error) {
-	for i := 0; i < 50; i++ {
-		listener, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
-		if err != nil {
-			return 0, err
-		}
-		_, portStr, err := net.SplitHostPort(listener.Addr().String())
-		_ = listener.Close()
-		if err != nil {
-			continue
-		}
-		port, err := strconv.Atoi(portStr)
-		if err != nil {
-			continue
-		}
+	span := fallbackPortRangeEnd - fallbackPortRangeStart + 1
+	if span <= 0 {
+		return 0, fmt.Errorf("invalid fallback port range %d..%d", fallbackPortRangeStart, fallbackPortRangeEnd)
+	}
+	startOffset := (time.Now().Nanosecond() + os.Getpid()) % span
+	for i := 0; i < span; i++ {
+		port := fallbackPortRangeStart + ((startOffset + i) % span)
 		if used[port] {
+			continue
+		}
+		if !portAvailable(host, port) {
 			continue
 		}
 		used[port] = true
 		return port, nil
 	}
-	return 0, fmt.Errorf("unable to find free port after multiple attempts")
+	return 0, fmt.Errorf("unable to find free port in range %d..%d", fallbackPortRangeStart, fallbackPortRangeEnd)
 }
 
 func writeEnvFile(path string, env map[string]string) error {

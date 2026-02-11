@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -192,6 +194,10 @@ func TestServer_HandleGetSample_ResponseFormat(t *testing.T) {
 }
 
 func TestHandleExportStart_StagingPermissionDenied(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows: chmod-based dir permissions don't reliably block writes")
+	}
+
 	tmpDir, err := os.MkdirTemp("", "vmgather-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
@@ -233,6 +239,222 @@ func TestHandleExportStart_StagingPermissionDenied(t *testing.T) {
 	}
 }
 
+func TestHandleValidateConnectionDoesNotLogConnectionDetailsByDefault(t *testing.T) {
+	server := NewServer(t.TempDir(), "test-version", false)
+
+	var buf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(prevOutput)
+
+	reqBody := map[string]interface{}{
+		"connection": map[string]interface{}{
+			"url": "http://127.0.0.1:8428",
+			"auth": map[string]interface{}{
+				"type":     "basic",
+				"username": "secret-user",
+				"password": "secret-password",
+			},
+		},
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	logs := buf.String()
+	if strings.Contains(logs, "Validating connection:") {
+		t.Fatalf("expected connection details logging to be disabled by default, but it was logged:\n%s", logs)
+	}
+	if strings.Contains(logs, "secret-password") {
+		t.Fatalf("expected password to never appear in logs, but it did:\n%s", logs)
+	}
+}
+
+func TestHandleValidateConnectionLogsConnectionDetailsWhenDebugEnabled(t *testing.T) {
+	server := NewServer(t.TempDir(), "test-version", true)
+
+	var buf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(prevOutput)
+
+	reqBody := map[string]interface{}{
+		"connection": map[string]interface{}{
+			"url": "http://127.0.0.1:8428",
+			"auth": map[string]interface{}{
+				"type":     "basic",
+				"username": "secret-user",
+				"password": "secret-password",
+			},
+		},
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	logs := buf.String()
+	if !strings.Contains(logs, "Validating connection:") {
+		t.Fatalf("expected debug logging to include connection details, but it did not:\n%s", logs)
+	}
+	if strings.Contains(logs, "secret-password") {
+		t.Fatalf("expected password to never appear in logs, but it did:\n%s", logs)
+	}
+}
+
+func TestHandleDiscoverComponentsDoesNotLogDiscoveryRequestByDefault(t *testing.T) {
+	server := NewServer(t.TempDir(), "test-version", false)
+	server.vmService = &mockVMService{}
+
+	var buf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(prevOutput)
+
+	reqBody := map[string]interface{}{
+		"connection": map[string]interface{}{
+			"url":  "http://127.0.0.1:8428",
+			"auth": map[string]interface{}{"type": "none"},
+		},
+		"time_range": map[string]string{
+			"start": time.Now().Add(-time.Hour).Format(time.RFC3339),
+			"end":   time.Now().Format(time.RFC3339),
+		},
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/discover", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	logs := buf.String()
+	if strings.Contains(logs, "🔎 Component Discovery:") {
+		t.Fatalf("expected discovery request logging to be disabled by default, but it was logged:\n%s", logs)
+	}
+}
+
+func TestHandleDiscoverComponentsLogsDiscoveryRequestWhenDebugEnabled(t *testing.T) {
+	server := NewServer(t.TempDir(), "test-version", true)
+	server.vmService = &mockVMService{}
+
+	var buf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(prevOutput)
+
+	reqBody := map[string]interface{}{
+		"connection": map[string]interface{}{
+			"url":  "http://127.0.0.1:8428",
+			"auth": map[string]interface{}{"type": "none"},
+		},
+		"time_range": map[string]string{
+			"start": time.Now().Add(-time.Hour).Format(time.RFC3339),
+			"end":   time.Now().Format(time.RFC3339),
+		},
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/discover", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	logs := buf.String()
+	if !strings.Contains(logs, "🔎 Component Discovery:") {
+		t.Fatalf("expected debug logging to include discovery request details, but it did not:\n%s", logs)
+	}
+}
+
+func TestHandleGetSampleDoesNotLogSampleRequestByDefault(t *testing.T) {
+	server := NewServer(t.TempDir(), "test-version", false)
+	server.vmService = &mockVMService{
+		samples: []domain.MetricSample{{MetricName: "vm_app_version", Labels: map[string]string{"job": "test-job"}}},
+	}
+
+	var buf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(prevOutput)
+
+	cfg := domain.ExportConfig{
+		Connection: domain.VMConnection{
+			URL:  "http://127.0.0.1:8428",
+			Auth: domain.AuthConfig{Type: "none"},
+		},
+	}
+	reqBody := map[string]interface{}{
+		"config": cfg,
+		"limit":  1,
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/sample", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	logs := buf.String()
+	if strings.Contains(logs, "Sample Metrics Request:") {
+		t.Fatalf("expected sample request logging to be disabled by default, but it was logged:\n%s", logs)
+	}
+}
+
+func TestHandleGetSampleLogsSampleRequestWhenDebugEnabled(t *testing.T) {
+	server := NewServer(t.TempDir(), "test-version", true)
+	server.vmService = &mockVMService{
+		samples: []domain.MetricSample{{MetricName: "vm_app_version", Labels: map[string]string{"job": "test-job"}}},
+	}
+
+	var buf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(prevOutput)
+
+	cfg := domain.ExportConfig{
+		Connection: domain.VMConnection{
+			URL:  "http://127.0.0.1:8428",
+			Auth: domain.AuthConfig{Type: "none"},
+		},
+	}
+	reqBody := map[string]interface{}{
+		"config": cfg,
+		"limit":  1,
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/sample", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	logs := buf.String()
+	if !strings.Contains(logs, "Sample Metrics Request:") {
+		t.Fatalf("expected debug logging to include sample request details, but it did not:\n%s", logs)
+	}
+}
+
 func TestHandleListDirectory(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "vmgather-list-*")
 	if err != nil {
@@ -245,6 +467,7 @@ func TestHandleListDirectory(t *testing.T) {
 
 	server := NewServer(tmpDir, "test-version", false)
 	req := httptest.NewRequest(http.MethodGet, "/api/fs/list?path="+tmpDir, nil)
+	req.RemoteAddr = "127.0.0.1:1234"
 	w := httptest.NewRecorder()
 
 	server.Router().ServeHTTP(w, req)
@@ -262,6 +485,25 @@ func TestHandleListDirectory(t *testing.T) {
 	}
 }
 
+func TestHandleListDirectoryRejectsNonLoopbackRemoteAddr(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "vmgather-list-reject-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	server := NewServer(tmpDir, "test-version", false)
+	req := httptest.NewRequest(http.MethodGet, "/api/fs/list?path="+tmpDir, nil)
+	// httptest defaults to a non-loopback RemoteAddr (192.0.2.1:1234).
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
+	}
+}
+
 func TestHandleCheckDirectory(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "vmgather-check-*")
 	if err != nil {
@@ -274,6 +516,7 @@ func TestHandleCheckDirectory(t *testing.T) {
 	body, _ := json.Marshal(reqBody)
 	req := httptest.NewRequest(http.MethodPost, "/api/fs/check", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.1:1234"
 	w := httptest.NewRecorder()
 
 	server.Router().ServeHTTP(w, req)
@@ -296,6 +539,24 @@ func TestHandleCheckDirectory(t *testing.T) {
 	}
 }
 
+func TestHandleCheckDirectoryRejectsNonLoopbackRemoteAddr(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	server := NewServer(tmpDir, "test-version", false)
+	reqBody := map[string]string{"path": tmpDir}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/fs/check", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	// httptest defaults to a non-loopback RemoteAddr (192.0.2.1:1234).
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
+	}
+}
+
 func TestHandleCheckDirectoryCreatesMissing(t *testing.T) {
 	tmpDir := t.TempDir()
 	missing := filepath.Join(tmpDir, "nested", "dir")
@@ -307,6 +568,7 @@ func TestHandleCheckDirectoryCreatesMissing(t *testing.T) {
 	body, _ := json.Marshal(reqBody)
 	req := httptest.NewRequest(http.MethodPost, "/api/fs/check", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.1:1234"
 	w := httptest.NewRecorder()
 	server.Router().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -328,6 +590,7 @@ func TestHandleCheckDirectoryCreatesMissing(t *testing.T) {
 	body, _ = json.Marshal(reqBody)
 	req = httptest.NewRequest(http.MethodPost, "/api/fs/check", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.1:1234"
 	w = httptest.NewRecorder()
 	server.Router().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {

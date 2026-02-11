@@ -29,6 +29,10 @@ func TestNewClient(t *testing.T) {
 		t.Error("expected non-nil HTTP client")
 	}
 
+	if client.httpClient.Timeout != 0 {
+		t.Errorf("httpClient.Timeout = %v, want 0", client.httpClient.Timeout)
+	}
+
 	if client.conn.URL != conn.URL {
 		t.Errorf("URL = %v, want %v", client.conn.URL, conn.URL)
 	}

@@ -2,6 +2,53 @@
 
 All notable changes to vmgather are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and versions adhere to semantic versioning.
 
+## [v1.8.0] - Unreleased
+
+### Added
+- Export wizard now lets you configure a separate batch window (auto/preset/custom seconds) independent of metric sampling step.
+- Makefile now provides `test-unit-full` for running unit tests without `-short`.
+- Makefile now provides `test-all-clean` for running the full suite and then cleaning the Docker test env + volumes (recommended for CI / OrbStack).
+- Makefile now provides `manual-env-up/down/clean/logs` for stable local manual testing against a Docker VM stack.
+
+### Changed
+- Export batching payload is now built from the batch-window selector instead of forcing batching to match metric step.
+- Metric step selector now refreshes the batch-window hint to reflect the current recommendation.
+- Playwright E2E now starts a fresh `vmgather` web server by default (opt-in reuse via `PW_REUSE_EXISTING_SERVER=1`).
+- Makefile now provides `test-e2e` and `test-all` targets for running Playwright locally.
+- Makefile `test-full` now runs unit tests via `test-unit-full` (no `-short`).
+- `make test-e2e` now defaults `E2E_REAL=1` and `LIVE_VM_URL` to the local Docker env, so "real" Playwright specs don't get skipped.
+- `make test-env-up` auto-recovers from Docker disk-full errors by running `docker system prune -af` and retrying.
+- `make test-env-full` now uses `make test-env-clean` instead of global `docker volume prune -f`, avoiding accidental cleanup of unrelated volumes.
+- Local test env healthcheck/scenarios are now implemented in Go (`local-test-env/testconfig healthcheck|scenarios`) and invoked by Makefile (shell scripts removed).
+- `make test-env-up` now uses isolated compose project names and stops the previously started test project (stored in `local-test-env/.compose-project.test`), avoiding name conflicts and stale-network flakes on OrbStack.
+- Local Docker test environment no longer sets fixed `container_name` values and uses tmpfs-backed storage for VM data, preventing disk/volume issues on repeated runs.
+- Makefile now provides a `pre-push` target (runs `make test-all-clean`).
+- `local-test-env/testconfig healthcheck` now also validates `vmselect-standalone` readiness; integration scenarios include a standalone `vmselect` check.
+- Local Docker test environment compose file no longer uses the deprecated `version:` field, removing noisy Docker Compose warnings.
+- Documentation now starts with a mode quick choice and uses consistent VMSelect/tenant URL examples across README and the user guide.
+- Export output location is now more predictable by default: if `-output` isn't set, vmgather uses `~/Downloads/vmgather` when available (otherwise falls back to `./exports`).
+
+### Fixed
+- Frontend batching payload field now matches the backend contract: `custom_interval_seconds` (was `custom_interval_secs`).
+- Makefile test targets now preserve `go test` exit codes (piped output no longer masks failures).
+- Flaky ExportService streaming unit test no longer times out under parallel load.
+- Data races fixed in async job workflows (export job manager and importer upload response snapshot); `make test-race` is now clean.
+- Release builds can now inject the correct runtime version via `-ldflags "-X main.version=..."` (both `vmgather` and `vmimporter`).
+- Streaming exports no longer fail due to a hard-coded 30s HTTP client timeout; request-scoped context timeouts control export duration.
+- Export API availability checks no longer leak HTTP response bodies; connections are closed immediately on success.
+- Resumed exports no longer double-count completed batches; progress and ETA remain correct after resume.
+- Job filter selectors now escape regex metacharacters (e.g. `.` or `|`) to avoid query corruption and regex injection risks.
+- Canceled export jobs are now removed by retention cleanup after the configured retention period.
+- Export jobs are no longer canceled by a hard-coded 15-minute manager timeout; only explicit cancel and per-batch timeouts apply.
+- `/api/fs/*` endpoints now reject non-localhost requests, reducing the security surface when binding to `0.0.0.0`.
+- `/api/download` now blocks symlink escapes outside the export directory (prevents downloading files outside `-output` via symlink).
+- Export complete screen now shows where the archive was saved and offers a one-click "Copy" action; suggested download filenames are now Windows-safe via backend-provided `archive_name`.
+- Verbose request/diagnostic dumps are now printed only when `-debug` is enabled (`/api/validate`, `/api/discover`, `/api/sample`).
+- Obfuscation advanced sections (labels/preview) no longer auto-open by default; sample-loading errors and retries render consistently.
+- Playwright E2E no longer intermittently fails with `net::ERR_CONNECTION_REFUSED` on longer runs; the `webServer` timeout is increased to keep the server alive.
+- Connection test no longer hangs indefinitely during host reachability precheck; the `/metrics` probe is bounded and always proceeds to backend validation.
+- Race-mode tests are now more stable; resume job tests no longer flake under `make test-race`.
+
 ## [v1.7.0] - 2026-01-23
 
 ### Added
@@ -83,8 +130,8 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 ## [v1.4.0] - 2025-12-03
 
 ### Added
-- Live discovery coverage against real VictoriaMetrics endpoints: integration (`live_discovery_test.go`) and E2E (`live-discovery.spec.js`) gated by `LIVE_VM_URL`, plus a healthcheck script to verify `vm_app_version` before tests.
-- Local test env healthcheck (`local-test-env/healthcheck.sh`) and published ports for single-node VM (`http://localhost:18428`), with quick-start docs updated.
+- Live discovery coverage against real VictoriaMetrics endpoints: integration (`live_discovery_test.go`) and E2E (`live-discovery.spec.js`) gated by `LIVE_VM_URL`, plus a healthcheck command to verify `vm_app_version` before tests.
+- Local test env healthcheck (`local-test-env/testconfig healthcheck`) and published ports for single-node VM (`http://localhost:18428`), with quick-start docs updated.
 
 ### Changed
 - CI integration job now runs live discovery with `LIVE_VM_URL=http://localhost:18428` and `-tags "integration realdiscovery"`.
@@ -105,7 +152,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Discovery failures caused by `/prometheus` base paths now fall back cleanly; missing metrics report a clear reason instead of generic 500.
 
 ### Testing
-- `./local-test-env/healthcheck.sh` validates `vm_app_version` availability on single and cluster endpoints.
+- `./local-test-env/testconfig healthcheck` validates `vm_app_version` availability on single and cluster endpoints.
 - `INTEGRATION_TEST=1 go test -tags "integration realdiscovery" ./tests/integration/...` (uses LIVE_VM_URL=http://localhost:18428).
 - `npm test` Playwright suite (92 specs; live discovery executed when `LIVE_VM_URL` is set).
 

@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-llm build build-safe build-all clean fmt lint help test-env test-env-up test-env-down test-env-logs test-scenarios test-config-bootstrap docker-build docker-build-vmgather docker-build-vmimporter
+.PHONY: test test-fast test-llm build build-safe build-all clean fmt lint help pre-push test-env test-env-up test-env-down test-env-clean test-env-logs test-e2e test-all test-all-clean test-scenarios test-config-bootstrap docker-build docker-build-vmgather docker-build-vmimporter manual-env-up manual-env-down manual-env-clean manual-env-logs
 
 VERSION ?= $(shell git describe --tags --always --dirty)
 PKG_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "latest")
@@ -11,6 +11,9 @@ GO_VERSION ?= 1.22
 DOCKER_OUTPUT ?= type=docker
 DOCKER_COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo "docker compose" || echo "docker-compose")
 TEST_ENV_FILE := local-test-env/.env.dynamic
+MANUAL_ENV_FILE := local-test-env/.env.manual
+TEST_ENV_PROJECT_FILE_TEST := .compose-project.test
+TEST_ENV_PROJECT_FILE_MANUAL := .compose-project.manual
 
 # Docker registries and namespace (standard across VictoriaMetrics)
 # GHCR is handled by CI; local `make release` targets public hubs only.
@@ -82,6 +85,7 @@ help:
 	@echo "TEST COMMANDS:"
 	@echo "  make test         - Run all tests (fast mode, no race detector)"
 	@echo "  make test-fast    - Run tests with -short flag (skip slow tests)"
+	@echo "  make test-unit-full - Run unit tests without -short"
 	@echo "  make test-full    - Run complete test suite with race detector"
 	@echo "  make test-llm     - Run tests with LLM-friendly structured output"
 	@echo "  make test-coverage - Generate HTML coverage report"
@@ -106,6 +110,10 @@ help:
 	@echo "  make test-integration  - Binary tests Docker environment (needs Docker)"
 	@echo "  make test-env-up       - Start test environment"
 	@echo "  make test-env-down     - Stop test environment"
+	@echo "  make test-env-clean    - Stop test environment and remove volumes"
+	@echo "  make test-e2e          - Run Playwright suite (requires test-env-up)"
+	@echo "  make test-all          - Everything: test-full + test-e2e"
+	@echo "  make test-all-clean    - Everything + cleanup (recommended for CI / OrbStack)"
 	@echo ""
 	@echo "FULL TEST SUITE:"
 	@echo "  make test-full         - Everything: unit + Docker scenarios"
@@ -128,7 +136,13 @@ test:
 	@echo "TEST SUITE: Fast Mode (no race detector, skip slow tests)"
 	@echo "================================================================================"
 	@echo ""
-	@go test -short -coverprofile=coverage.out ./... | $(MAKE) --no-print-directory format-test-output
+	@set -e; \
+		tmpfile="$$(mktemp)"; \
+		status=0; \
+		go test -short -coverprofile=coverage.out ./... >"$$tmpfile" 2>&1 || status=$$?; \
+		cat "$$tmpfile" | $(MAKE) --no-print-directory format-test-output; \
+		rm -f "$$tmpfile"; \
+		exit $$status
 	@echo ""
 	@$(MAKE) --no-print-directory test-summary
 
@@ -138,7 +152,29 @@ test-fast:
 	@echo "TEST SUITE: Ultra-Fast Mode (no coverage, skip slow tests)"
 	@echo "================================================================================"
 	@echo ""
-	@go test -short ./... | $(MAKE) --no-print-directory format-test-output
+	@set -e; \
+		tmpfile="$$(mktemp)"; \
+		status=0; \
+		go test -short ./... >"$$tmpfile" 2>&1 || status=$$?; \
+		cat "$$tmpfile" | $(MAKE) --no-print-directory format-test-output; \
+		rm -f "$$tmpfile"; \
+		exit $$status
+	@echo ""
+	@$(MAKE) --no-print-directory test-summary
+
+# Full unit test suite (no -short)
+test-unit-full:
+	@echo "================================================================================"
+	@echo "TEST SUITE: Unit Full Mode (no -short)"
+	@echo "================================================================================"
+	@echo ""
+	@set -e; \
+		tmpfile="$$(mktemp)"; \
+		status=0; \
+		go test -coverprofile=coverage.out ./... >"$$tmpfile" 2>&1 || status=$$?; \
+		cat "$$tmpfile" | $(MAKE) --no-print-directory format-test-output; \
+		rm -f "$$tmpfile"; \
+		exit $$status
 	@echo ""
 	@$(MAKE) --no-print-directory test-summary
 
@@ -148,7 +184,13 @@ test-race:
 	@echo "TEST SUITE: Race detector mode"
 	@echo "================================================================================"
 	@echo ""
-	@go test -v -race -coverprofile=coverage.out ./... | $(MAKE) --no-print-directory format-test-output
+	@set -e; \
+		tmpfile="$$(mktemp)"; \
+		status=0; \
+		go test -v -race -coverprofile=coverage.out ./... >"$$tmpfile" 2>&1 || status=$$?; \
+		cat "$$tmpfile" | $(MAKE) --no-print-directory format-test-output; \
+		rm -f "$$tmpfile"; \
+		exit $$status
 	@echo ""
 	@$(MAKE) --no-print-directory test-summary
 
@@ -320,6 +362,46 @@ clean:
 
 docker-build: docker-build-vmgather docker-build-vmimporter
 
+docker-build-vmgather:
+	@set -e; \
+		platforms="$(PLATFORMS)"; \
+		platform="$${platforms%%,*}"; \
+		if [ "$$platform" != "$$platforms" ]; then \
+			echo "[INFO] docker-build loads a single-platform image; using $$platform from PLATFORMS=$$platforms"; \
+		fi; \
+		echo "Building Docker image $(DOCKER_NAMESPACE)/vmgather:local ($$platform)"; \
+		docker buildx build \
+			--platform "$$platform" \
+			--build-arg GO_VERSION=$(GO_VERSION) \
+			--label "org.opencontainers.image.source=https://github.com/VictoriaMetrics/vmgather" \
+			--label "org.opencontainers.image.vendor=VictoriaMetrics" \
+			--label "org.opencontainers.image.version=$(PKG_TAG)" \
+			--label "org.opencontainers.image.created=$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+			-f build/docker/Dockerfile.vmgather \
+			--tag $(DOCKER_NAMESPACE)/vmgather:local \
+			--output $(DOCKER_OUTPUT) \
+			.
+
+docker-build-vmimporter:
+	@set -e; \
+		platforms="$(PLATFORMS)"; \
+		platform="$${platforms%%,*}"; \
+		if [ "$$platform" != "$$platforms" ]; then \
+			echo "[INFO] docker-build loads a single-platform image; using $$platform from PLATFORMS=$$platforms"; \
+		fi; \
+		echo "Building Docker image $(DOCKER_NAMESPACE)/vmimporter:local ($$platform)"; \
+		docker buildx build \
+			--platform "$$platform" \
+			--build-arg GO_VERSION=$(GO_VERSION) \
+			--label "org.opencontainers.image.source=https://github.com/VictoriaMetrics/vmgather" \
+			--label "org.opencontainers.image.vendor=VictoriaMetrics" \
+			--label "org.opencontainers.image.version=$(PKG_TAG)" \
+			--label "org.opencontainers.image.created=$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+			-f build/docker/Dockerfile.vmimporter \
+			--tag $(DOCKER_NAMESPACE)/vmimporter:local \
+			--output $(DOCKER_OUTPUT) \
+			.
+
 
 
 # Format code
@@ -343,7 +425,9 @@ lint:
 # =============================================================================
 
 # Build test config utility
-local-test-env/testconfig: local-test-env/config.go
+LOCAL_TEST_ENV_GO := $(wildcard local-test-env/*.go)
+
+local-test-env/testconfig: $(LOCAL_TEST_ENV_GO)
 	@cd local-test-env && go build -o testconfig .
 
 # Load and validate test configuration
@@ -363,13 +447,13 @@ test-config-bootstrap: local-test-env/testconfig
 test-config-json: local-test-env/testconfig
 	@cd local-test-env && ./testconfig json
 
-# Full clean-slate test environment cycle (cleans up before and after)
+# Legacy clean-slate test environment cycle (cleans up before and after).
+# Keep this target for debugging; `pre-push` is defined later and runs the full suite.
 test-env-full:
-	$(MAKE) test-env-down
-	docker volume prune -f || true
+	$(MAKE) test-env-clean
 	$(MAKE) test-env-up
 	$(MAKE) test
-	$(MAKE) test-env-down
+	$(MAKE) test-env-clean
 
 test-env-up: local-test-env/testconfig
 	@echo "================================================================================"
@@ -380,15 +464,70 @@ test-env-up: local-test-env/testconfig
 		echo "This directory is gitignored. Please ensure you have it locally."; \
 		exit 1; \
 	fi
-	@cd local-test-env && ./testconfig bootstrap
-	@cd local-test-env && ./testconfig validate
-	@$(DOCKER_COMPOSE) --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml up -d
+	@echo "Starting Docker test environment (isolated compose project)..."
+	@set -e; \
+		prev_proj="$$(cd local-test-env && VMGATHER_PROJECT_FILE=$(TEST_ENV_PROJECT_FILE_TEST) ./testconfig project 2>/dev/null || true)"; \
+		if [ -n "$$prev_proj" ]; then \
+			echo "  [INFO] stopping existing compose project: $$prev_proj"; \
+			$(DOCKER_COMPOSE) -p "$$prev_proj" --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml down >/dev/null 2>&1 || true; \
+		fi; \
+		started=0; \
+		attempt=0; \
+		max_attempts=3; \
+		while [ "$$attempt" -lt "$$max_attempts" ]; do \
+			attempt=$$((attempt+1)); \
+			echo "  [INFO] bootstrapping dynamic ports (attempt $$attempt/$$max_attempts)"; \
+			rm -f "$(TEST_ENV_FILE)"; \
+			(cd local-test-env && VMGATHER_PREFER_DEFAULT_PORTS=0 ./testconfig bootstrap); \
+			(cd local-test-env && ./testconfig validate); \
+			proj="$$(cd local-test-env && VMGATHER_PROJECT_FILE=$(TEST_ENV_PROJECT_FILE_TEST) VMGATHER_PROJECT_PREFIX=vmtest ./testconfig project reset)"; \
+			echo "  [INFO] compose project: $$proj (attempt $$attempt/$$max_attempts)"; \
+			tmpfile="$$(mktemp)"; \
+			status=0; \
+			$(DOCKER_COMPOSE) -p "$$proj" --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml up -d >"$$tmpfile" 2>&1 || status=$$?; \
+			cat "$$tmpfile"; \
+			if [ "$$status" -eq 0 ]; then \
+				rm -f "$$tmpfile"; \
+				started=1; \
+				break; \
+			fi; \
+				if grep -qi "no space left on device" "$$tmpfile"; then \
+					echo ""; \
+					echo "[WARN] Docker reported 'no space left on device'. Running cleanup and retrying..."; \
+					$(DOCKER_COMPOSE) -p "$$proj" --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml down -v >/dev/null 2>&1 || true; \
+					docker builder prune -af || true; \
+					docker system prune -af || true; \
+					rm -f "$$tmpfile"; \
+					continue; \
+				fi; \
+				if grep -qi "already exists in network" "$$tmpfile"; then \
+					echo ""; \
+					echo "[WARN] Docker network has stale endpoints. Retrying with a new compose project..."; \
+					$(DOCKER_COMPOSE) -p "$$proj" --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml down >/dev/null 2>&1 || true; \
+					rm -f "$$tmpfile"; \
+					continue; \
+				fi; \
+				if grep -Eqi "port is already allocated|ports are not available|bind for .* failed|address already in use" "$$tmpfile"; then \
+					echo ""; \
+					echo "[WARN] Docker reported a host port conflict. Re-picking ports and retrying..."; \
+					$(DOCKER_COMPOSE) -p "$$proj" --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml down >/dev/null 2>&1 || true; \
+					rm -f "$$tmpfile"; \
+					continue; \
+				fi; \
+				$(DOCKER_COMPOSE) -p "$$proj" --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml down >/dev/null 2>&1 || true; \
+				rm -f "$$tmpfile"; \
+				exit "$$status"; \
+			done; \
+		if [ "$$started" -ne 1 ]; then \
+			echo "[ERROR] Failed to start the Docker test environment after $$max_attempts attempts"; \
+			exit 1; \
+		fi
 	@echo ""
 	@echo "Waiting for services to be ready (30 seconds)..."
 	@sleep 30
 	@echo ""
 	@echo "Running healthcheck..."
-	@cd local-test-env && ./healthcheck.sh
+	@cd local-test-env && ./testconfig healthcheck
 	@echo ""
 	@echo "[OK] Test environment is ready!"
 	@echo ""
@@ -401,48 +540,177 @@ test-env-up: local-test-env/testconfig
 # Stop test environment
 test-env-down:
 	@echo "Stopping Test Environment..."
-	@if [ -f "$(TEST_ENV_FILE)" ]; then \
-		$(DOCKER_COMPOSE) --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml down; \
-	else \
-		$(DOCKER_COMPOSE) -f local-test-env/docker-compose.test.yml down; \
-	fi
+	@set -e; \
+		proj="$$(cd local-test-env && VMGATHER_PROJECT_FILE=$(TEST_ENV_PROJECT_FILE_TEST) ./testconfig project 2>/dev/null || true)"; \
+		if [ -z "$$proj" ]; then \
+			echo "[WARN] No stored compose project name; nothing to stop"; \
+			exit 0; \
+		fi; \
+		$(DOCKER_COMPOSE) -p "$$proj" --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml down
 	@echo "[OK] Test environment stopped"
 
 # Stop and remove all data
 test-env-clean:
 	@echo "Cleaning Test Environment (including data)..."
-	@if [ -f "$(TEST_ENV_FILE)" ]; then \
-		$(DOCKER_COMPOSE) --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml down -v; \
-	else \
-		$(DOCKER_COMPOSE) -f local-test-env/docker-compose.test.yml down -v; \
-	fi
+	@set -e; \
+		proj="$$(cd local-test-env && VMGATHER_PROJECT_FILE=$(TEST_ENV_PROJECT_FILE_TEST) ./testconfig project 2>/dev/null || true)"; \
+		if [ -z "$$proj" ]; then \
+			echo "[WARN] No stored compose project name; nothing to clean"; \
+			exit 0; \
+		fi; \
+		$(DOCKER_COMPOSE) -p "$$proj" --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml down -v; \
+		rm -f "local-test-env/$(TEST_ENV_PROJECT_FILE_TEST)" >/dev/null 2>&1 || true
 	@echo "[OK] Test environment cleaned"
 
 # Show logs from test environment
 test-env-logs:
-	@if [ -f "$(TEST_ENV_FILE)" ]; then \
-		$(DOCKER_COMPOSE) --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml logs -f; \
-	else \
-		$(DOCKER_COMPOSE) -f local-test-env/docker-compose.test.yml logs -f; \
-	fi
+	@set -e; \
+		proj="$$(cd local-test-env && VMGATHER_PROJECT_FILE=$(TEST_ENV_PROJECT_FILE_TEST) ./testconfig project 2>/dev/null || true)"; \
+		if [ -z "$$proj" ]; then \
+			echo "[ERROR] No stored compose project name; run 'make test-env-up' first"; \
+			exit 1; \
+		fi; \
+		$(DOCKER_COMPOSE) -p "$$proj" --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml logs -f
+
+# Manual (local) environment for UI testing.
+manual-env-up: local-test-env/testconfig
+	@echo "================================================================================"
+	@echo "Starting Manual Test Environment"
+	@echo "================================================================================"
+	@set -e; \
+		prev_proj="$$(cd local-test-env && VMGATHER_PROJECT_FILE=$(TEST_ENV_PROJECT_FILE_MANUAL) ./testconfig project 2>/dev/null || true)"; \
+		if [ -n "$$prev_proj" ]; then \
+			echo "  [INFO] stopping existing compose project: $$prev_proj"; \
+			$(DOCKER_COMPOSE) -p "$$prev_proj" --env-file $(MANUAL_ENV_FILE) -f local-test-env/docker-compose.test.yml down >/dev/null 2>&1 || true; \
+		fi; \
+		started=0; \
+		attempt=0; \
+		max_attempts=3; \
+		while [ "$$attempt" -lt "$$max_attempts" ]; do \
+			attempt=$$((attempt+1)); \
+			echo "  [INFO] bootstrapping dynamic ports (attempt $$attempt/$$max_attempts)"; \
+			rm -f "$(MANUAL_ENV_FILE)"; \
+			(cd local-test-env && VMGATHER_ENV_FILE=.env.manual VMGATHER_PREFER_DEFAULT_PORTS=0 ./testconfig bootstrap); \
+			(cd local-test-env && VMGATHER_ENV_FILE=.env.manual ./testconfig validate); \
+			proj="$$(cd local-test-env && VMGATHER_ENV_FILE=.env.manual VMGATHER_PROJECT_FILE=$(TEST_ENV_PROJECT_FILE_MANUAL) VMGATHER_PROJECT_PREFIX=vmmanual ./testconfig project reset)"; \
+			echo "  [INFO] compose project: $$proj (attempt $$attempt/$$max_attempts)"; \
+			tmpfile="$$(mktemp)"; \
+			status=0; \
+			$(DOCKER_COMPOSE) -p "$$proj" --env-file $(MANUAL_ENV_FILE) -f local-test-env/docker-compose.test.yml up -d >"$$tmpfile" 2>&1 || status=$$?; \
+			cat "$$tmpfile"; \
+			if [ "$$status" -eq 0 ]; then \
+				rm -f "$$tmpfile"; \
+				started=1; \
+				break; \
+			fi; \
+			if grep -qi "no space left on device" "$$tmpfile"; then \
+				echo ""; \
+				echo "[WARN] Docker reported 'no space left on device'. Running cleanup and retrying..."; \
+				$(DOCKER_COMPOSE) -p "$$proj" --env-file $(MANUAL_ENV_FILE) -f local-test-env/docker-compose.test.yml down -v >/dev/null 2>&1 || true; \
+				docker builder prune -af || true; \
+				docker system prune -af || true; \
+				rm -f "$$tmpfile"; \
+				continue; \
+			fi; \
+			if grep -qi "already exists in network" "$$tmpfile"; then \
+				echo ""; \
+				echo "[WARN] Docker network has stale endpoints. Retrying with a new compose project..."; \
+				$(DOCKER_COMPOSE) -p "$$proj" --env-file $(MANUAL_ENV_FILE) -f local-test-env/docker-compose.test.yml down >/dev/null 2>&1 || true; \
+				rm -f "$$tmpfile"; \
+				continue; \
+			fi; \
+			if grep -Eqi "port is already allocated|ports are not available|bind for .* failed|address already in use" "$$tmpfile"; then \
+				echo ""; \
+				echo "[WARN] Docker reported a host port conflict. Re-picking ports and retrying..."; \
+				$(DOCKER_COMPOSE) -p "$$proj" --env-file $(MANUAL_ENV_FILE) -f local-test-env/docker-compose.test.yml down >/dev/null 2>&1 || true; \
+				rm -f "$$tmpfile"; \
+				continue; \
+			fi; \
+			$(DOCKER_COMPOSE) -p "$$proj" --env-file $(MANUAL_ENV_FILE) -f local-test-env/docker-compose.test.yml down >/dev/null 2>&1 || true; \
+			rm -f "$$tmpfile"; \
+			exit "$$status"; \
+		done; \
+		if [ "$$started" -ne 1 ]; then \
+			echo "[ERROR] Failed to start the Docker manual environment after $$max_attempts attempts"; \
+			exit 1; \
+		fi; \
+		echo ""; \
+		echo "Waiting for services to be ready (30 seconds)..."; \
+		sleep 30; \
+		echo ""; \
+		echo "Running healthcheck..."; \
+		(cd local-test-env && VMGATHER_ENV_FILE=.env.manual ./testconfig healthcheck); \
+		echo ""; \
+		echo "[OK] Manual test environment is ready!"; \
+		echo ""; \
+		(cd local-test-env && VMGATHER_ENV_FILE=.env.manual ./testconfig json) | jq -r '"Available instances:\n  - VMSingle No Auth:     \(.vm_single_noauth.url)\n  - VMSingle via VMAuth:  \(.vm_single_auth.url)\n  - VM Cluster:           \(.vm_cluster.base_url)\n  - VMSelect standalone:  \(.vmselect_standalone.base_url)\n  - VM Cluster via VMAuth: \(.vmauth_cluster.url)"'
+	@echo ""
+	@echo "Run 'make manual-env-logs' to see logs"
+	@echo "Run 'make manual-env-down' to stop"
+
+manual-env-down:
+	@echo "Stopping Manual Test Environment..."
+	@set -e; \
+		proj="$$(cd local-test-env && VMGATHER_PROJECT_FILE=$(TEST_ENV_PROJECT_FILE_MANUAL) ./testconfig project 2>/dev/null || true)"; \
+		if [ -z "$$proj" ]; then \
+			echo "[WARN] No stored compose project name; nothing to stop"; \
+			exit 0; \
+		fi; \
+		$(DOCKER_COMPOSE) -p "$$proj" --env-file $(MANUAL_ENV_FILE) -f local-test-env/docker-compose.test.yml down
+	@echo "[OK] Manual test environment stopped"
+
+manual-env-clean:
+	@echo "Cleaning Manual Test Environment (including data)..."
+	@set -e; \
+		proj="$$(cd local-test-env && VMGATHER_PROJECT_FILE=$(TEST_ENV_PROJECT_FILE_MANUAL) ./testconfig project 2>/dev/null || true)"; \
+		if [ -z "$$proj" ]; then \
+			echo "[WARN] No stored compose project name; nothing to clean"; \
+			exit 0; \
+		fi; \
+		$(DOCKER_COMPOSE) -p "$$proj" --env-file $(MANUAL_ENV_FILE) -f local-test-env/docker-compose.test.yml down -v; \
+		rm -f "local-test-env/$(TEST_ENV_PROJECT_FILE_MANUAL)" >/dev/null 2>&1 || true; \
+		rm -f "$(MANUAL_ENV_FILE)" >/dev/null 2>&1 || true
+	@echo "[OK] Manual test environment cleaned"
+
+manual-env-logs:
+	@set -e; \
+		proj="$$(cd local-test-env && VMGATHER_PROJECT_FILE=$(TEST_ENV_PROJECT_FILE_MANUAL) ./testconfig project 2>/dev/null || true)"; \
+		if [ -z "$$proj" ]; then \
+			echo "[ERROR] No stored compose project name; run 'make manual-env-up' first"; \
+			exit 1; \
+		fi; \
+		$(DOCKER_COMPOSE) -p "$$proj" --env-file $(MANUAL_ENV_FILE) -f local-test-env/docker-compose.test.yml logs -f
+
+manual-vmgather-up:
+	@echo "Building vmgather..."
+	@go build -o vmgather ./cmd/vmgather
+	@echo "Starting vmgather UI on http://localhost:8080 ..."
+	@./vmgather -addr localhost:8080 -no-browser
+
+manual-vmgather-down:
+	@echo "Stopping vmgather UI (port 8080)..."
+	@pid="$$(lsof -tiTCP:8080 -sTCP:LISTEN 2>/dev/null || true)"; \
+		if [ -z "$$pid" ]; then \
+			echo "[WARN] No listener found on :8080"; \
+			exit 0; \
+		fi; \
+		cmd="$$(ps -p "$$pid" -o command= 2>/dev/null || true)"; \
+		if echo "$$cmd" | grep -q "[/]vmgather"; then \
+			kill "$$pid"; \
+		else \
+			echo "[ERROR] Refusing to kill pid=$$pid (not vmgather): $$cmd"; \
+			exit 1; \
+		fi
 
 # Integration tests: binary tests Docker environment
 test-integration: local-test-env/testconfig
 	@echo "================================================================================"
 	@echo "Integration Tests: Binary testing Docker environment"
 	@echo "================================================================================"
-	@if [ ! -f "local-test-env/test-all-scenarios.sh" ]; then \
-		echo "[ERROR] test-all-scenarios.sh not found"; \
-		exit 1; \
-	fi
-	@if ! docker ps | grep -q vmsingle-noauth; then \
-		echo "[ERROR] Docker test environment not running"; \
-		echo "Run 'make test-env-up' first"; \
-		exit 1; \
-	fi
+	@cd local-test-env && ./testconfig healthcheck
 	@set -e; \
 		eval "$$(cd local-test-env && ./testconfig env)"; \
-		cd local-test-env && ./test-all-scenarios.sh; \
+		cd local-test-env && ./testconfig scenarios; \
 		cd ..; \
 		INTEGRATION_TEST=1 LIVE_VM_URL="$$VM_SINGLE_NOAUTH_URL" go test -tags "integration realdiscovery" ./tests/integration/...
 
@@ -455,6 +723,63 @@ test-env: test-env-up test-integration
 	@echo "[OK] All E2E tests completed!"
 	@echo "Run 'make test-env-down' to stop the environment"
 
+# Playwright tests: require the local docker environment.
+test-e2e:
+	@echo "================================================================================"
+	@echo "Playwright E2E Suite"
+	@echo "================================================================================"
+	@cd local-test-env && ./testconfig healthcheck
+	@echo ""
+	@echo "[1/3] Building vmgather..."
+	@go build -o vmgather ./cmd/vmgather
+	@echo ""
+	@echo "[2/3] Ensuring E2E dependencies exist..."
+	@if [ ! -d "tests/e2e/node_modules" ]; then \
+		echo "  Installing node deps via npm ci..."; \
+		cd tests/e2e && npm ci; \
+	fi
+	@echo ""
+	@echo "[3/3] Running Playwright (workers=1)..."
+	@set -e; \
+		eval "$$(cd local-test-env && ./testconfig env)"; \
+		E2E_REAL="$${E2E_REAL:-1}"; \
+		LIVE_VM_URL="$${LIVE_VM_URL:-$$VM_SINGLE_NOAUTH_URL}"; \
+		export E2E_REAL LIVE_VM_URL; \
+		if [ -n "$$VMGATHER_PORT" ] && command -v lsof >/dev/null 2>&1; then \
+			pid="$$(lsof -tiTCP:$$VMGATHER_PORT -sTCP:LISTEN || true)"; \
+			if [ -n "$$pid" ]; then \
+				cmd="$$(ps -p "$$pid" -o command= || true)"; \
+				if echo "$$cmd" | grep -q "[/]vmgather" && echo "$$cmd" | grep -q -- "-no-browser"; then \
+					echo "  [WARN] Killing stale vmgather web server (pid=$$pid, port=$$VMGATHER_PORT)"; \
+					kill "$$pid" || true; \
+					sleep 1; \
+				fi; \
+			fi; \
+		fi; \
+		cd tests/e2e && npx playwright test --workers=1
+	@echo ""
+	@echo "================================================================================"
+	@echo "[OK] Playwright E2E suite passed!"
+	@echo "================================================================================"
+
+# Everything: unit + docker scenarios + Playwright.
+test-all: test-full test-e2e
+
+# Everything + cleanup (CI / disk-constrained environments).
+test-all-clean:
+	@set -e; \
+		status=0; \
+		$(MAKE) --no-print-directory test-all || status=$$?; \
+		echo ""; \
+		echo "================================================================================"; \
+		echo "Cleaning Docker test environment (including volumes)..."; \
+		echo "================================================================================"; \
+		$(MAKE) --no-print-directory test-env-clean || true; \
+		exit $$status
+
+# Local gate before pushing changes.
+pre-push: test-all-clean
+
 # =============================================================================
 # FULL TEST SUITE
 # =============================================================================
@@ -466,7 +791,7 @@ test-full:
 	@echo "================================================================================"
 	@echo ""
 	@echo "[1/3] Unit tests (without Docker)..."
-	@$(MAKE) test
+	@$(MAKE) test-unit-full
 	@echo ""
 	@echo "[2/3] Starting Docker test environment..."
 	@$(MAKE) test-env-down 2>/dev/null || true

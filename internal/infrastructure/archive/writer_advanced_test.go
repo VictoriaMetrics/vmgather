@@ -53,21 +53,30 @@ func TestWriter_CrossPlatformPaths(t *testing.T) {
 			shouldWork:  true,
 			description: "ID with dots (should work on all platforms)",
 		},
-	}
-
-	// Platform-specific tests
-	if runtime.GOOS == "windows" {
-		tests = append(tests, struct {
-			name        string
-			exportID    string
-			shouldWork  bool
-			description string
-		}{
-			name:        "windows_reserved",
-			exportID:    "CON", // Reserved name on Windows
+		{
+			name:        "windows_reserved_name_is_allowed_with_prefix",
+			exportID:    "CON",
+			shouldWork:  true,
+			description: "Reserved bare name is safe once prefixed in archive filename",
+		},
+		{
+			name:        "invalid_colon",
+			exportID:    "export:123",
 			shouldWork:  false,
-			description: "Windows reserved name",
-		})
+			description: "Colon is invalid for cross-platform filenames",
+		},
+		{
+			name:        "invalid_asterisk",
+			exportID:    "export*123",
+			shouldWork:  false,
+			description: "Asterisk is invalid for cross-platform filenames",
+		},
+		{
+			name:        "invalid_control_character",
+			exportID:    "export\t123",
+			shouldWork:  false,
+			description: "Control characters are invalid in filenames",
+		},
 	}
 
 	for _, tt := range tests {
@@ -404,6 +413,12 @@ func TestWriter_DiskSpaceHandling(t *testing.T) {
 
 // TestWriter_InvalidOutputDirectory tests error handling for invalid directories
 func TestWriter_InvalidOutputDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	parentFile := filepath.Join(tmpDir, "not-a-dir")
+	if err := os.WriteFile(parentFile, []byte("x"), 0o600); err != nil {
+		t.Fatalf("failed to create parent file: %v", err)
+	}
+
 	tests := []struct {
 		name        string
 		outputDir   string
@@ -411,10 +426,10 @@ func TestWriter_InvalidOutputDirectory(t *testing.T) {
 		description string
 	}{
 		{
-			name:        "nonexistent_parent",
-			outputDir:   "/nonexistent/parent/dir",
+			name:        "parent_is_file",
+			outputDir:   filepath.Join(parentFile, "child"),
 			shouldFail:  true,
-			description: "Parent directory doesn't exist",
+			description: "Parent path is a file, not a directory",
 		},
 		{
 			name:        "empty_path",
