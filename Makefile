@@ -7,7 +7,7 @@ PKG_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "latest")
 PLATFORMS ?= linux/amd64,linux/arm64,linux/arm
 
 # Go version for build
-GO_VERSION ?= 1.22
+GO_VERSION ?= 1.25.7
 DOCKER_OUTPUT ?= type=docker
 DOCKER_COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo "docker compose" || echo "docker-compose")
 TEST_ENV_FILE := local-test-env/.env.dynamic

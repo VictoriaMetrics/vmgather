@@ -2,6 +2,11 @@
 
 All notable changes to vmgather are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and versions adhere to semantic versioning.
 
+## [v1.9.0] - Unreleased
+
+### Security
+- Docker build toolchain for `vmgather` and `vmimporter` images is upgraded to Go `1.25.7` (from `1.22`) to consume fixed Go stdlib security patches and reduce fixable `CRITICAL/HIGH` CVEs in registry scans.
+
 ## [v1.8.0] - 2026-02-11
 
 ### Added
