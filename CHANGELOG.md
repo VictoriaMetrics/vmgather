@@ -8,6 +8,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Docker build toolchain for `vmgather` and `vmimporter` images is upgraded to Go `1.25.7` (from `1.22`) to consume fixed Go stdlib security patches and reduce fixable `CRITICAL/HIGH` CVEs in registry scans.
 - Docker runtime images now use `distroless ...:nonroot` with explicit `USER 65532:65532`, removing root-by-default execution.
 - Docker publish targets now emit max-mode provenance and SBOM attestations (`--provenance=mode=max --sbom=true`) for release images.
+- Docker builder/runtime base images are now pinned by digest in both Dockerfiles for deterministic builds and reduced supply-chain drift from mutable tags.
 
 ## [v1.8.0] - 2026-02-11
 
