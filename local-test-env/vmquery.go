@@ -113,6 +113,28 @@ func extractVMQueryTimestampSeconds(resp *vmQueryResponse) (int64, bool) {
 	}
 }
 
+func extractVMQueryValueFloat(resp *vmQueryResponse) (float64, bool) {
+	if resp == nil || len(resp.Data.Result) == 0 {
+		return 0, false
+	}
+	v := resp.Data.Result[0].Value
+	if len(v) < 2 {
+		return 0, false
+	}
+	switch raw := v[1].(type) {
+	case float64:
+		return raw, true
+	case string:
+		f, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			return 0, false
+		}
+		return f, true
+	default:
+		return 0, false
+	}
+}
+
 func isFreshTimestamp(tsSeconds int64, now time.Time) bool {
 	if tsSeconds <= 0 {
 		return false
