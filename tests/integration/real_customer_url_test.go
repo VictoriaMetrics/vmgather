@@ -11,7 +11,7 @@ import (
 
 // TestRealCustomerURL tests with the EXACT customer URL format
 // Customer's working curl:
-// curl --user 'monitoring-read:PASSWORD' 'https://vm.example.com/1011/ui/prometheus/api/v1/query?query=sum(1)'
+// curl --user 'monitoring-read:${VM_AUTH_PASSWORD}' 'https://vm.example.com/1011/ui/prometheus/api/v1/query?query=sum(1)'
 func TestRealCustomerURL(t *testing.T) {
 	t.Skip("Skipping test with real customer URL - requires real credentials")
 
