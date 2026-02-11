@@ -2,7 +2,7 @@
 
 All notable changes to vmgather are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and versions adhere to semantic versioning.
 
-## [v1.8.0] - Unreleased
+## [v1.8.0] - 2026-02-11
 
 ### Added
 - Export wizard now lets you configure a separate batch window (auto/preset/custom seconds) independent of metric sampling step.
