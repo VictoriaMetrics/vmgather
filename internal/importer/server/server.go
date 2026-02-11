@@ -214,7 +214,7 @@ type Server struct {
 }
 
 func NewServer(version string) *Server {
-	transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: false}}
+	transport := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
 	return &Server{
 		version: version,
 		httpClient: &http.Client{
@@ -232,7 +232,7 @@ func (s *Server) withInsecure(insecure bool, endpoint string) *http.Client {
 	s.insecureTLSWarnOnce.Do(func() {
 		log.Printf("[WARN] vmimporter is using skip_tls_verify for endpoint %s. Use only in trusted lab/dev environments.", redactURLForLog(endpoint))
 	})
-	transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} // #nosec G402 - intentional for air-gapped envs
+	transport := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}} // #nosec G402 - intentional for air-gapped envs
 	return &http.Client{Timeout: importerHTTPTimeout, Transport: transport}
 }
 

@@ -1,8 +1,9 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,8 +73,15 @@ func generateProjectName(prefix string) string {
 	if p == "" {
 		p = "vmtest"
 	}
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	return fmt.Sprintf("%s_%d_%04d", p, time.Now().Unix(), r.Intn(10_000))
+	return fmt.Sprintf("%s_%d_%04d", p, time.Now().Unix(), randomSuffix())
+}
+
+func randomSuffix() int {
+	var b [2]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return int(time.Now().UnixNano() % 10_000)
+	}
+	return int(binary.BigEndian.Uint16(b[:]) % 10_000)
 }
 
 func sanitizeComposeProject(s string) string {

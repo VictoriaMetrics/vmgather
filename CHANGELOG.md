@@ -16,6 +16,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Added secret-scanning hardening with a repo-level `.gitleaks.toml` allowlist for generated artifacts plus a CI `secret-scan` job (`gitleaks` + verified `trufflehog`) in `.github/workflows/security.yml`.
 - Runtime container images now define explicit `HEALTHCHECK` probes (`/api/health`) for `vmgather` and `vmimporter` via a minimal static `container-healthcheck` binary.
 - `skip_tls_verify` mode now emits explicit runtime warnings (in both exporter and importer paths) with redacted endpoints to reduce accidental insecure usage in production.
+- TLS client configs now enforce `MinVersion: tls.VersionTLS12` where explicitly constructed; local test compose project suffix generation switched from `math/rand` to `crypto/rand` to satisfy high-severity SAST findings.
 
 ## [v1.8.0] - 2026-02-11
 

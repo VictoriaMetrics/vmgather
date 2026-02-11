@@ -95,7 +95,7 @@ func NewClient(conn domain.VMConnection) *Client {
 		insecureTLSWarnOnce.Do(func() {
 			log.Printf("[WARN] TLS certificate verification is disabled for VictoriaMetrics requests (target=%s). Use only in trusted lab/dev environments.", connectionTargetForLog(conn))
 		})
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec G402 -- explicit user opt-in via skip_tls_verify
+		transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true} // #nosec G402 -- explicit user opt-in via skip_tls_verify
 	}
 
 	return &Client{
