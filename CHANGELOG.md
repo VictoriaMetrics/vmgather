@@ -9,6 +9,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Docker runtime images now use `distroless ...:nonroot` with explicit `USER 65532:65532`, removing root-by-default execution.
 - Docker publish targets now emit max-mode provenance and SBOM attestations (`--provenance=mode=max --sbom=true`) for release images.
 - Docker builder/runtime base images are now pinned by digest in both Dockerfiles for deterministic builds and reduced supply-chain drift from mutable tags.
+- Docker builder stages no longer install extra Alpine build packages (`git`, `build-base`), reducing build-time supply-chain surface while keeping `CGO_ENABLED=0` static binaries.
 
 ## [v1.8.0] - 2026-02-11
 

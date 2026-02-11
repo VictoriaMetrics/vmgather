@@ -3,8 +3,7 @@ ARG GO_VERSION=1.25.7
 FROM golang:${GO_VERSION}-alpine@sha256:f6751d823c26342f9506c03797d2527668d095b0a15f1862cddb4d927a7a4ced AS builder
 WORKDIR /src
 COPY . .
-RUN apk add --no-cache git build-base && \
-    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /out/vmgather ./cmd/vmgather
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /out/vmgather ./cmd/vmgather
 
 FROM gcr.io/distroless/base-debian12:nonroot@sha256:107333192f6732e786f65df4df77f1d8bfb500289aad09540e43e0f7b6a2b816
 WORKDIR /tmp
