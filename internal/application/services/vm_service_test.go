@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,100 @@ func TestNewVMService(t *testing.T) {
 
 	// Verify service implements interface
 	var _ VMService = service
+}
+
+func TestEffectiveQueryTime_ClampsFutureAndZero(t *testing.T) {
+	now := time.Now()
+
+	future := now.Add(10 * time.Minute)
+	clampedFuture := effectiveQueryTime(future)
+	if clampedFuture.After(time.Now().Add(2 * time.Second)) {
+		t.Fatalf("future timestamp was not clamped: %s", clampedFuture)
+	}
+
+	zero := effectiveQueryTime(time.Time{})
+	if zero.After(time.Now().Add(2 * time.Second)) {
+		t.Fatalf("zero timestamp should resolve to now, got %s", zero)
+	}
+
+	past := now.Add(-10 * time.Minute)
+	gotPast := effectiveQueryTime(past)
+	if !gotPast.Equal(past) {
+		t.Fatalf("past timestamp must be preserved: got=%s want=%s", gotPast, past)
+	}
+}
+
+func TestVMService_DiscoverComponents_ClampsFutureEnd(t *testing.T) {
+	nowUnix := time.Now().Unix()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/query" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+
+		tsRaw := r.URL.Query().Get("time")
+		ts, err := strconv.ParseInt(tsRaw, 10, 64)
+		if err != nil {
+			t.Fatalf("invalid time query param %q: %v", tsRaw, err)
+		}
+
+		query := r.URL.Query().Get("query")
+		result := []map[string]interface{}{}
+		if ts <= nowUnix+60 {
+			switch {
+			case strings.Contains(query, "label_replace(vm_app_version"):
+				result = []map[string]interface{}{
+					{"metric": map[string]string{"job": "vmsingle-noauth", "vm_component": "victoria"}},
+				}
+			case strings.HasPrefix(query, "count("):
+				result = []map[string]interface{}{
+					{"metric": map[string]string{}, "value": []interface{}{float64(ts), "1"}},
+				}
+			case strings.HasPrefix(query, "count by (job)"):
+				result = []map[string]interface{}{
+					{"metric": map[string]string{"job": "vmsingle-noauth"}, "value": []interface{}{float64(ts), "1"}},
+				}
+			case strings.HasPrefix(query, "count(count by (instance)"):
+				result = []map[string]interface{}{
+					{"metric": map[string]string{}, "value": []interface{}{float64(ts), "1"}},
+				}
+			}
+		}
+
+		payload := map[string]interface{}{
+			"status": "success",
+			"data": map[string]interface{}{
+				"resultType": "vector",
+				"result":     result,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(payload)
+	}))
+	defer srv.Close()
+
+	service := &vmServiceImpl{
+		clientFactory: func(conn domain.VMConnection) *vm.Client {
+			return vm.NewClient(domain.VMConnection{URL: srv.URL})
+		},
+	}
+
+	tr := domain.TimeRange{
+		Start: time.Now().Add(-1 * time.Hour),
+		End:   time.Now().Add(10 * time.Minute), // future end must be clamped
+	}
+
+	components, err := service.DiscoverComponents(context.Background(), domain.VMConnection{URL: srv.URL}, tr)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(components) != 1 {
+		t.Fatalf("expected 1 component, got %d", len(components))
+	}
+	if components[0].Component != "victoria" {
+		t.Fatalf("unexpected component %+v", components[0])
+	}
 }
 
 // NOTE: Full integration tests with ValidateConnection would require either:

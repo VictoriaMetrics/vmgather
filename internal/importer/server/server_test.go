@@ -27,6 +27,53 @@ func recentTimeRange() (string, string) {
 	return start.Format(time.RFC3339), end.Format(time.RFC3339)
 }
 
+func TestRedactURLForLog(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "empty endpoint",
+			in:   "",
+			want: "unknown-endpoint",
+		},
+		{
+			name: "invalid endpoint",
+			in:   "://bad",
+			want: "invalid-url",
+		},
+		{
+			name: "no user info",
+			in:   "https://example.com/api/v1/import",
+			want: "https://example.com/api/v1/import",
+		},
+		{
+			name: "username only",
+			in:   "https://alice@example.com/api/v1/import",
+			want: "https://alice@example.com/api/v1/import",
+		},
+		{
+			name: "username and password",
+			in:   "https://alice:secret@example.com/api/v1/import",
+			want: "https://alice:xxxxx@example.com/api/v1/import",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := redactURLForLog(tt.in)
+			if got != tt.want {
+				t.Fatalf("unexpected redacted URL: got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHandleUploadSuccess(t *testing.T) {
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

@@ -34,7 +34,14 @@ func main() {
 	}
 
 	srv := importer.NewServer(version)
-	httpServer := &http.Server{Addr: finalAddr, Handler: srv.Router()}
+	httpServer := &http.Server{
+		Addr:              finalAddr,
+		Handler:           srv.Router(),
+		ReadHeaderTimeout: 5 * time.Second,
+		// Keep body reads unbounded to avoid aborting large uploads mid-transfer.
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
 
 	go func() {
 		log.Printf("VMImport %s listening on http://%s", version, finalAddr)

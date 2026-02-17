@@ -19,6 +19,7 @@ const (
 	fallbackPortRangeStart = 20000
 	fallbackPortRangeEnd   = 45000
 	defaultTestHost        = "127.0.0.1"
+	defaultEnvFileName     = ".env.dynamic"
 )
 
 // TestConfig holds all test environment URLs and credentials
@@ -97,7 +98,7 @@ type AuthConfig struct {
 
 // DefaultConfig returns default test configuration
 func DefaultConfig() *TestConfig {
-	loadEnvFileIfExists(getEnvOrDefault("VMGATHER_ENV_FILE", ".env.dynamic"))
+	loadEnvFileIfExists(resolveEnvFilePath())
 	// Use explicit IPv4 loopback by default to avoid ::1 resolution differences across hosts.
 	host := getEnvOrDefault("VM_TEST_HOST", defaultTestHost)
 	vmGatherPort := getEnvIntOrDefault("VMGATHER_PORT", 8080)
@@ -299,6 +300,76 @@ func getEnvIntOrDefault(key string, defaultValue int) int {
 	return defaultValue
 }
 
+// resolveEnvFilePath returns the default .env.dynamic path in a way that works
+// both when testconfig is executed from local-test-env/ and from repo root.
+func resolveEnvFilePath() string {
+	cwd, _ := os.Getwd()
+	executable, _ := os.Executable()
+	return resolveEnvFilePathWith(os.Getenv("VMGATHER_ENV_FILE"), cwd, executable)
+}
+
+func resolveEnvFilePathWith(explicit, cwd, executable string) string {
+	if path := strings.TrimSpace(explicit); path != "" {
+		return path
+	}
+
+	cwdFile := filepath.Join(cwd, defaultEnvFileName)
+	if fileExists(cwdFile) {
+		// Keep relative output when running from local-test-env/ for nicer CLI UX.
+		return defaultEnvFileName
+	}
+
+	localTestEnvDir := filepath.Join(cwd, "local-test-env")
+	localTestEnvFile := filepath.Join(localTestEnvDir, defaultEnvFileName)
+	if fileExists(localTestEnvFile) {
+		return localTestEnvFile
+	}
+	// For repo-root usage, prefer the canonical local-test-env location even if
+	// the env file hasn't been bootstrapped yet.
+	if dirExists(localTestEnvDir) {
+		return localTestEnvFile
+	}
+
+	exeDirFile := ""
+	if executable != "" {
+		exeDirFile = filepath.Join(filepath.Dir(executable), defaultEnvFileName)
+		if fileExists(exeDirFile) {
+			return exeDirFile
+		}
+	}
+
+	// Fallback location for first bootstrap: beside the testconfig binary.
+	if exeDirFile != "" {
+		return exeDirFile
+	}
+	if cwd != "" {
+		return cwdFile
+	}
+	return defaultEnvFileName
+}
+
+func fileExists(path string) bool {
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir()
+}
+
+func dirExists(path string) bool {
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
+}
+
 // Main function for CLI usage
 func main() {
 	config := LoadConfig()
@@ -311,7 +382,7 @@ func main() {
 
 	switch format {
 	case "bootstrap":
-		envFile := getEnvOrDefault("VMGATHER_ENV_FILE", ".env.dynamic")
+		envFile := resolveEnvFilePath()
 		if err := bootstrapEnvFile(envFile); err != nil {
 			fmt.Fprintf(os.Stderr, "[ERROR] Failed to bootstrap env file: %v\n", err)
 			os.Exit(1)
