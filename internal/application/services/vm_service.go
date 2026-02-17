@@ -38,6 +38,14 @@ type vmServiceImpl struct {
 	clientFactory func(domain.VMConnection) *vm.Client
 }
 
+func effectiveQueryTime(end time.Time) time.Time {
+	now := time.Now()
+	if end.IsZero() || end.After(now) {
+		return now
+	}
+	return end
+}
+
 // NewVMService creates a new VM service
 func NewVMService() VMService {
 	return &vmServiceImpl{
@@ -69,12 +77,13 @@ func (s *vmServiceImpl) ValidateConnection(ctx context.Context, conn domain.VMCo
 // DiscoverComponents discovers VictoriaMetrics components using vm_app_version metric
 func (s *vmServiceImpl) DiscoverComponents(ctx context.Context, conn domain.VMConnection, tr domain.TimeRange) ([]domain.VMComponent, error) {
 	client := s.clientFactory(conn)
+	queryTime := effectiveQueryTime(tr.End)
 
 	// Discovery query: extract component name from version label
 	// Example: version="vmstorage-v1.95.1" -> component="vmstorage"
 	query := `group by (job, vm_component) (label_replace(vm_app_version{version!=""}, "vm_component", "$1", "version", "(.+?)\\-.*"))`
 
-	result, err := client.Query(ctx, query, tr.End)
+	result, err := client.Query(ctx, query, queryTime)
 	if err != nil {
 		return nil, fmt.Errorf("discovery query failed: %w", err)
 	}
@@ -139,14 +148,15 @@ func (s *vmServiceImpl) DiscoverSelectorJobs(ctx context.Context, conn domain.VM
 	}
 
 	client := s.clientFactory(conn)
+	queryTime := effectiveQueryTime(tr.End)
 	groupQuery := fmt.Sprintf("group by (job, instance) (%s)", selector)
-	result, err := client.Query(ctx, groupQuery, tr.End)
+	result, err := client.Query(ctx, groupQuery, queryTime)
 	if err != nil {
 		return nil, fmt.Errorf("selector discovery failed: %w", err)
 	}
 	if len(result.Data.Result) == 0 {
 		countQuery := fmt.Sprintf("count(%s)", selector)
-		if countResult, countErr := client.Query(ctx, countQuery, tr.End); countErr == nil && len(countResult.Data.Result) > 0 {
+		if countResult, countErr := client.Query(ctx, countQuery, queryTime); countErr == nil && len(countResult.Data.Result) > 0 {
 			if len(countResult.Data.Result[0].Value) >= 2 {
 				if count, ok := parseCountValue(countResult.Data.Result[0].Value[1]); ok && count > 0 {
 					return nil, fmt.Errorf("selector matched series without job labels; use MetricsQL or add a job label")
@@ -173,7 +183,7 @@ func (s *vmServiceImpl) DiscoverSelectorJobs(ctx context.Context, conn domain.VM
 
 	jobCounts := make(map[string]int)
 	countQuery := fmt.Sprintf("count by (job) (%s)", selector)
-	if countResult, countErr := client.Query(ctx, countQuery, tr.End); countErr == nil {
+	if countResult, countErr := client.Query(ctx, countQuery, queryTime); countErr == nil {
 		for _, series := range countResult.Data.Result {
 			job := series.Metric["job"]
 			if job == "" || len(series.Value) < 2 {
@@ -220,7 +230,7 @@ func (s *vmServiceImpl) estimateComponentMetrics(ctx context.Context, client *vm
 	// Count unique series
 	query := fmt.Sprintf("count(%s)", selector)
 
-	result, err := client.Query(ctx, query, tr.End)
+	result, err := client.Query(ctx, query, effectiveQueryTime(tr.End))
 	if err != nil {
 		return 0, err
 	}
@@ -249,7 +259,7 @@ func (s *vmServiceImpl) countInstances(ctx context.Context, client *vm.Client, j
 	selector := buildJobFilterSelector(jobs)
 	query := fmt.Sprintf("count(count by (instance) (%s))", selector)
 
-	result, err := client.Query(ctx, query, tr.End)
+	result, err := client.Query(ctx, query, effectiveQueryTime(tr.End))
 	if err != nil {
 		return 0, err
 	}
@@ -280,7 +290,7 @@ func (s *vmServiceImpl) estimateJobMetrics(ctx context.Context, client *vm.Clien
 	selector := buildJobFilterSelector(jobs)
 	query := fmt.Sprintf("count by (job) (%s)", selector)
 
-	result, err := client.Query(ctx, query, tr.End)
+	result, err := client.Query(ctx, query, effectiveQueryTime(tr.End))
 	if err != nil || len(result.Data.Result) == 0 {
 		return jobCounts
 	}

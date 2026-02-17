@@ -24,6 +24,8 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 ### Fixed
 - `redactURLForLog` in importer now safely handles endpoints without user info (prevents potential nil-pointer panic during warning logs).
 - `vmimporter` HTTP server no longer applies a global `ReadTimeout` that could abort large bundle uploads mid-transfer.
+- `local-test-env/testconfig` now resolves `.env.dynamic` consistently when run from either repo root or `local-test-env/`, avoiding stale/default URL output during manual checks.
+- VM discovery/estimation queries now clamp zero/future `time_range.end` values to `now`, preventing false "no components" results on valid live endpoints.
 
 ## [v1.8.0] - 2026-02-11
 

@@ -133,6 +133,51 @@ func TestShouldIgnoreListenErrorDoesNotHideRealConflict(t *testing.T) {
 	}
 }
 
+func TestResolveEnvFilePathWith_UsesExplicitOverride(t *testing.T) {
+	path := resolveEnvFilePathWith("/tmp/custom.env", "/tmp/repo", "/tmp/repo/local-test-env/testconfig")
+	if path != "/tmp/custom.env" {
+		t.Fatalf("expected explicit env file path, got %q", path)
+	}
+}
+
+func TestResolveEnvFilePathWith_UsesExecutableDirEnvWhenRunFromRepoRoot(t *testing.T) {
+	root := t.TempDir()
+	exe := filepath.Join(root, "local-test-env", "testconfig")
+	exeDir := filepath.Dir(exe)
+	if err := os.MkdirAll(exeDir, 0o755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+	envPath := filepath.Join(exeDir, defaultEnvFileName)
+	if err := os.WriteFile(envPath, []byte("VMGATHER_PORT=27024\n"), 0o644); err != nil {
+		t.Fatalf("write env file failed: %v", err)
+	}
+
+	path := resolveEnvFilePathWith("", root, exe)
+	if path != envPath {
+		t.Fatalf("expected env file from executable dir %q, got %q", envPath, path)
+	}
+}
+
+func TestResolveEnvFilePathWith_FallsBackToRepoLocalTestEnv(t *testing.T) {
+	root := t.TempDir()
+	exe := filepath.Join(root, "bin", "testconfig")
+	if err := os.MkdirAll(filepath.Dir(exe), 0o755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+	envPath := filepath.Join(root, "local-test-env", defaultEnvFileName)
+	if err := os.MkdirAll(filepath.Dir(envPath), 0o755); err != nil {
+		t.Fatalf("mkdir local-test-env failed: %v", err)
+	}
+	if err := os.WriteFile(envPath, []byte("VM_SINGLE_NOAUTH_PORT=18428\n"), 0o644); err != nil {
+		t.Fatalf("write env file failed: %v", err)
+	}
+
+	path := resolveEnvFilePathWith("", root, exe)
+	if path != envPath {
+		t.Fatalf("expected env file from repo local-test-env %q, got %q", envPath, path)
+	}
+}
+
 func readEnvFile(t *testing.T, path string) map[string]string {
 	t.Helper()
 
