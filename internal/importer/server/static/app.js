@@ -1,4 +1,9 @@
 const JOB_CHUNK_SIZE_HINT = 512 * 1024;
+const DEFAULT_MAX_LABELS_OVERRIDE = 40;
+const JOB_POLL_INTERVAL_MS = 1200;
+const JOB_POLL_REQUEST_TIMEOUT_MS = 15000;
+const JOB_POLL_MAX_ERRORS = 5;
+const JOB_PROGRESS_STALL_MS = 45000;
 const dropZone = document.getElementById('dropZone');
 const bundleInput = document.getElementById('bundleFile');
 const statusPanel = document.getElementById('statusPanel');
@@ -11,16 +16,36 @@ let uploadStart = 0;
 let selectedBundleBytes = 0;
 let currentJobId = null;
 let jobPollTimer = null;
+let jobPollErrors = 0;
+let lastJobUpdateAtMs = 0;
+let lastJobUpdatedToken = '';
+let lastKnownJobId = null;
+let lastKnownJobSnapshot = null;
+let stallWarningShown = false;
 let uploadingBundle = false;
 let lastAnalysisSummary = null;
+let lastAnalysisMode = 'sample';
+let lastMaxLabelsLimit = 0;
+let lastMaxLabelsSource = 'unknown';
+let lastLabelSimulation = null;
+let recentProfiles = [];
+let protectedDropLabels = [];
+let selectedDropLabels = new Set();
+const MAX_LABEL_DROP_SUGGESTIONS = 5;
 
 document.addEventListener('DOMContentLoaded', () => {
+    protectedDropLabels = ['__name__', 'job', 'instance'];
     toggleAuthFields();
     toggleTenantInput();
     initializeUrlValidation();
     initializeMetricStepSelector();
+    initializeMaxLabelsOverrideInput();
+    ensureDefaultMaxLabelsOverride();
     initDropZone();
+    renderLabelManager([], 0);
+    loadRecentProfiles();
     refreshStartButton();
+    refreshPreflightControls();
 });
 
 function initDropZone() {
@@ -71,6 +96,340 @@ function updateFileHint(file) {
     fileHint.textContent = `Selected ${file.name} (${size})`;
     clearAnalysisResult();
     setAnalysisReady(false);
+    refreshPreflightControls();
+}
+
+function getManualMaxLabelsOverride() {
+    const input = document.getElementById('maxLabelsOverride');
+    if (!input) return DEFAULT_MAX_LABELS_OVERRIDE;
+    const raw = String(input.value || '').trim();
+    if (!raw) return DEFAULT_MAX_LABELS_OVERRIDE;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0 || !Number.isInteger(value)) return DEFAULT_MAX_LABELS_OVERRIDE;
+    return value;
+}
+
+function ensureDefaultMaxLabelsOverride(force = false) {
+    const input = document.getElementById('maxLabelsOverride');
+    if (!input) return;
+    const raw = String(input.value || '').trim();
+    if (force || !raw) {
+        input.value = String(DEFAULT_MAX_LABELS_OVERRIDE);
+    }
+}
+
+function clearMaxLabelsRisk() {
+    const risk = document.getElementById('maxLabelsRisk');
+    if (!risk) return;
+    risk.style.display = 'none';
+    risk.textContent = '';
+}
+
+function updateMaxLabelsRisk(summary = lastAnalysisSummary, maxLabelsLimit = lastMaxLabelsLimit, source = lastMaxLabelsSource) {
+    const risk = document.getElementById('maxLabelsRisk');
+    if (!risk) return;
+    if (!summary) {
+        clearMaxLabelsRisk();
+        return;
+    }
+    const selected = getSelectedDropLabels();
+    const impact = evaluateDropImpact(lastLabelSimulation, selected, maxLabelsLimit);
+    const maxSeen = Number(summary.max_labels_seen || 0);
+    const fallbackOverLimit = Number(summary.over_label_limit || 0);
+    const overLimit = impact ? impact.overSeries : fallbackOverLimit;
+    const pointsAtRisk = impact ? impact.overPoints : Number(summary.over_limit_points || 0);
+    const maxAfterDrop = impact ? impact.maxAfterDrop : maxSeen;
+    const simulationInfo = impact ? ` (sample series analyzed: ${impact.seriesCount}${impact.capped ? ', capped' : ''})` : '';
+    if (maxSeen <= 0) {
+        clearMaxLabelsRisk();
+        return;
+    }
+    if (source === 'unknown') {
+        risk.className = 'status error';
+        risk.style.display = 'block';
+        risk.textContent = `Target maxLabelsPerTimeseries is unknown. Preflight observed up to ${maxSeen} labels per series (projected max after current drop selection: ${maxAfterDrop}). Set optional override and rerun preflight (or Full collection) for precise drop diagnostics before import.${simulationInfo}`;
+        return;
+    }
+    if (maxLabelsLimit > 0 && overLimit > 0) {
+        const extra = impact ? impact.minAdditionalDrops : 0;
+        const suggestion = impact && impact.candidateLabels.length
+            ? ` Candidate labels to drop first: ${impact.candidateLabels.join(', ')}.`
+            : '';
+        risk.className = 'status error';
+        risk.style.display = 'block';
+        risk.textContent = `Potential drops detected: projected max labels ${maxAfterDrop} exceeds limit ${maxLabelsLimit}. Over-limit series in sample: ${overLimit}; estimated sampled points at risk: ${pointsAtRisk}.${extra > 0 ? ` Need at least ${extra} more label drop(s) on worst affected series.` : ''}${suggestion}${simulationInfo}`;
+        return;
+    }
+    if (maxLabelsLimit > 0) {
+        risk.className = 'status success';
+        risk.style.display = 'block';
+        risk.textContent = `Current drop-label selection keeps sampled series within maxLabelsPerTimeseries=${maxLabelsLimit}. Projected max labels after drop: ${maxAfterDrop}.${simulationInfo}`;
+        return;
+    }
+    clearMaxLabelsRisk();
+}
+
+function initializeMaxLabelsOverrideInput() {
+    const input = document.getElementById('maxLabelsOverride');
+    if (!input) return;
+    input.addEventListener('input', () => {
+        const raw = String(input.value || '').trim();
+        if (!raw) {
+            input.setCustomValidity('');
+        } else {
+            const value = Number(raw);
+            if (!Number.isFinite(value) || value <= 0 || !Number.isInteger(value)) {
+                input.setCustomValidity('Enter a positive integer');
+            } else {
+                input.setCustomValidity('');
+            }
+        }
+        if (lastAnalysisSummary) {
+            updateMaxLabelsRisk(lastAnalysisSummary, lastMaxLabelsLimit, lastMaxLabelsSource);
+        } else {
+            clearMaxLabelsRisk();
+        }
+    });
+    input.addEventListener('blur', () => {
+        ensureDefaultMaxLabelsOverride();
+        if (lastAnalysisSummary) {
+            updateMaxLabelsRisk(lastAnalysisSummary, lastMaxLabelsLimit, lastMaxLabelsSource);
+        }
+    });
+}
+
+function normalizeDropLabels(labels) {
+    if (!Array.isArray(labels)) return [];
+    const seen = new Set();
+    const result = [];
+    labels.forEach(label => {
+        const value = String(label || '').trim();
+        if (!value || seen.has(value)) return;
+        seen.add(value);
+        result.push(value);
+    });
+    result.sort((a, b) => a.localeCompare(b));
+    return result;
+}
+
+function getSelectedDropLabels() {
+    return normalizeDropLabels(Array.from(selectedDropLabels));
+}
+
+function setSelectedDropLabels(labels) {
+    selectedDropLabels = new Set(normalizeDropLabels(labels).filter(label => !protectedDropLabels.includes(label)));
+}
+
+function decodeBase64Raw(input) {
+    if (!input) return new Uint8Array();
+    const normalized = String(input).replace(/-/g, '+').replace(/_/g, '/');
+    const padding = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
+    const binary = atob(normalized + padding);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+}
+
+function hasBit(bitset, index) {
+    if (!bitset || index < 0) return false;
+    const byteIndex = Math.floor(index / 8);
+    const bitIndex = index % 8;
+    if (byteIndex >= bitset.length) return false;
+    return (bitset[byteIndex] & (1 << bitIndex)) !== 0;
+}
+
+function buildLabelSimulation(summary = {}) {
+    const universeRaw = Array.isArray(summary.label_universe) ? summary.label_universe : [];
+    const universe = universeRaw.map(item => String(item || '').trim()).filter(Boolean);
+    const encodedBitsets = Array.isArray(summary.series_label_bitsets) ? summary.series_label_bitsets : [];
+    if (!universe.length || !encodedBitsets.length) {
+        return null;
+    }
+    const labelCountsRaw = Array.isArray(summary.series_label_counts) ? summary.series_label_counts : [];
+    const pointCountsRaw = Array.isArray(summary.series_point_counts) ? summary.series_point_counts : [];
+    const seriesCount = Math.min(encodedBitsets.length, labelCountsRaw.length);
+    if (seriesCount <= 0) {
+        return null;
+    }
+
+    const bitsets = new Array(seriesCount);
+    for (let i = 0; i < seriesCount; i += 1) {
+        try {
+            bitsets[i] = decodeBase64Raw(encodedBitsets[i]);
+        } catch (err) {
+            console.debug('Failed to decode label bitset', err);
+            return null;
+        }
+    }
+
+    const labelCounts = labelCountsRaw.slice(0, seriesCount).map(value => Number(value || 0));
+    const pointCounts = pointCountsRaw.slice(0, seriesCount).map(value => Number(value || 0));
+    while (pointCounts.length < seriesCount) pointCounts.push(0);
+
+    const indexByName = new Map();
+    universe.forEach((name, idx) => indexByName.set(name, idx));
+
+    return {
+        universe,
+        indexByName,
+        bitsets,
+        labelCounts,
+        pointCounts,
+        seriesCount,
+        capped: Boolean(summary.simulation_series_capped),
+    };
+}
+
+function evaluateDropImpact(simulation, selectedLabels, maxLabelsLimit) {
+    if (!simulation) return null;
+    const selectedIndexes = [];
+    selectedLabels.forEach(label => {
+        const idx = simulation.indexByName.get(label);
+        if (typeof idx === 'number') selectedIndexes.push(idx);
+    });
+
+    let overSeries = 0;
+    let overPoints = 0;
+    let maxAfterDrop = 0;
+    let maxExcess = 0;
+    const overSeriesIndexes = [];
+
+    for (let i = 0; i < simulation.seriesCount; i += 1) {
+        const bitset = simulation.bitsets[i];
+        const original = Number(simulation.labelCounts[i] || 0);
+        let dropped = 0;
+        for (let j = 0; j < selectedIndexes.length; j += 1) {
+            if (hasBit(bitset, selectedIndexes[j])) dropped += 1;
+        }
+        const after = Math.max(0, original - dropped);
+        if (after > maxAfterDrop) maxAfterDrop = after;
+        if (maxLabelsLimit > 0 && after > maxLabelsLimit) {
+            const excess = after - maxLabelsLimit;
+            overSeries += 1;
+            overPoints += Number(simulation.pointCounts[i] || 0);
+            overSeriesIndexes.push(i);
+            if (excess > maxExcess) maxExcess = excess;
+        }
+    }
+
+    const selectedIndexSet = new Set(selectedIndexes);
+    const protectedIndexSet = new Set(
+        normalizeDropLabels(protectedDropLabels)
+            .map(label => simulation.indexByName.get(label))
+            .filter(idx => typeof idx === 'number'),
+    );
+    const candidateScores = new Map();
+    for (let k = 0; k < overSeriesIndexes.length; k += 1) {
+        const seriesIndex = overSeriesIndexes[k];
+        const bitset = simulation.bitsets[seriesIndex];
+        for (let idx = 0; idx < simulation.universe.length; idx += 1) {
+            if (!hasBit(bitset, idx) || selectedIndexSet.has(idx) || protectedIndexSet.has(idx)) {
+                continue;
+            }
+            candidateScores.set(idx, (candidateScores.get(idx) || 0) + 1);
+        }
+    }
+    const candidateLabels = Array.from(candidateScores.entries())
+        .sort((a, b) => {
+            if (a[1] === b[1]) {
+                const left = simulation.universe[a[0]] || '';
+                const right = simulation.universe[b[0]] || '';
+                return left.localeCompare(right);
+            }
+            return b[1] - a[1];
+        })
+        .slice(0, MAX_LABEL_DROP_SUGGESTIONS)
+        .map(([idx]) => simulation.universe[idx]);
+
+    return {
+        seriesCount: simulation.seriesCount,
+        overSeries,
+        overPoints,
+        maxAfterDrop,
+        minAdditionalDrops: Math.max(0, maxExcess),
+        candidateLabels,
+        capped: simulation.capped,
+    };
+}
+
+function renderLabelManager(labelStats = [], totalLabels = 0) {
+    const details = document.getElementById('labelManagerDetails');
+    const summary = document.getElementById('labelManagerSummary');
+    const rows = document.getElementById('labelManagerRows');
+    const hint = document.getElementById('labelManagerHint');
+    if (!details || !summary || !rows || !hint) return;
+
+    const normalizedStats = Array.isArray(labelStats) ? labelStats : [];
+    const shownLabels = normalizedStats.length;
+    const detectedLabels = Math.max(shownLabels, Number(totalLabels || 0));
+    const selectedLabels = getSelectedDropLabels();
+    const selectedCount = selectedLabels.length;
+    if (!normalizedStats.length) {
+        details.open = false;
+        summary.textContent = selectedCount > 0
+            ? `Label management (drop selected: ${selectedCount}${detectedLabels > 0 ? `; total labels: ${detectedLabels}` : ''})`
+            : 'Label management (optional)';
+        rows.innerHTML = selectedCount > 0
+            ? `<div class="input-hint">Selected drop labels: <code>${selectedLabels.join('</code>, <code>')}</code>.</div><div class="input-hint">Run preflight to preview all detected labels and tune selection.</div>`
+            : '<div class="input-hint">Run preflight to see all detected labels and choose what to drop before import.</div>';
+        let hintText = protectedDropLabels.length
+            ? `Protected labels (always kept): ${protectedDropLabels.join(', ')}.`
+            : 'Protected labels are always kept.';
+        if (detectedLabels > 0) {
+            hintText += ` Detected labels in sample: ${detectedLabels}.`;
+        }
+        hint.textContent = hintText;
+        return;
+    }
+
+    setSelectedDropLabels(Array.from(selectedDropLabels));
+    const selectedNow = getSelectedDropLabels();
+    const selectedNowCount = selectedNow.length;
+    const visibleSelected = normalizedStats.filter(item => selectedDropLabels.has(String(item.name || '').trim())).length;
+    const hiddenSelected = Math.max(0, selectedNowCount - visibleSelected);
+    summary.textContent = selectedNowCount > 0
+        ? `Label management (drop selected: ${selectedNowCount}; total labels: ${detectedLabels})`
+        : `Label management (total labels: ${detectedLabels})`;
+
+    rows.innerHTML = normalizedStats.map(item => {
+        const label = String(item.name || '');
+        const count = Number(item.count || 0);
+        const isProtected = protectedDropLabels.includes(label);
+        const checked = !isProtected && selectedDropLabels.has(label);
+        return `
+            <label style="display:flex; align-items:center; gap:8px; margin-bottom:6px; opacity:${isProtected ? 0.7 : 1};">
+                <input type="checkbox" data-drop-label="${label}" ${checked ? 'checked' : ''} ${isProtected ? 'disabled' : ''} style="width:auto;">
+                <code>${label}</code>
+                <span class="input-hint">seen in ${count} sample series${isProtected ? ' · protected' : ''}</span>
+            </label>
+        `;
+    }).join('');
+
+    rows.querySelectorAll('input[data-drop-label]').forEach(input => {
+        input.addEventListener('change', event => {
+            const label = event.target.getAttribute('data-drop-label');
+            if (!label || protectedDropLabels.includes(label)) return;
+            if (event.target.checked) {
+                selectedDropLabels.add(label);
+            } else {
+                selectedDropLabels.delete(label);
+            }
+            renderLabelManager(normalizedStats, detectedLabels);
+            updateMaxLabelsRisk(lastAnalysisSummary, lastMaxLabelsLimit, lastMaxLabelsSource);
+        });
+    });
+
+    const protectedHint = protectedDropLabels.length
+        ? `Protected labels (always kept): ${protectedDropLabels.join(', ')}.`
+        : 'Protected labels are always kept.';
+    const totalHint = detectedLabels > shownLabels
+        ? ` Showing ${shownLabels} labels out of ${detectedLabels} detected labels in sample.`
+        : ` Showing all ${shownLabels} detected labels in sample.`;
+    hint.textContent = hiddenSelected > 0
+        ? `${protectedHint} ${hiddenSelected} selected label(s) are not in the current preflight list but will still be dropped.${totalHint}`
+        : `${protectedHint}${totalHint}`;
 }
 
 function resetForm() {
@@ -93,10 +452,17 @@ function resetForm() {
     fileHint.textContent = '';
     document.getElementById('vmUrlHint').textContent = 'Enter a VictoriaMetrics endpoint.';
     document.getElementById('vmUrlHint').classList.remove('success', 'error');
+    ensureDefaultMaxLabelsOverride(true);
     totalBatches = 0;
+    setSelectedDropLabels([]);
+    renderLabelManager([], 0);
     setAnalysisReady(false);
     refreshStartButton();
-    clearResumeCTA();
+    refreshPreflightControls();
+    clearStatusActions();
+    lastKnownJobId = null;
+    lastKnownJobSnapshot = null;
+    stallWarningShown = false;
 }
 
 function toggleAuthFields() {
@@ -221,6 +587,133 @@ function getConnectionConfig() {
     };
 }
 
+function formatRecentProfileLabel(profile) {
+    const endpoint = profile.endpoint || 'unknown-endpoint';
+    const tenant = profile.tenant_id ? `tenant ${profile.tenant_id}` : 'single-tenant';
+    const auth = profile.auth_type || 'none';
+    let host = endpoint;
+    try {
+        const candidate = PROTOCOL_REGEX.test(endpoint) ? endpoint : `http://${endpoint}`;
+        host = new URL(candidate).host;
+    } catch (err) {
+        host = endpoint;
+    }
+    const when = profile.last_used_at ? new Date(profile.last_used_at).toLocaleString() : '';
+    return when ? `${host} · ${tenant} · ${auth} · ${when}` : `${host} · ${tenant} · ${auth}`;
+}
+
+function renderRecentProfiles() {
+    const select = document.getElementById('recentProfilesSelect');
+    if (!select) return;
+
+    const currentValue = select.value;
+    select.innerHTML = '';
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = recentProfiles.length ? 'Select recent profile…' : 'No recent profiles yet';
+    select.appendChild(placeholder);
+
+    recentProfiles.forEach(profile => {
+        const option = document.createElement('option');
+        option.value = profile.id || '';
+        option.textContent = formatRecentProfileLabel(profile);
+        select.appendChild(option);
+    });
+
+    if (currentValue && recentProfiles.some(profile => profile.id === currentValue)) {
+        select.value = currentValue;
+    } else {
+        select.value = '';
+    }
+}
+
+async function loadRecentProfiles() {
+    try {
+        const resp = await fetch('/api/profiles/recent');
+        if (!resp.ok) {
+            return;
+        }
+        const payload = await resp.json();
+        recentProfiles = Array.isArray(payload.profiles) ? payload.profiles : [];
+        renderRecentProfiles();
+    } catch (err) {
+        console.debug('Failed to load recent profiles', err);
+    }
+}
+
+function applySelectedRecentProfile() {
+    const select = document.getElementById('recentProfilesSelect');
+    if (!select || !select.value) return;
+    const profile = recentProfiles.find(candidate => candidate.id === select.value);
+    if (!profile) return;
+
+    const vmUrl = document.getElementById('vmUrl');
+    if (vmUrl) {
+        vmUrl.value = profile.endpoint || '';
+        vmUrl.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    const enableTenant = document.getElementById('enableTenant');
+    if (enableTenant) {
+        enableTenant.checked = Boolean(profile.tenant_id);
+        toggleTenantInput();
+    }
+    const tenantInput = document.getElementById('tenantId');
+    if (tenantInput) {
+        tenantInput.value = profile.tenant_id || '';
+    }
+
+    const authTypeInput = document.getElementById('authType');
+    if (authTypeInput) {
+        authTypeInput.value = profile.auth_type || 'none';
+        toggleAuthFields();
+    }
+
+    if ((profile.auth_type || 'none') === 'basic') {
+        const username = document.getElementById('username');
+        const password = document.getElementById('password');
+        if (username) username.value = profile.username || '';
+        if (password) password.value = '';
+    } else if ((profile.auth_type || 'none') === 'bearer') {
+        const token = document.getElementById('token');
+        if (token) token.value = '';
+    } else if ((profile.auth_type || 'none') === 'header') {
+        const headerName = document.getElementById('headerName');
+        const headerValue = document.getElementById('headerValue');
+        if (headerName) headerName.value = profile.custom_header_name || '';
+        if (headerValue) headerValue.value = '';
+    }
+
+    const skipTls = document.getElementById('skipTls');
+    if (skipTls) {
+        skipTls.checked = Boolean(profile.skip_tls_verify);
+    }
+
+    const metricStep = document.getElementById('metricStep');
+    if (metricStep) {
+        const targetStep = String(profile.metric_step_seconds || '');
+        const hasOption = Array.from(metricStep.options).some(option => option.value === targetStep);
+        metricStep.value = hasOption ? targetStep : 'auto';
+        applyRecommendedMetricStep(false);
+    }
+
+    const shiftInput = document.getElementById('timeShiftMinutes');
+    if (shiftInput) {
+        shiftInput.value = String(Math.round((profile.time_shift_ms || 0) / (60 * 1000)));
+    }
+    const maxLabelsOverride = document.getElementById('maxLabelsOverride');
+    if (maxLabelsOverride) {
+        maxLabelsOverride.value = profile.max_labels_override ? String(profile.max_labels_override) : String(DEFAULT_MAX_LABELS_OVERRIDE);
+    }
+    setSelectedDropLabels(profile.drop_labels || []);
+    renderLabelManager(lastAnalysisSummary?.label_stats || [], lastAnalysisSummary?.total_labels || 0);
+
+    connectionValid = false;
+    refreshStartButton();
+    showStatus('Profile applied. Re-enter secret fields and run Test Connection.', false);
+}
+
 async function testConnection() {
     const btn = document.getElementById('testConnectionBtn');
     const label = document.getElementById('testBtnText');
@@ -270,6 +763,7 @@ async function testConnection() {
             ? 'Connection successful (TLS verification skipped for self-signed cert)'
             : 'Connection successful! Uploads can start.';
         connectionValid = true;
+        await loadRecentProfiles();
         refreshStartButton();
     } catch (err) {
         result.classList.remove('success');
@@ -298,6 +792,8 @@ function serializeConfig() {
         batch_window_seconds: getBatchWindowSeconds(metricStep),
         drop_old: true,
         time_shift_ms: (Number(document.getElementById('timeShiftMinutes')?.value || 0) || 0) * 60 * 1000,
+        max_labels_override: getManualMaxLabelsOverride(),
+        drop_labels: getSelectedDropLabels(),
     };
 }
 
@@ -319,6 +815,7 @@ function startImport() {
     }
 
     selectedBundleBytes = file.size;
+    clearStatusActions();
     lockStartButton('Importing…');
     showStatus('Uploading bundle…', false);
     showImportProgressPanel();
@@ -353,9 +850,13 @@ function uploadBundle(file, config) {
         }
 
         if (xhr.status >= 200 && xhr.status < 300 && payload.job_id) {
+            loadRecentProfiles();
+            showImportProgressPanel(false);
             startJobPolling(payload.job_id, payload.job || null);
         } else {
+            loadRecentProfiles();
             showStatus(payload.error || 'Import failed', true);
+            renderStatusActions(lastKnownJobSnapshot || { id: currentJobId }, true);
             hideImportProgressPanel();
             unlockStartButton();
         }
@@ -363,6 +864,8 @@ function uploadBundle(file, config) {
 
     xhr.onerror = () => {
         showStatus('Network error while uploading bundle.', true);
+        renderStatusActions(lastKnownJobSnapshot || { id: currentJobId }, true);
+        loadRecentProfiles();
         hideImportProgressPanel();
         uploadingBundle = false;
         unlockStartButton();
@@ -380,7 +883,11 @@ function clearAnalysisResult() {
     const shiftSummary = document.getElementById('shiftSummary');
     const shiftNow = document.getElementById('shiftToNowBtn');
     const retentionInfo = document.getElementById('retentionInfo');
+    lastAnalysisMode = 'sample';
     lastAnalysisSummary = null;
+    lastMaxLabelsLimit = 0;
+    lastMaxLabelsSource = 'unknown';
+    lastLabelSimulation = null;
     if (analysisResult) {
         analysisResult.classList.remove('error');
         analysisResult.textContent = 'Preflight is optional but recommended: checks timestamps vs retention, validates JSONL, and estimates drops.';
@@ -405,6 +912,9 @@ function clearAnalysisResult() {
     if (retentionInfo) {
         retentionInfo.textContent = 'Fetched from target during preflight; shown in UTC.';
     }
+    setSelectedDropLabels([]);
+    renderLabelManager([], 0);
+    clearMaxLabelsRisk();
     setShiftMinutes(0);
     if (shiftNow) {
         shiftNow.style.display = 'none';
@@ -425,13 +935,49 @@ function renderAnalysisResult(data) {
         return;
     }
     const summary = data.summary || {};
+    lastAnalysisMode = String(data.analysis_mode || 'sample');
     lastAnalysisSummary = summary;
+    lastMaxLabelsLimit = Number(data.max_labels_limit || summary.max_labels_limit || 0);
+    lastMaxLabelsSource = String(data.max_labels_source || (lastMaxLabelsLimit > 0 ? 'metrics' : 'unknown'));
+    lastLabelSimulation = buildLabelSimulation(summary);
     const warnings = data.warnings || [];
+    protectedDropLabels = normalizeDropLabels(data.protected_labels || protectedDropLabels);
+    if (!protectedDropLabels.length) {
+        protectedDropLabels = ['__name__', 'job', 'instance'];
+    }
+    const maxLabelsLimit = lastMaxLabelsLimit;
     const rows = [];
     if (summary.start) {
         rows.push(`<div><strong>Time range:</strong> ${formatRFC(summary.start)} → ${formatRFC(summary.end || summary.start)}</div>`);
     }
     rows.push(`<div><strong>Points:</strong> ${summary.points || 0}, skipped: ${summary.skipped_lines || 0}, dropped old: ${summary.dropped_old || 0}</div>`);
+    const scannedLines = Number(summary.scanned_lines || 0);
+    const sampleLimit = Number(summary.sample_limit || 0);
+    const sampleCut = Boolean(summary.sample_cut);
+    if (lastAnalysisMode === 'full') {
+        rows.push(`<div><strong>Preflight mode:</strong> full collection (${scannedLines} lines scanned).</div>`);
+    } else {
+        rows.push(`<div><strong>Preflight mode:</strong> sample (${scannedLines} lines scanned${sampleLimit > 0 ? `, limit=${sampleLimit}` : ''}${sampleCut ? ', truncated' : ''}).</div>`);
+    }
+
+    if (maxLabelsLimit > 0) {
+        rows.push(`<div><strong>Label limit:</strong> target maxLabelsPerTimeseries=${maxLabelsLimit}${lastMaxLabelsSource === 'manual' ? ' (manual override)' : ''}; analyzed lines=${summary.analyzed_lines || 0}; over limit=${summary.over_label_limit || 0}; max seen=${summary.max_labels_seen || 0}</div>`);
+    } else {
+        rows.push(`<div><strong>Label limit:</strong> target maxLabelsPerTimeseries=unknown; analyzed lines=${summary.analyzed_lines || 0}; max seen=${summary.max_labels_seen || 0}</div>`);
+    }
+    const impact = evaluateDropImpact(lastLabelSimulation, getSelectedDropLabels(), maxLabelsLimit);
+    if (impact && maxLabelsLimit > 0) {
+        const mode = impact.overSeries > 0 ? 'risk' : 'ok';
+        rows.push(`<div><strong>Drop impact (${mode}):</strong> over-limit sample series=${impact.overSeries}/${impact.seriesCount}; projected max labels=${impact.maxAfterDrop}; estimated sampled points at risk=${impact.overPoints}${impact.minAdditionalDrops > 0 ? `; at least ${impact.minAdditionalDrops} more label drop(s) needed on worst affected series` : ''}${impact.capped ? '; sample set capped' : ''}.</div>`);
+    }
+    if ((summary.over_label_limit || 0) > 0 || (impact && impact.overSeries > 0)) {
+        const selectedDropCount = getSelectedDropLabels().length;
+        rows.push(`<div><strong>Action:</strong> ${selectedDropCount > 0 ? `drop_labels currently selected: ${selectedDropCount}.` : 'select labels in “Label management” below to reduce label count before import.'}</div>`);
+    }
+    if ((summary.total_labels || 0) > 0) {
+        const shownLabels = Array.isArray(summary.label_stats) ? summary.label_stats.length : 0;
+        rows.push(`<div><strong>Labels:</strong> detected in sample=${summary.total_labels}; shown in manager=${shownLabels}</div>`);
+    }
     if (summary.examples && summary.examples.length) {
         rows.push(`<div><strong>Example:</strong> <code>${formatSeriesExample(summary.examples[0])}</code></div>`);
     }
@@ -444,14 +990,20 @@ function renderAnalysisResult(data) {
     analysisResult.textContent = warnings.length ? 'Preflight: issues detected.' : 'Preflight complete.';
     analysisDetails.innerHTML = rows.join('');
     analysisDetails.style.display = 'block';
+    renderLabelManager(summary.label_stats || [], summary.total_labels || 0);
+    updateMaxLabelsRisk(summary, maxLabelsLimit, lastMaxLabelsSource);
+    const labelManager = document.getElementById('labelManagerDetails');
+    if (labelManager && ((summary.over_label_limit || 0) > 0 || getSelectedDropLabels().length > 0)) {
+        labelManager.open = true;
+    }
     if (retentionInfo) {
         if (typeof data.retention_cutoff === 'number' && data.retention_cutoff > 0) {
             const cutoffDate = new Date(data.retention_cutoff);
             const approxWindowHours = Math.max(1, Math.round((Date.now() - data.retention_cutoff) / 3600000));
             const days = (approxWindowHours / 24).toFixed(1);
-            retentionInfo.textContent = `Retention (from target): ~${days} days; cutoff ≈ ${cutoffDate.toISOString()} (UTC).`;
+            retentionInfo.textContent = `Retention (from target): ~${days} days; cutoff ≈ ${cutoffDate.toISOString()} (UTC).${maxLabelsLimit > 0 ? ` maxLabelsPerTimeseries=${maxLabelsLimit}.` : ''}`;
         } else {
-            retentionInfo.textContent = 'Retention unknown (target did not return tsdb status).';
+            retentionInfo.textContent = `Retention unknown (target did not return tsdb status).${maxLabelsLimit > 0 ? ` maxLabelsPerTimeseries=${maxLabelsLimit}.` : ''}`;
         }
     }
     if (shiftBtn) {
@@ -491,11 +1043,13 @@ function renderAnalysisResult(data) {
     }
     updateShiftSummary();
     setAnalysisReady(true);
+    refreshPreflightControls();
 }
 
-async function analyzeBundle() {
+async function analyzeBundle(fullCollection = false) {
     const file = bundleInput.files[0];
     const analysisResult = document.getElementById('analysisResult');
+    const fullBtn = document.getElementById('fullPreflightBtn');
     if (!analysisResult) return;
     if (!file) {
         analysisResult.textContent = 'Select a bundle file first.';
@@ -505,6 +1059,10 @@ async function analyzeBundle() {
     analysisResult.classList.remove('error');
     analysisResult.innerHTML = '<span class="loading-spinner"></span> Validating bundle…';
     setAnalysisLoader(true);
+    if (fullBtn) {
+        fullBtn.disabled = true;
+        fullBtn.textContent = fullCollection ? 'Running full collection…' : 'Full collection';
+    }
     const details = document.getElementById('analysisDetails');
     if (details) {
         details.style.display = 'none';
@@ -516,9 +1074,12 @@ async function analyzeBundle() {
     const form = new FormData();
     form.append('bundle', file);
     form.append('config', JSON.stringify(serializeConfig()));
+    if (fullCollection) {
+        form.append('full_collection', '1');
+    }
 
     try {
-        analysisResult.textContent = 'Unpacking and analyzing…';
+        analysisResult.textContent = fullCollection ? 'Running full collection analysis…' : 'Unpacking and analyzing…';
         const resp = await fetch('/api/analyze', { method: 'POST', body: form });
         const data = await resp.json();
         if (!resp.ok) {
@@ -529,8 +1090,11 @@ async function analyzeBundle() {
         analysisResult.classList.add('error');
         analysisResult.textContent = err.message || 'Analysis failed';
         lastAnalysisSummary = null;
+        lastLabelSimulation = null;
     } finally {
+        loadRecentProfiles();
         setAnalysisLoader(false);
+        refreshPreflightControls();
     }
 }
 
@@ -566,6 +1130,7 @@ function setAnalysisReady(ready) {
     if (shiftNow) shiftNow.disabled = !ready;
     if (shiftBtn) shiftBtn.disabled = !ready;
     refreshStartButton();
+    refreshPreflightControls();
 }
 
 function refreshStartButton() {
@@ -578,6 +1143,14 @@ function setAnalysisLoader(show) {
     const loader = document.getElementById('analysisLoader');
     if (!loader) return;
     loader.style.display = show ? 'block' : 'none';
+}
+
+function refreshPreflightControls() {
+    const fullBtn = document.getElementById('fullPreflightBtn');
+    if (!fullBtn) return;
+    const hasFile = bundleInput && bundleInput.files && bundleInput.files.length > 0;
+    fullBtn.disabled = !hasFile || uploadingBundle;
+    fullBtn.textContent = 'Full collection';
 }
 
 function applySuggestedShift() {
@@ -665,25 +1238,29 @@ function renderImportResult(payload) {
             html += `<pre>${verification.query}</pre>`;
         }
     }
+    if ((summary.over_label_limit || 0) > 0 && (summary.max_labels_limit || 0) > 0) {
+        html += `<div><strong>Warning:</strong> ${summary.over_label_limit} series were sent with labels above maxLabelsPerTimeseries=${summary.max_labels_limit} (max seen=${summary.max_labels_seen || 'n/a'}). Target may drop them.</div>`;
+    }
 
     showStatus(html, false, true, true);
 }
 
-function showImportProgressPanel() {
+function showImportProgressPanel(resetValues = true) {
     const panel = document.getElementById('importProgressPanel');
     if (!panel) return;
     panel.classList.remove('hidden');
     panel.style.display = 'block';
-
-    document.getElementById('importProgressPercent').textContent = '0%';
-    document.getElementById('importProgressFill').style.width = '0%';
-    document.getElementById('importProgressEta').textContent = 'Uploading bundle…';
-    document.getElementById('importStage').textContent = 'Uploading bundle…';
-    document.getElementById('importProgressMetrics').textContent = 'Preparing upload…';
-    document.getElementById('importProgressSummary').textContent = `${formatBytes(selectedBundleBytes)} compressed bundle (inflated size pending…)`;
-    document.getElementById('importBatchWindow').textContent = `Chunk size: ${formatBytes(JOB_CHUNK_SIZE_HINT)}`;
-    document.getElementById('importProgressBatches').textContent = '0 / 0 chunks';
-    document.getElementById('importProgressEtaDetail').textContent = '';
+    if (resetValues) {
+        document.getElementById('importProgressPercent').textContent = '0%';
+        document.getElementById('importProgressFill').style.width = '0%';
+        document.getElementById('importProgressEta').textContent = 'Uploading bundle…';
+        document.getElementById('importStage').textContent = 'Uploading bundle…';
+        document.getElementById('importProgressMetrics').textContent = 'Preparing upload…';
+        document.getElementById('importProgressSummary').textContent = `${formatBytes(selectedBundleBytes)} compressed bundle (inflated size pending…)`;
+        document.getElementById('importBatchWindow').textContent = `Chunk size: ${formatBytes(JOB_CHUNK_SIZE_HINT)}`;
+        document.getElementById('importProgressBatches').textContent = '0 / 0 chunks';
+        updateProgressDebugDetail('');
+    }
 }
 
 function hideImportProgressPanel() {
@@ -766,6 +1343,21 @@ function showStatus(text, isError = false, success = false, asHTML = false) {
     }
 }
 
+function updateProgressDebugDetail(text) {
+    const debug = document.getElementById('importProgressEtaDetail');
+    if (!debug) return;
+    debug.textContent = text || '';
+}
+
+function formatJobSnapshot(job) {
+    if (!job) return '';
+    const updated = job.updated_at ? new Date(job.updated_at).toLocaleTimeString() : 'n/a';
+    const chunks = job.chunks_total
+        ? `${job.chunks_completed || 0}/${job.chunks_total}`
+        : `${job.chunks_completed || 0}`;
+    return `Job ${job.id || 'unknown'} · state=${job.state || '-'} · stage=${job.stage || '-'} · chunks=${chunks} · updated=${updated}`;
+}
+
 function formatBytes(bytes) {
     if (!bytes && bytes !== 0) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB'];
@@ -843,15 +1435,44 @@ function formatSeriesExample(example = {}) {
 function startJobPolling(jobId, snapshot) {
     stopJobPolling();
     currentJobId = jobId;
+    lastKnownJobId = jobId;
+    jobPollErrors = 0;
+    lastJobUpdateAtMs = Date.now();
+    lastJobUpdatedToken = '';
+    stallWarningShown = false;
+    updateProgressDebugDetail('');
     if (snapshot) {
+        lastKnownJobSnapshot = snapshot;
         updateJobProgressUI(snapshot);
+        if (snapshot.updated_at) {
+            lastJobUpdatedToken = snapshot.updated_at;
+        }
     }
     const poll = async () => {
         if (!currentJobId) return;
         try {
-            const resp = await fetch(`/api/import/status?id=${encodeURIComponent(jobId)}`);
-            if (!resp.ok) return;
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), JOB_POLL_REQUEST_TIMEOUT_MS);
+            let resp;
+            try {
+                resp = await fetch(`/api/import/status?id=${encodeURIComponent(jobId)}`, {
+                    signal: controller.signal,
+                    cache: 'no-store',
+                });
+            } finally {
+                clearTimeout(timeout);
+            }
+            if (!resp.ok) {
+                throw new Error(`status polling returned HTTP ${resp.status}`);
+            }
             const job = await resp.json();
+            lastKnownJobSnapshot = job;
+            jobPollErrors = 0;
+            if (job.updated_at && job.updated_at !== lastJobUpdatedToken) {
+                lastJobUpdatedToken = job.updated_at;
+                lastJobUpdateAtMs = Date.now();
+                stallWarningShown = false;
+            }
             updateJobProgressUI(job);
             if (job.state === 'completed') {
                 renderImportResult({
@@ -863,17 +1484,44 @@ function startJobPolling(jobId, snapshot) {
                 stopJobPolling();
                 unlockStartButton();
             } else if (job.state === 'failed') {
-                showStatus(job.error || 'Import failed', true);
+                const chunkText = job.chunks_total
+                    ? ` (${job.chunks_completed || 0}/${job.chunks_total} chunks)`
+                    : '';
+                const message = job.resume_ready
+                    ? `${job.error || 'Import failed'}${chunkText}. You can resume from the saved offset.`
+                    : (job.error || 'Import failed');
+                showStatus(message, true);
+                renderStatusActions(job, true);
                 stopJobPolling();
-                hideImportProgressPanel();
                 unlockStartButton();
+            } else if (job.state === 'running') {
+                const stalledForMs = Date.now() - lastJobUpdateAtMs;
+                if (stalledForMs > JOB_PROGRESS_STALL_MS && !stallWarningShown) {
+                    const stalledSec = Math.round(stalledForMs / 1000);
+                    showStatus(`Import appears stalled: no progress update for ${stalledSec}s. Use Retry Status to re-check job state or Resume if backend marked it resumable.`, true);
+                    renderStatusActions(job, true);
+                    stallWarningShown = true;
+                }
             }
         } catch (err) {
             console.error('Job polling failed', err);
+            jobPollErrors += 1;
+            const errorMessage = err && err.name === 'AbortError'
+                ? `status polling timeout after ${Math.round(JOB_POLL_REQUEST_TIMEOUT_MS / 1000)}s`
+                : (err?.message || 'unknown polling error');
+            updateProgressDebugDetail(`Polling errors: ${jobPollErrors}/${JOB_POLL_MAX_ERRORS}. Last error: ${errorMessage}`);
+            if (jobPollErrors >= JOB_POLL_MAX_ERRORS) {
+                const snapshotHint = formatJobSnapshot(lastKnownJobSnapshot);
+                const suffix = snapshotHint ? ` Last known: ${snapshotHint}.` : '';
+                showStatus(`Lost connection to import job after ${JOB_POLL_MAX_ERRORS} polling errors (${errorMessage}). Retry Status to continue monitoring.${suffix}`, true);
+                renderStatusActions(lastKnownJobSnapshot || { id: jobId }, true);
+                stopJobPolling();
+                unlockStartButton();
+            }
         }
     };
     poll();
-    jobPollTimer = setInterval(poll, 1200);
+    jobPollTimer = setInterval(poll, JOB_POLL_INTERVAL_MS);
 }
 
 function stopJobPolling() {
@@ -882,10 +1530,14 @@ function stopJobPolling() {
         jobPollTimer = null;
     }
     currentJobId = null;
+    jobPollErrors = 0;
+    lastJobUpdateAtMs = 0;
+    lastJobUpdatedToken = '';
 }
 
 function updateJobProgressUI(job) {
     if (!job || uploadingBundle) return;
+    lastKnownJobSnapshot = job;
     const percent = Math.max(0, Math.min(100, Math.round(job.percent || 0)));
     const percentLabel = document.getElementById('importProgressPercent');
     if (percentLabel) percentLabel.textContent = `${percent}%`;
@@ -915,7 +1567,8 @@ function updateJobProgressUI(job) {
         metricsEl.textContent = job.remote_path || 'Streaming chunks…';
     }
 
-    renderResumeCTA(job);
+    updateProgressDebugDetail(formatJobSnapshot(job));
+    renderStatusActions(job, false);
 }
 
 function formatStage(stage) {
@@ -947,41 +1600,97 @@ function unlockStartButton() {
     startButton.textContent = 'Start Import';
 }
 
-function renderResumeCTA(job) {
+function renderStatusActions(job, showRetryStatus = false) {
     if (!statusPanel) return;
-    clearResumeCTA();
+    clearStatusActions();
+    const actions = document.createElement('div');
+    actions.id = 'statusActionButtons';
+    actions.style.display = 'flex';
+    actions.style.gap = '8px';
+    actions.style.marginTop = '10px';
+    actions.style.flexWrap = 'wrap';
+
     if (job && job.state === 'failed' && job.resume_ready && job.id) {
-        const btn = document.createElement('button');
-        btn.textContent = 'Resume Import';
-        btn.className = 'btn-primary';
-        btn.style.marginLeft = '10px';
-        btn.onclick = () => resumeImport(job.id);
-        btn.id = 'resumeImportBtn';
-        statusPanel.appendChild(btn);
+        const resumeBtn = document.createElement('button');
+        resumeBtn.textContent = 'Resume Import';
+        resumeBtn.className = 'btn-primary';
+        resumeBtn.onclick = () => resumeImport(job.id);
+        resumeBtn.id = 'resumeImportBtn';
+        actions.appendChild(resumeBtn);
+    }
+
+    const retryJobID = (job && job.id) || lastKnownJobId;
+    if (showRetryStatus && retryJobID) {
+        const retryBtn = document.createElement('button');
+        retryBtn.textContent = 'Retry Status';
+        retryBtn.className = 'btn-secondary';
+        retryBtn.id = 'retryStatusBtn';
+        retryBtn.onclick = () => retryStatusPolling(retryJobID);
+        actions.appendChild(retryBtn);
+    }
+
+    if (actions.childElementCount > 0) {
+        statusPanel.appendChild(actions);
     }
 }
 
-function clearResumeCTA() {
+function clearStatusActions() {
+    const actions = document.getElementById('statusActionButtons');
+    if (actions && actions.parentNode) {
+        actions.parentNode.removeChild(actions);
+    }
+    const retryBtn = document.getElementById('retryStatusBtn');
+    if (retryBtn && retryBtn.parentNode) {
+        retryBtn.parentNode.removeChild(retryBtn);
+    }
     const existing = document.getElementById('resumeImportBtn');
     if (existing && existing.parentNode) {
         existing.parentNode.removeChild(existing);
     }
 }
 
+function renderResumeCTA(job) {
+    renderStatusActions(job, false);
+}
+
+function clearResumeCTA() {
+    clearStatusActions();
+}
+
+function retryStatusPolling(jobId) {
+    const targetJobID = jobId || lastKnownJobId;
+    if (!targetJobID) {
+        showStatus('No import job to monitor. Start a new import.', true);
+        return;
+    }
+    const snapshot = lastKnownJobSnapshot && lastKnownJobSnapshot.id === targetJobID
+        ? lastKnownJobSnapshot
+        : null;
+    showStatus(`Retrying status polling for ${targetJobID}…`, false);
+    clearStatusActions();
+    showImportProgressPanel(false);
+    lockStartButton('Importing…');
+    startJobPolling(targetJobID, snapshot);
+}
+
 async function resumeImport(jobId) {
     if (!jobId) return;
     try {
         showStatus('Resuming import…', false, false);
+        clearStatusActions();
         const resp = await fetch(`/api/import/resume?id=${encodeURIComponent(jobId)}`, { method: 'POST' });
         if (!resp.ok) {
             const body = await resp.text();
             showStatus(body || 'Resume failed', true);
+            renderStatusActions({ state: 'failed', resume_ready: true, id: jobId }, true);
             return;
         }
-        startJobPolling(jobId);
-        showImportProgressPanel();
+        showImportProgressPanel(false);
+        startJobPolling(jobId, lastKnownJobSnapshot && lastKnownJobSnapshot.id === jobId ? lastKnownJobSnapshot : null);
+        lockStartButton('Importing…');
     } catch (err) {
         showStatus(`Resume failed: ${err.message}`, true);
+        renderStatusActions({ state: 'failed', resume_ready: true, id: jobId }, true);
     }
 }
 
