@@ -212,6 +212,15 @@ function normalizeDropLabels(labels) {
     return result;
 }
 
+function escapeHtml(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function getSelectedDropLabels() {
     return normalizeDropLabels(Array.from(selectedDropLabels));
 }
@@ -371,8 +380,9 @@ function renderLabelManager(labelStats = [], totalLabels = 0) {
         summary.textContent = selectedCount > 0
             ? `Label management (drop selected: ${selectedCount}${detectedLabels > 0 ? `; total labels: ${detectedLabels}` : ''})`
             : 'Label management (optional)';
+        const selectedLabelsEscaped = selectedLabels.map(label => `<code>${escapeHtml(label)}</code>`).join(', ');
         rows.innerHTML = selectedCount > 0
-            ? `<div class="input-hint">Selected drop labels: <code>${selectedLabels.join('</code>, <code>')}</code>.</div><div class="input-hint">Run preflight to preview all detected labels and tune selection.</div>`
+            ? `<div class="input-hint">Selected drop labels: ${selectedLabelsEscaped}.</div><div class="input-hint">Run preflight to preview all detected labels and tune selection.</div>`
             : '<div class="input-hint">Run preflight to see all detected labels and choose what to drop before import.</div>';
         let hintText = protectedDropLabels.length
             ? `Protected labels (always kept): ${protectedDropLabels.join(', ')}.`
@@ -398,10 +408,11 @@ function renderLabelManager(labelStats = [], totalLabels = 0) {
         const count = Number(item.count || 0);
         const isProtected = protectedDropLabels.includes(label);
         const checked = !isProtected && selectedDropLabels.has(label);
+        const safeLabel = escapeHtml(label);
         return `
             <label style="display:flex; align-items:center; gap:8px; margin-bottom:6px; opacity:${isProtected ? 0.7 : 1};">
-                <input type="checkbox" data-drop-label="${label}" ${checked ? 'checked' : ''} ${isProtected ? 'disabled' : ''} style="width:auto;">
-                <code>${label}</code>
+                <input type="checkbox" data-drop-label="${safeLabel}" ${checked ? 'checked' : ''} ${isProtected ? 'disabled' : ''} style="width:auto;">
+                <code>${safeLabel}</code>
                 <span class="input-hint">seen in ${count} sample series${isProtected ? ' · protected' : ''}</span>
             </label>
         `;

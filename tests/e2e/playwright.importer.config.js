@@ -4,6 +4,7 @@ const { defineConfig, devices } = require('@playwright/test');
 const defaultBaseUrl = 'http://127.0.0.1:38081';
 let baseURL = process.env.VMIMPORTER_URL || defaultBaseUrl;
 let webAddr = process.env.VMIMPORTER_ADDR || '';
+const defaultWebAddr = '127.0.0.1:38081';
 
 try {
   const parsed = new URL(baseURL);
@@ -12,8 +13,27 @@ try {
   }
 } catch (_err) {
   baseURL = defaultBaseUrl;
-  webAddr = '127.0.0.1:38081';
+  webAddr = defaultWebAddr;
 }
+
+function sanitizeWebAddr(addr) {
+  if (typeof addr !== 'string') {
+    return defaultWebAddr;
+  }
+  const trimmed = addr.trim();
+  const hostPortPattern = /^(?:\[[0-9a-fA-F:.]+\]|[A-Za-z0-9.-]+):([0-9]{1,5})$/;
+  const match = hostPortPattern.exec(trimmed);
+  if (!match) {
+    return defaultWebAddr;
+  }
+  const port = Number(match[1]);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return defaultWebAddr;
+  }
+  return trimmed;
+}
+
+const safeWebAddr = sanitizeWebAddr(webAddr || defaultWebAddr);
 
 module.exports = defineConfig({
   testDir: './importer-specs',
@@ -39,7 +59,7 @@ module.exports = defineConfig({
     },
   ],
   webServer: {
-    command: `../../vmimporter -no-browser -addr ${webAddr || '127.0.0.1:38081'}`,
+    command: `../../vmimporter -no-browser -addr ${safeWebAddr}`,
     url: baseURL,
     reuseExistingServer: process.env.PW_REUSE_EXISTING_SERVER === '1',
     timeout: 5 * 60 * 1000,
