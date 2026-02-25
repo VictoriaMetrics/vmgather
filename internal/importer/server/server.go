@@ -7,9 +7,11 @@ import (
 	"context"
 	"crypto/tls"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"io/fs"
 	"log"
@@ -30,22 +32,52 @@ const importerHTTPTimeout = 5 * time.Minute
 
 var maxImportChunkBytes = 512 * 1024
 
+const (
+	defaultAnalyzeSampleLines = 2000
+	maxSimulationSeries       = 5000
+	maxRecentProfiles         = 10
+	recentProfilesFile        = "recent_profiles.json"
+	recentProfilesDir         = "vmimporter"
+	defaultAuthTypeNone       = "none"
+)
+
+var protectedDropLabels = []string{"__name__", "job", "instance"}
+
 //go:embed static/*
 var staticFiles embed.FS
 
 type uploadConfig struct {
-	Endpoint          string `json:"endpoint"`
-	TenantID          string `json:"tenant_id"`
-	AuthType          string `json:"auth_type,omitempty"`
-	Username          string `json:"username"`
-	Password          string `json:"password"`
-	CustomHeaderName  string `json:"custom_header_name,omitempty"`
-	CustomHeaderValue string `json:"custom_header_value,omitempty"`
-	SkipTLSVerify     bool   `json:"skip_tls_verify"`
-	MetricStepSeconds int    `json:"metric_step_seconds"`
-	BatchWindowSecs   int    `json:"batch_window_seconds"`
-	DropOld           bool   `json:"drop_old"`
-	TimeShiftMs       int64  `json:"time_shift_ms"`
+	Endpoint          string   `json:"endpoint"`
+	TenantID          string   `json:"tenant_id"`
+	AuthType          string   `json:"auth_type,omitempty"`
+	Username          string   `json:"username"`
+	Password          string   `json:"password"`
+	CustomHeaderName  string   `json:"custom_header_name,omitempty"`
+	CustomHeaderValue string   `json:"custom_header_value,omitempty"`
+	SkipTLSVerify     bool     `json:"skip_tls_verify"`
+	MetricStepSeconds int      `json:"metric_step_seconds"`
+	BatchWindowSecs   int      `json:"batch_window_seconds"`
+	DropOld           bool     `json:"drop_old"`
+	TimeShiftMs       int64    `json:"time_shift_ms"`
+	MaxLabelsOverride int      `json:"max_labels_override,omitempty"`
+	DropLabels        []string `json:"drop_labels,omitempty"`
+}
+
+type recentProfile struct {
+	ID                string    `json:"id"`
+	Endpoint          string    `json:"endpoint"`
+	TenantID          string    `json:"tenant_id,omitempty"`
+	AuthType          string    `json:"auth_type"`
+	Username          string    `json:"username,omitempty"`
+	CustomHeaderName  string    `json:"custom_header_name,omitempty"`
+	SkipTLSVerify     bool      `json:"skip_tls_verify,omitempty"`
+	MetricStepSeconds int       `json:"metric_step_seconds,omitempty"`
+	BatchWindowSecs   int       `json:"batch_window_seconds,omitempty"`
+	DropOld           bool      `json:"drop_old"`
+	TimeShiftMs       int64     `json:"time_shift_ms,omitempty"`
+	MaxLabelsOverride int       `json:"max_labels_override,omitempty"`
+	DropLabels        []string  `json:"drop_labels,omitempty"`
+	LastUsedAt        time.Time `json:"last_used_at"`
 }
 
 type uploadResult struct {
@@ -194,8 +226,29 @@ type importSummary struct {
 	DroppedOld     int                 `json:"dropped_old,omitempty"`
 	ProcessedBytes int64               `json:"processed_bytes,omitempty"`
 	NormalizedTs   bool                `json:"normalized_ts,omitempty"`
+	AnalyzedLines  int                 `json:"analyzed_lines,omitempty"`
+	ScannedLines   int                 `json:"scanned_lines,omitempty"`
+	SampleLimit    int                 `json:"sample_limit,omitempty"`
+	SampleCut      bool                `json:"sample_cut,omitempty"`
+	MaxLabelsSeen  int                 `json:"max_labels_seen,omitempty"`
+	OverLabelLimit int                 `json:"over_label_limit,omitempty"`
+	OverLimitPts   int                 `json:"over_limit_points,omitempty"`
+	MaxLabelsLimit int                 `json:"max_labels_limit,omitempty"`
+	TotalLabels    int                 `json:"total_labels,omitempty"`
+	LabelStats     []labelStat         `json:"label_stats,omitempty"`
+	LabelUniverse  []string            `json:"label_universe,omitempty"`
+	LabelBitsets   []string            `json:"series_label_bitsets,omitempty"`
+	LabelCounts    []int               `json:"series_label_counts,omitempty"`
+	PointCounts    []int               `json:"series_point_counts,omitempty"`
+	SimSeries      int                 `json:"simulation_series,omitempty"`
+	SimSeriesCut   bool                `json:"simulation_series_capped,omitempty"`
 
 	rangePinned bool
+}
+
+type labelStat struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
 }
 
 type metricLine struct {
@@ -211,18 +264,292 @@ type Server struct {
 	jobs                map[string]*importJob
 	jobsMu              sync.RWMutex
 	insecureTLSWarnOnce sync.Once
+	profilesPath        string
+	profiles            []recentProfile
+	profilesMu          sync.RWMutex
 }
 
 func NewServer(version string) *Server {
+	return newServer(version, defaultProfilesPath())
+}
+
+func newServer(version, profilesPath string) *Server {
 	transport := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
-	return &Server{
+	server := &Server{
 		version: version,
 		httpClient: &http.Client{
 			Timeout:   importerHTTPTimeout,
 			Transport: transport,
 		},
-		jobs: make(map[string]*importJob),
+		jobs:         make(map[string]*importJob),
+		profilesPath: profilesPath,
+		profiles:     make([]recentProfile, 0, maxRecentProfiles),
 	}
+	server.loadRecentProfiles()
+	return server
+}
+
+func defaultProfilesPath() string {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil || strings.TrimSpace(cacheDir) == "" {
+		return filepath.Join(os.TempDir(), recentProfilesFile)
+	}
+	return filepath.Join(cacheDir, recentProfilesDir, recentProfilesFile)
+}
+
+func sanitizeEndpointForStorage(raw string) string {
+	endpoint := strings.TrimSpace(raw)
+	if endpoint == "" {
+		return ""
+	}
+	candidate := endpoint
+	addedScheme := false
+	if !strings.Contains(candidate, "://") {
+		candidate = "http://" + candidate
+		addedScheme = true
+	}
+	parsed, err := url.Parse(candidate)
+	if err != nil {
+		return endpoint
+	}
+	parsed.User = nil
+	sanitized := parsed.String()
+	if addedScheme {
+		return strings.TrimPrefix(sanitized, "http://")
+	}
+	return sanitized
+}
+
+func normalizeAuthType(authType string) string {
+	switch strings.ToLower(strings.TrimSpace(authType)) {
+	case "basic", "bearer", "header":
+		return strings.ToLower(strings.TrimSpace(authType))
+	default:
+		return defaultAuthTypeNone
+	}
+}
+
+func isProtectedDropLabel(name string) bool {
+	for _, candidate := range protectedDropLabels {
+		if name == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func sanitizeDropLabels(labels []string) []string {
+	if len(labels) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(labels))
+	for _, raw := range labels {
+		label := strings.TrimSpace(raw)
+		if label == "" || isProtectedDropLabel(label) {
+			continue
+		}
+		set[label] = struct{}{}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(set))
+	for label := range set {
+		result = append(result, label)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func sanitizeMaxLabelsOverride(value int) int {
+	if value <= 0 {
+		return 0
+	}
+	return value
+}
+
+func dropLabelsSet(labels []string) map[string]struct{} {
+	if len(labels) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(labels))
+	for _, label := range sanitizeDropLabels(labels) {
+		set[label] = struct{}{}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return set
+}
+
+func filterMetricLabels(metric map[string]string, dropSet map[string]struct{}) map[string]string {
+	if len(metric) == 0 || len(dropSet) == 0 {
+		return metric
+	}
+	filtered := make(map[string]string, len(metric))
+	for key, value := range metric {
+		if isProtectedDropLabel(key) {
+			filtered[key] = value
+			continue
+		}
+		if _, drop := dropSet[key]; drop {
+			continue
+		}
+		filtered[key] = value
+	}
+	return filtered
+}
+
+func buildRecentProfile(cfg uploadConfig) (recentProfile, bool) {
+	endpoint := sanitizeEndpointForStorage(cfg.Endpoint)
+	if endpoint == "" {
+		return recentProfile{}, false
+	}
+	profile := recentProfile{
+		Endpoint:          endpoint,
+		TenantID:          strings.TrimSpace(cfg.TenantID),
+		AuthType:          normalizeAuthType(cfg.AuthType),
+		SkipTLSVerify:     cfg.SkipTLSVerify,
+		MetricStepSeconds: cfg.MetricStepSeconds,
+		BatchWindowSecs:   cfg.BatchWindowSecs,
+		DropOld:           cfg.DropOld,
+		TimeShiftMs:       cfg.TimeShiftMs,
+		MaxLabelsOverride: sanitizeMaxLabelsOverride(cfg.MaxLabelsOverride),
+		DropLabels:        sanitizeDropLabels(cfg.DropLabels),
+		LastUsedAt:        time.Now().UTC(),
+	}
+
+	if profile.AuthType == "basic" {
+		profile.Username = strings.TrimSpace(cfg.Username)
+	}
+	if profile.AuthType == "header" {
+		profile.CustomHeaderName = strings.TrimSpace(cfg.CustomHeaderName)
+	}
+
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(strings.ToLower(profile.Endpoint)))
+	_, _ = h.Write([]byte("|" + profile.TenantID))
+	_, _ = h.Write([]byte("|" + profile.AuthType))
+	_, _ = h.Write([]byte("|" + profile.Username))
+	_, _ = h.Write([]byte("|" + profile.CustomHeaderName))
+	_, _ = h.Write([]byte("|" + strconv.FormatBool(profile.SkipTLSVerify)))
+	_, _ = h.Write([]byte("|" + strconv.Itoa(profile.MetricStepSeconds)))
+	_, _ = h.Write([]byte("|" + strconv.Itoa(profile.BatchWindowSecs)))
+	_, _ = h.Write([]byte("|" + strconv.FormatBool(profile.DropOld)))
+	_, _ = h.Write([]byte("|" + strconv.FormatInt(profile.TimeShiftMs, 10)))
+	_, _ = h.Write([]byte("|" + strconv.Itoa(profile.MaxLabelsOverride)))
+	_, _ = h.Write([]byte("|" + strings.Join(profile.DropLabels, ",")))
+	profile.ID = strconv.FormatUint(h.Sum64(), 16)
+	return profile, true
+}
+
+func (s *Server) recentProfilesSnapshot() []recentProfile {
+	s.profilesMu.RLock()
+	defer s.profilesMu.RUnlock()
+	snapshot := make([]recentProfile, len(s.profiles))
+	copy(snapshot, s.profiles)
+	return snapshot
+}
+
+func (s *Server) saveRecentProfile(cfg uploadConfig) {
+	profile, ok := buildRecentProfile(cfg)
+	if !ok {
+		return
+	}
+
+	s.profilesMu.Lock()
+	defer s.profilesMu.Unlock()
+
+	updated := make([]recentProfile, 0, maxRecentProfiles)
+	updated = append(updated, profile)
+	for _, existing := range s.profiles {
+		if existing.ID == profile.ID {
+			continue
+		}
+		updated = append(updated, existing)
+		if len(updated) >= maxRecentProfiles {
+			break
+		}
+	}
+	s.profiles = updated
+
+	if err := s.persistRecentProfilesLocked(); err != nil {
+		log.Printf("[WARN] failed to persist recent profiles: %v", err)
+	}
+}
+
+func (s *Server) loadRecentProfiles() {
+	if strings.TrimSpace(s.profilesPath) == "" {
+		return
+	}
+	raw, err := os.ReadFile(s.profilesPath)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Printf("[WARN] failed to read recent profiles: %v", err)
+		}
+		return
+	}
+	var profiles []recentProfile
+	if err := json.Unmarshal(raw, &profiles); err != nil {
+		log.Printf("[WARN] failed to decode recent profiles: %v", err)
+		return
+	}
+	for index := range profiles {
+		profiles[index].Endpoint = sanitizeEndpointForStorage(profiles[index].Endpoint)
+		profiles[index].AuthType = normalizeAuthType(profiles[index].AuthType)
+		if profiles[index].AuthType != "basic" {
+			profiles[index].Username = ""
+		}
+		if profiles[index].AuthType != "header" {
+			profiles[index].CustomHeaderName = ""
+		}
+		profiles[index].DropLabels = sanitizeDropLabels(profiles[index].DropLabels)
+		profiles[index].MaxLabelsOverride = sanitizeMaxLabelsOverride(profiles[index].MaxLabelsOverride)
+		if profiles[index].ID == "" {
+			cfg := uploadConfig{
+				Endpoint:          profiles[index].Endpoint,
+				TenantID:          profiles[index].TenantID,
+				AuthType:          profiles[index].AuthType,
+				Username:          profiles[index].Username,
+				CustomHeaderName:  profiles[index].CustomHeaderName,
+				SkipTLSVerify:     profiles[index].SkipTLSVerify,
+				MetricStepSeconds: profiles[index].MetricStepSeconds,
+				BatchWindowSecs:   profiles[index].BatchWindowSecs,
+				DropOld:           profiles[index].DropOld,
+				TimeShiftMs:       profiles[index].TimeShiftMs,
+				MaxLabelsOverride: profiles[index].MaxLabelsOverride,
+				DropLabels:        profiles[index].DropLabels,
+			}
+			if rebuilt, ok := buildRecentProfile(cfg); ok {
+				profiles[index].ID = rebuilt.ID
+			}
+		}
+	}
+	if len(profiles) > maxRecentProfiles {
+		profiles = profiles[:maxRecentProfiles]
+	}
+
+	s.profilesMu.Lock()
+	s.profiles = profiles
+	s.profilesMu.Unlock()
+}
+
+func (s *Server) persistRecentProfilesLocked() error {
+	if strings.TrimSpace(s.profilesPath) == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(s.profilesPath), 0o755); err != nil {
+		return err
+	}
+	payload, err := json.MarshalIndent(s.profiles, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmpPath := s.profilesPath + ".tmp"
+	if err := os.WriteFile(tmpPath, payload, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, s.profilesPath)
 }
 
 func (s *Server) withInsecure(insecure bool, endpoint string) *http.Client {
@@ -257,6 +584,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": s.version})
 	})
+	mux.HandleFunc("/api/profiles/recent", s.handleRecentProfiles)
 	mux.HandleFunc("/api/analyze", s.handleAnalyze)
 	mux.HandleFunc("/api/upload", s.handleUpload)
 	mux.HandleFunc("/api/check-endpoint", s.handleCheckEndpoint)
@@ -278,6 +606,17 @@ func (s *Server) Router() http.Handler {
 		}
 	})
 	return mux
+}
+
+func (s *Server) handleRecentProfiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		respondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"profiles": s.recentProfilesSnapshot(),
+	})
 }
 
 func (s *Server) handleJobStatus(w http.ResponseWriter, r *http.Request) {
@@ -362,12 +701,15 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("invalid config: %v", err))
 		return
 	}
+	cfg.DropLabels = sanitizeDropLabels(cfg.DropLabels)
+	cfg.MaxLabelsOverride = sanitizeMaxLabelsOverride(cfg.MaxLabelsOverride)
 	file, header, err := r.FormFile("bundle")
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "bundle file is required")
 		return
 	}
 	defer func() { _ = file.Close() }()
+	s.saveRecentProfile(cfg)
 
 	tempPath, uploadedBytes, err := persistUploadedFile(file)
 	if err != nil {
@@ -417,6 +759,17 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("invalid config: %v", err))
 		return
 	}
+	cfg.DropLabels = sanitizeDropLabels(cfg.DropLabels)
+	cfg.MaxLabelsOverride = sanitizeMaxLabelsOverride(cfg.MaxLabelsOverride)
+	s.saveRecentProfile(cfg)
+
+	fullCollection := parseBoolFormValue(r.FormValue("full_collection"))
+	sampleLimit := defaultAnalyzeSampleLines
+	analysisMode := "sample"
+	if fullCollection {
+		sampleLimit = 0
+		analysisMode = "full"
+	}
 	file, header, err := r.FormFile("bundle")
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "bundle file is required")
@@ -444,23 +797,26 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	retentionCutoff := s.retentionCutoff(ctx, cfg)
-	if !cfg.DropOld {
-		retentionCutoff = 0
-	}
+	detectedMaxLabelsLimit, maxLabelsLimit, maxLabelsSource := s.resolveMaxLabelsLimit(ctx, cfg)
 	if !cfg.DropOld {
 		retentionCutoff = 0
 	}
 
-	summary, err := s.analyzeBundle(ctx, bundle, retentionCutoff, cfg.TimeShiftMs)
+	summary, err := s.analyzeBundle(ctx, bundle, retentionCutoff, cfg.TimeShiftMs, maxLabelsLimit, cfg.DropLabels, sampleLimit)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("failed to analyze bundle: %v", err))
 		return
 	}
 
 	payload := map[string]interface{}{
-		"summary":          summary,
-		"retention_cutoff": retentionCutoff,
-		"warnings":         buildAnalysisWarnings(summary, retentionCutoff),
+		"summary":                   summary,
+		"analysis_mode":             analysisMode,
+		"retention_cutoff":          retentionCutoff,
+		"max_labels_limit":          maxLabelsLimit,
+		"max_labels_source":         maxLabelsSource,
+		"detected_max_labels_limit": detectedMaxLabelsLimit,
+		"protected_labels":          protectedDropLabels,
+		"warnings":                  buildAnalysisWarnings(summary, retentionCutoff, maxLabelsLimit),
 		"suggested_shift_ms": func() int64 {
 			if retentionCutoff > 0 && !summary.Start.IsZero() && summary.Start.UnixMilli() < retentionCutoff {
 				return retentionCutoff - summary.Start.UnixMilli() + int64(time.Hour/time.Millisecond)
@@ -521,14 +877,21 @@ func prepareBundle(path, originalName string, uploadedBytes int64) (*bundleInfo,
 	}
 }
 
-func (s *Server) analyzeBundle(ctx context.Context, bundle *bundleInfo, retentionCutoffMs int64, shiftMs int64) (importSummary, error) {
+func (s *Server) analyzeBundle(ctx context.Context, bundle *bundleInfo, retentionCutoffMs int64, shiftMs int64, maxLabelsLimit int, dropLabels []string, sampleLimit int) (importSummary, error) {
 	summary := importSummary{
 		Labels:         make(map[string]string),
 		SourceBytes:    bundle.OriginalBytes,
 		InflatedBytes:  bundle.ExtractedBytes,
 		ChunkBytes:     maxImportChunkBytes,
 		ProcessedBytes: 0,
+		MaxLabelsLimit: maxLabelsLimit,
+		SampleLimit:    sampleLimit,
 	}
+	dropSet := dropLabelsSet(dropLabels)
+	labelCounts := make(map[string]int)
+	seriesLabels := make([][]string, 0, 256)
+	seriesLabelCounts := make([]int, 0, 256)
+	seriesPointCounts := make([]int, 0, 256)
 	if summary.InflatedBytes == 0 && bundle.ExtractedBytes > 0 {
 		summary.InflatedBytes = bundle.ExtractedBytes
 	}
@@ -542,14 +905,14 @@ func (s *Server) analyzeBundle(ctx context.Context, bundle *bundleInfo, retentio
 	scanner := bufio.NewScanner(file)
 	buf := make([]byte, 0, 1024*1024)
 	scanner.Buffer(buf, 16*1024*1024)
-	const maxLines = 1000
 	linesScanned := 0
 
 	for scanner.Scan() {
-		linesScanned++
-		if linesScanned > maxLines {
+		if sampleLimit > 0 && linesScanned >= sampleLimit {
+			summary.SampleCut = true
 			break
 		}
+		linesScanned++
 		line := scanner.Bytes()
 		summary.ProcessedBytes += int64(len(line)) + 1
 
@@ -557,6 +920,21 @@ func (s *Server) analyzeBundle(ctx context.Context, bundle *bundleInfo, retentio
 		if err := json.Unmarshal(line, &parsed); err != nil {
 			summary.SkippedLines++
 			continue
+		}
+		rawLabels := make([]string, 0, len(parsed.Metric))
+		for label := range parsed.Metric {
+			labelCounts[label]++
+			rawLabels = append(rawLabels, label)
+		}
+		parsed.Metric = filterMetricLabels(parsed.Metric, dropSet)
+		summary.AnalyzedLines++
+		labelCount := len(parsed.Metric)
+		if labelCount > summary.MaxLabelsSeen {
+			summary.MaxLabelsSeen = labelCount
+		}
+		if maxLabelsLimit > 0 && labelCount > maxLabelsLimit {
+			summary.OverLabelLimit++
+			summary.OverLimitPts += len(parsed.Timestamps)
 		}
 		values, err := normalizeValues(parsed.Values)
 		if err != nil {
@@ -586,6 +964,13 @@ func (s *Server) analyzeBundle(ctx context.Context, bundle *bundleInfo, retentio
 			summary.SkippedLines++
 			continue
 		}
+		if len(seriesLabels) < maxSimulationSeries {
+			seriesLabels = append(seriesLabels, rawLabels)
+			seriesLabelCounts = append(seriesLabelCounts, len(rawLabels))
+			seriesPointCounts = append(seriesPointCounts, len(filteredTs))
+		} else {
+			summary.SimSeriesCut = true
+		}
 		parsed.Timestamps = filteredTs
 		parsed.Values = nil
 		if err := summary.consumeMetric(metricLine{Metric: parsed.Metric, Timestamps: filteredTs}); err != nil {
@@ -596,13 +981,61 @@ func (s *Server) analyzeBundle(ctx context.Context, bundle *bundleInfo, retentio
 	if err := scanner.Err(); err != nil {
 		return summary, err
 	}
+	summary.ScannedLines = linesScanned
 	if summary.InflatedBytes == 0 {
 		summary.InflatedBytes = summary.ProcessedBytes
 	}
+	summary.TotalLabels = len(labelCounts)
+	summary.LabelStats = buildLabelStats(labelCounts, 0)
+	summary.LabelUniverse = labelNames(summary.LabelStats)
+	summary.LabelBitsets = encodeSeriesLabelBitsets(seriesLabels, summary.LabelUniverse)
+	summary.LabelCounts = seriesLabelCounts
+	summary.PointCounts = seriesPointCounts
+	summary.SimSeries = len(seriesLabelCounts)
 	return summary, nil
 }
 
-func buildAnalysisWarnings(summary importSummary, cutoffMs int64) []string {
+func labelNames(stats []labelStat) []string {
+	if len(stats) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(stats))
+	for _, item := range stats {
+		if item.Name == "" {
+			continue
+		}
+		names = append(names, item.Name)
+	}
+	return names
+}
+
+func encodeSeriesLabelBitsets(seriesLabels [][]string, universe []string) []string {
+	if len(seriesLabels) == 0 || len(universe) == 0 {
+		return nil
+	}
+	index := make(map[string]int, len(universe))
+	for idx, name := range universe {
+		index[name] = idx
+	}
+	width := (len(universe) + 7) / 8
+	encoded := make([]string, 0, len(seriesLabels))
+	for _, labels := range seriesLabels {
+		bitset := make([]byte, width)
+		for _, name := range labels {
+			idx, ok := index[name]
+			if !ok {
+				continue
+			}
+			byteIdx := idx / 8
+			bitIdx := idx % 8
+			bitset[byteIdx] |= 1 << bitIdx
+		}
+		encoded = append(encoded, base64.RawStdEncoding.EncodeToString(bitset))
+	}
+	return encoded
+}
+
+func buildAnalysisWarnings(summary importSummary, cutoffMs int64, maxLabelsLimit int) []string {
 	var warnings []string
 	if cutoffMs > 0 && !summary.Start.IsZero() {
 		cutoff := time.UnixMilli(cutoffMs)
@@ -632,7 +1065,36 @@ func buildAnalysisWarnings(summary importSummary, cutoffMs int64) []string {
 	if summary.NormalizedTs {
 		warnings = append(warnings, "Timestamps were auto-scaled to milliseconds (detected non-ms input).")
 	}
+	if maxLabelsLimit > 0 && summary.OverLabelLimit > 0 {
+		warnings = append(warnings, fmt.Sprintf("Target label limit risk: %d/%d analyzed series exceed maxLabelsPerTimeseries=%d (max seen=%d, affected points in sample=%d). These series will be dropped by VictoriaMetrics until the limit is increased.", summary.OverLabelLimit, summary.AnalyzedLines, maxLabelsLimit, summary.MaxLabelsSeen, summary.OverLimitPts))
+	}
+	if maxLabelsLimit == 0 && summary.MaxLabelsSeen > 40 {
+		warnings = append(warnings, fmt.Sprintf("Detected series with high label count (max seen=%d), but target maxLabelsPerTimeseries could not be read. Run Full collection and confirm target limit before import.", summary.MaxLabelsSeen))
+	}
+	if summary.SampleCut && summary.SampleLimit > 0 {
+		warnings = append(warnings, fmt.Sprintf("Preflight sampled first %d lines (full bundle not scanned). Use Full collection for complete diagnostics.", summary.SampleLimit))
+	}
 	return warnings
+}
+
+func buildLabelStats(labelCounts map[string]int, limit int) []labelStat {
+	if len(labelCounts) == 0 {
+		return nil
+	}
+	stats := make([]labelStat, 0, len(labelCounts))
+	for name, count := range labelCounts {
+		stats = append(stats, labelStat{Name: name, Count: count})
+	}
+	sort.Slice(stats, func(i, j int) bool {
+		if stats[i].Count == stats[j].Count {
+			return stats[i].Name < stats[j].Name
+		}
+		return stats[i].Count > stats[j].Count
+	})
+	if limit > 0 && len(stats) > limit {
+		stats = stats[:limit]
+	}
+	return stats
 }
 
 func prepareZipBundle(path string, uploadedBytes int64) (*bundleInfo, error) {
@@ -796,8 +1258,9 @@ func (s *Server) runImportJob(ctx context.Context, job *importJob, cfg uploadCon
 	}
 
 	retentionCutoff := s.retentionCutoff(ctx, cfg)
+	_, maxLabelsLimit, _ := s.resolveMaxLabelsLimit(ctx, cfg)
 
-	_, summary, err := s.streamImport(ctx, cfg, bundle, importURL, startOffset, retentionCutoff, cfg.TimeShiftMs, progress)
+	_, summary, err := s.streamImport(ctx, cfg, bundle, importURL, startOffset, retentionCutoff, cfg.TimeShiftMs, maxLabelsLimit, progress)
 	if err != nil {
 		s.updateJob(job, func(j *importJob) {
 			j.State = jobStateFailed
@@ -890,14 +1353,16 @@ func isLikelyMetricsFile(f *zip.File) (bool, error) {
 	return false, nil
 }
 
-func (s *Server) streamImport(ctx context.Context, cfg uploadConfig, bundle *bundleInfo, importURL string, startOffset, retentionCutoffMs, shiftMs int64, progress func(int)) (*uploadResult, importSummary, error) {
+func (s *Server) streamImport(ctx context.Context, cfg uploadConfig, bundle *bundleInfo, importURL string, startOffset, retentionCutoffMs, shiftMs int64, maxLabelsLimit int, progress func(int)) (*uploadResult, importSummary, error) {
 	summary := importSummary{
 		Labels:         make(map[string]string),
 		SourceBytes:    bundle.OriginalBytes,
 		InflatedBytes:  bundle.ExtractedBytes,
 		ChunkBytes:     maxImportChunkBytes,
 		ProcessedBytes: startOffset,
+		MaxLabelsLimit: maxLabelsLimit,
 	}
+	dropSet := dropLabelsSet(cfg.DropLabels)
 	if summary.InflatedBytes == 0 && bundle.ExtractedBytes > 0 {
 		summary.InflatedBytes = bundle.ExtractedBytes
 	}
@@ -1011,6 +1476,16 @@ func (s *Server) streamImport(ctx context.Context, cfg uploadConfig, bundle *bun
 		if err := json.Unmarshal(line, &parsed); err != nil {
 			summary.SkippedLines++
 			continue
+		}
+		parsed.Metric = filterMetricLabels(parsed.Metric, dropSet)
+		summary.AnalyzedLines++
+		labelCount := len(parsed.Metric)
+		if labelCount > summary.MaxLabelsSeen {
+			summary.MaxLabelsSeen = labelCount
+		}
+		if maxLabelsLimit > 0 && labelCount > maxLabelsLimit {
+			summary.OverLabelLimit++
+			summary.OverLimitPts += len(parsed.Timestamps)
 		}
 
 		parsed.Timestamps, _ = normalizeTimestamps(parsed.Timestamps)
@@ -1437,8 +1912,18 @@ func (s *Server) handleCheckEndpoint(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	s.saveRecentProfile(cfg)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+func parseBoolFormValue(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) pingEndpoint(ctx context.Context, cfg uploadConfig) error {
@@ -1533,21 +2018,10 @@ func (s *Server) retentionCutoff(ctx context.Context, cfg uploadConfig) int64 {
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
-		// Look for: flag{name="retentionPeriod", value="400d", is_set="true"} 1
-		if !strings.Contains(line, `name="retentionPeriod"`) {
+		retentionStr, ok := readFlagValue(line, "retentionPeriod")
+		if !ok {
 			continue
 		}
-		// Extract value="..."
-		start := strings.Index(line, `value="`)
-		if start == -1 {
-			continue
-		}
-		start += len(`value="`)
-		end := strings.Index(line[start:], `"`)
-		if end == -1 {
-			continue
-		}
-		retentionStr := line[start : start+end]
 		dur, err := parseRetentionDuration(retentionStr)
 		if err != nil {
 			log.Printf("[WARN] retentionCutoff: failed to parse duration %q: %v", retentionStr, err)
@@ -1560,6 +2034,85 @@ func (s *Server) retentionCutoff(ctx context.Context, cfg uploadConfig) int64 {
 
 	log.Printf("[WARN] retentionCutoff: no retention period found in /metrics")
 	return 0
+}
+
+func (s *Server) maxLabelsPerTimeseries(ctx context.Context, cfg uploadConfig) int {
+	importURL, _, err := resolveEndpoints(cfg)
+	if err != nil {
+		log.Printf("[WARN] maxLabelsPerTimeseries: failed to resolve endpoints: %v", err)
+		return 0
+	}
+	parsed, err := url.Parse(importURL)
+	if err != nil {
+		log.Printf("[WARN] maxLabelsPerTimeseries: failed to parse URL: %v", err)
+		return 0
+	}
+
+	parsed.Path = "/metrics"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		log.Printf("[WARN] maxLabelsPerTimeseries: failed to create request: %v", err)
+		return 0
+	}
+	applyTenantHeaders(req, cfg)
+	applyAuthHeaders(req, cfg)
+
+	client := s.withInsecure(cfg.SkipTLSVerify, parsed.String())
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[WARN] maxLabelsPerTimeseries: failed to fetch /metrics: %v", err)
+		return 0
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 300 {
+		log.Printf("[WARN] maxLabelsPerTimeseries: /metrics returned %d", resp.StatusCode)
+		return 0
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		raw, ok := readFlagValue(line, "maxLabelsPerTimeseries")
+		if !ok {
+			continue
+		}
+		limit, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil || limit <= 0 {
+			continue
+		}
+		return limit
+	}
+	return 0
+}
+
+func (s *Server) resolveMaxLabelsLimit(ctx context.Context, cfg uploadConfig) (detected int, effective int, source string) {
+	detected = s.maxLabelsPerTimeseries(ctx, cfg)
+	effective = detected
+	source = "metrics"
+	if detected <= 0 {
+		source = "unknown"
+	}
+	if cfg.MaxLabelsOverride > 0 {
+		effective = cfg.MaxLabelsOverride
+		source = "manual"
+	}
+	return detected, effective, source
+}
+
+func readFlagValue(metricsLine, flagName string) (string, bool) {
+	if !strings.Contains(metricsLine, `flag{`) || !strings.Contains(metricsLine, `name="`+flagName+`"`) {
+		return "", false
+	}
+	start := strings.Index(metricsLine, `value="`)
+	if start == -1 {
+		return "", false
+	}
+	start += len(`value="`)
+	end := strings.Index(metricsLine[start:], `"`)
+	if end == -1 {
+		return "", false
+	}
+	return metricsLine[start : start+end], true
 }
 
 func parseRetentionDuration(raw string) (time.Duration, error) {

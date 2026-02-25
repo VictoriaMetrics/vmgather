@@ -2,7 +2,27 @@
 
 All notable changes to vmgather are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and versions adhere to semantic versioning.
 
-## [v1.9.0] - Unreleased
+## [v1.9.1] - 2026-02-23
+
+### Added
+- VMImporter now keeps a local “Recent profiles” history (up to 10 records) and lets you quickly re-apply endpoint/tenant/auth mode/metric step/time shift/drop-label settings.
+- Added `/api/profiles/recent` to expose saved VMImporter connection profiles for the UI dropdown.
+- Preflight analysis now reports full label-limit diagnostics from the target (`maxLabelsPerTimeseries`, over-limit series, max labels seen, affected points, and top label-frequency stats).
+- Label manager now shows both values: labels currently shown in UI and total labels detected in sample (`showing X/Y`).
+- Preflight now defaults to sampling the first `2000` lines and includes a `Full collection` action to scan the entire bundle when complete label diagnostics are required.
+
+### Changed
+- Drop-label configuration is now normalized and applied consistently in both preflight analysis and streaming import.
+- VMImporter explicitly protects core labels `__name__`, `job`, and `instance` from being dropped.
+- Recent profile persistence sanitizes stored endpoint/auth settings and does not persist secrets (password, bearer token, header value).
+- Successful endpoint checks and preflight analysis now also update recent profiles, so operator settings are retained even if a long import later fails mid-stream.
+
+### Fixed
+- Fixed confusing label-management UX: preflight now clearly indicates when only top labels are shown and how many labels exist in total.
+- Label-limit warnings now clearly state that over-limit series will be dropped by VictoriaMetrics until label count is reduced or limit is increased.
+- Added explicit warning when target `maxLabelsPerTimeseries` is unavailable but high label counts are detected in analyzed series.
+
+## [v1.9.0] - 2026-02-17
 
 ### Security
 - Docker build toolchain for `vmgather` and `vmimporter` images is upgraded to Go `1.25.7` (from `1.22`) to consume fixed Go stdlib security patches and reduce fixable `CRITICAL/HIGH` CVEs in registry scans.

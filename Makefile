@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-llm build build-safe build-all clean fmt lint help pre-push test-env test-env-up test-env-down test-env-clean test-env-logs test-e2e test-all test-all-clean test-scenarios test-config-bootstrap docker-build docker-build-vmgather docker-build-vmimporter manual-env-up manual-env-down manual-env-clean manual-env-logs security-check security-check-go security-check-secrets security-check-dockerfile security-check-images
+.PHONY: test test-fast test-llm build build-safe build-all clean fmt lint help pre-push test-env test-env-up test-env-down test-env-clean test-env-logs test-e2e test-e2e-importer test-all test-all-clean test-scenarios test-config-bootstrap docker-build docker-build-vmgather docker-build-vmimporter manual-env-up manual-env-down manual-env-clean manual-env-logs security-check security-check-go security-check-secrets security-check-dockerfile security-check-images
 
 VERSION ?= $(shell git describe --tags --always --dirty)
 PKG_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "latest")
@@ -116,8 +116,9 @@ help:
 	@echo "  make test-env-up       - Start test environment"
 	@echo "  make test-env-down     - Stop test environment"
 	@echo "  make test-env-clean    - Stop test environment and remove volumes"
-	@echo "  make test-e2e          - Run Playwright suite (requires test-env-up)"
-	@echo "  make test-all          - Everything: test-full + test-e2e"
+	@echo "  make test-e2e          - Run VMGather Playwright suite (requires test-env-up)"
+	@echo "  make test-e2e-importer - Run VMImporter Playwright regression suite"
+	@echo "  make test-all          - Everything: test-full + both Playwright suites"
 	@echo "  make test-all-clean    - Everything + cleanup (recommended for CI / OrbStack)"
 	@echo "  make security-check    - Run CI-equivalent security checks locally"
 	@echo "  make pre-push          - Full local gate: test-all-clean + security-check"
@@ -769,8 +770,29 @@ test-e2e:
 	@echo "[OK] Playwright E2E suite passed!"
 	@echo "================================================================================"
 
-# Everything: unit + docker scenarios + Playwright.
-test-all: test-full test-e2e
+# VMImporter Playwright tests.
+test-e2e-importer:
+	@echo "================================================================================"
+	@echo "Playwright E2E Suite (VMImporter)"
+	@echo "================================================================================"
+	@echo ""
+	@echo "[1/2] Building vmimporter..."
+	@go build -o vmimporter ./cmd/vmimporter
+	@echo ""
+	@echo "[2/2] Running importer regressions..."
+	@set -e; \
+		if [ ! -d "tests/e2e/node_modules" ]; then \
+			echo "  Installing node deps via npm ci..."; \
+			cd tests/e2e && npm ci; \
+		fi; \
+		cd tests/e2e && npx playwright test -c playwright.importer.config.js --workers=1
+	@echo ""
+	@echo "================================================================================"
+	@echo "[OK] Playwright VMImporter suite passed!"
+	@echo "================================================================================"
+
+# Everything: unit + docker scenarios + Playwright suites.
+test-all: test-full test-e2e test-e2e-importer
 
 # Everything + cleanup (CI / disk-constrained environments).
 test-all-clean:

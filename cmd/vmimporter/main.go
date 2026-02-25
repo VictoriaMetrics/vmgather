@@ -38,8 +38,9 @@ func main() {
 		Addr:              finalAddr,
 		Handler:           srv.Router(),
 		ReadHeaderTimeout: 5 * time.Second,
-		// Keep body reads unbounded to avoid aborting large uploads mid-transfer.
-		WriteTimeout: 30 * time.Second,
+		// Keep writes unbounded: full preflight on large bundles can run longer than 30s.
+		// VMImporter is a local tool and long-running analyze/import operations are expected.
+		WriteTimeout: 0,
 		IdleTimeout:  120 * time.Second,
 	}
 

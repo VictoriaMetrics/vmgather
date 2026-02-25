@@ -74,6 +74,135 @@ func TestRedactURLForLog(t *testing.T) {
 	}
 }
 
+func TestRecentProfilesRoundTripAndSecretStripping(t *testing.T) {
+	t.Parallel()
+
+	profilesPath := filepath.Join(t.TempDir(), "recent-profiles.json")
+	srv := newServer("test", profilesPath)
+
+	srv.saveRecentProfile(uploadConfig{
+		Endpoint:          "https://user:secret@vm.example.com/metrics/insert/prometheus",
+		TenantID:          "1042",
+		AuthType:          "basic",
+		Username:          "monitoring-1042",
+		Password:          "super-secret-password",
+		CustomHeaderName:  "X-API-Key",
+		CustomHeaderValue: "must-not-be-stored",
+		SkipTLSVerify:     true,
+		MetricStepSeconds: 300,
+		BatchWindowSecs:   300,
+		DropOld:           true,
+		TimeShiftMs:       120000,
+		MaxLabelsOverride: 45,
+		DropLabels:        []string{"cluster", "job", "cluster"},
+	})
+	srv.saveRecentProfile(uploadConfig{
+		Endpoint:          "https://vm.example.com/metrics/insert/prometheus",
+		TenantID:          "1042",
+		AuthType:          "bearer",
+		Password:          "bearer-secret",
+		SkipTLSVerify:     false,
+		MetricStepSeconds: 60,
+		BatchWindowSecs:   60,
+		DropOld:           true,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/profiles/recent", nil)
+	rec := httptest.NewRecorder()
+	srv.handleRecentProfiles(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if strings.Contains(body, "super-secret-password") || strings.Contains(body, "bearer-secret") || strings.Contains(body, "must-not-be-stored") {
+		t.Fatalf("response leaked secret fields: %s", body)
+	}
+
+	var payload struct {
+		Profiles []recentProfile `json:"profiles"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode profiles payload: %v", err)
+	}
+	if len(payload.Profiles) != 2 {
+		t.Fatalf("expected 2 profiles, got %d", len(payload.Profiles))
+	}
+
+	latest := payload.Profiles[0]
+	if latest.AuthType != "bearer" {
+		t.Fatalf("expected latest profile auth=bearer, got %q", latest.AuthType)
+	}
+	if latest.Endpoint != "https://vm.example.com/metrics/insert/prometheus" {
+		t.Fatalf("unexpected latest endpoint: %q", latest.Endpoint)
+	}
+
+	older := payload.Profiles[1]
+	if older.Username != "monitoring-1042" {
+		t.Fatalf("expected stored basic username, got %q", older.Username)
+	}
+	if strings.Contains(older.Endpoint, "secret@") {
+		t.Fatalf("expected sanitized endpoint without userinfo, got %q", older.Endpoint)
+	}
+	if older.TimeShiftMs != 120000 {
+		t.Fatalf("expected timeshift 120000, got %d", older.TimeShiftMs)
+	}
+	if older.MaxLabelsOverride != 45 {
+		t.Fatalf("expected max labels override=45, got %d", older.MaxLabelsOverride)
+	}
+	if len(older.DropLabels) != 1 || older.DropLabels[0] != "cluster" {
+		t.Fatalf("expected sanitized drop labels [cluster], got %v", older.DropLabels)
+	}
+
+	srvReloaded := newServer("test", profilesPath)
+	reloaded := srvReloaded.recentProfilesSnapshot()
+	if len(reloaded) != 2 {
+		t.Fatalf("expected 2 persisted profiles, got %d", len(reloaded))
+	}
+	if reloaded[0].ID == "" || reloaded[1].ID == "" {
+		t.Fatalf("expected non-empty profile IDs after reload: %+v", reloaded)
+	}
+}
+
+func TestRecentProfilesDeduplicateAndMoveToTop(t *testing.T) {
+	t.Parallel()
+
+	srv := newServer("test", filepath.Join(t.TempDir(), "profiles.json"))
+	first := uploadConfig{
+		Endpoint:          "https://vm-a.example.com/metrics/insert/prometheus",
+		TenantID:          "100",
+		AuthType:          "basic",
+		Username:          "first",
+		MetricStepSeconds: 60,
+		BatchWindowSecs:   60,
+		DropOld:           true,
+	}
+	second := uploadConfig{
+		Endpoint:          "https://vm-b.example.com/metrics/insert/prometheus",
+		TenantID:          "200",
+		AuthType:          "none",
+		MetricStepSeconds: 300,
+		BatchWindowSecs:   300,
+		DropOld:           true,
+	}
+
+	srv.saveRecentProfile(first)
+	srv.saveRecentProfile(second)
+	srv.saveRecentProfile(first)
+
+	profiles := srv.recentProfilesSnapshot()
+	if len(profiles) != 2 {
+		t.Fatalf("expected 2 unique profiles, got %d", len(profiles))
+	}
+	if profiles[0].Endpoint != "https://vm-a.example.com/metrics/insert/prometheus" {
+		t.Fatalf("expected first profile moved to top, got %q", profiles[0].Endpoint)
+	}
+	if profiles[1].Endpoint != "https://vm-b.example.com/metrics/insert/prometheus" {
+		t.Fatalf("unexpected second profile order: %q", profiles[1].Endpoint)
+	}
+}
+
 func TestHandleUploadSuccess(t *testing.T) {
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -89,12 +218,14 @@ func TestHandleUploadSuccess(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"test_metric"}]}`))
-		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"1y"}}`))
-		default:
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
+			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"1y"}}`))
+			case strings.HasSuffix(r.URL.Path, "/metrics"):
+				w.WriteHeader(http.StatusNotFound)
+			default:
+				t.Fatalf("unexpected path %s", r.URL.Path)
+			}
 	}))
 	defer downstream.Close()
 
@@ -139,6 +270,79 @@ func TestHandleUploadSuccess(t *testing.T) {
 	if job.Summary.SourceBytes == 0 || job.Summary.InflatedBytes == 0 {
 		t.Fatalf("expected byte accounting, got %+v", job.Summary)
 	}
+	profiles := srvImpl.recentProfilesSnapshot()
+	found := false
+	for _, profile := range profiles {
+		if profile.Endpoint == downstream.URL && profile.TenantID == "42" && profile.AuthType == "none" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected profile for endpoint=%q tenant=42 auth=none in %+v", downstream.URL, profiles)
+	}
+}
+
+func TestHandleUploadFailedImportStillSavesRecentProfile(t *testing.T) {
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/api/v1/import"):
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("bad gateway from test"))
+		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"30d"}}`))
+		case strings.HasSuffix(r.URL.Path, "/metrics"):
+			_, _ = w.Write([]byte(`flag{name="retentionPeriod", value="30d", is_set="true"} 1`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer downstream.Close()
+
+	srv := newServer("test", filepath.Join(t.TempDir(), "profiles.json"))
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	config := uploadConfig{Endpoint: downstream.URL, TenantID: "1042"}
+	configBytes, _ := json.Marshal(config)
+	_ = writer.WriteField("config", string(configBytes))
+	fileWriter, _ := writer.CreateFormFile("bundle", "test.jsonl")
+	fmt.Fprintf(fileWriter, `{"metric":{"__name__":"test_metric","job":"demo"},"values":[1],"timestamps":[%d]}`, recentTimestampMs())
+	_ = writer.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/upload", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+
+	srv.handleUpload(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var created struct {
+		JobID string `json:"job_id"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
+		t.Fatalf("failed to decode body: %v", err)
+	}
+
+	job := waitForJobCompletion(t, srv, created.JobID, 2*time.Second)
+	if job.State != jobStateFailed {
+		t.Fatalf("expected failed job state, got %+v", job)
+	}
+
+	profiles := srv.recentProfilesSnapshot()
+	found := false
+	for _, profile := range profiles {
+		if profile.Endpoint == downstream.URL && profile.TenantID == "1042" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected recent profile for failed import endpoint=%q tenant=1042 in %+v", downstream.URL, profiles)
+	}
 }
 
 func TestHandleUploadZipChunking(t *testing.T) {
@@ -157,12 +361,14 @@ func TestHandleUploadZipChunking(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"demo"}]}`))
-		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"30d"}}`))
-		default:
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
+			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"30d"}}`))
+			case strings.HasSuffix(r.URL.Path, "/metrics"):
+				w.WriteHeader(http.StatusNotFound)
+			default:
+				t.Fatalf("unexpected path %s", r.URL.Path)
+			}
 	}))
 	defer downstream.Close()
 
@@ -212,6 +418,69 @@ func TestHandleUploadZipChunking(t *testing.T) {
 	}
 	if bytes.Contains(imports[0], []byte(`"values":["`)) {
 		t.Fatalf("expected numeric values, got %s", imports[0])
+	}
+}
+
+func TestHandleUploadAppliesMaxLabelsLimitToSummary(t *testing.T) {
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/api/v1/import"):
+			w.WriteHeader(http.StatusAccepted)
+		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"demo"}]}`))
+		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"30d"}}`))
+		case strings.HasSuffix(r.URL.Path, "/metrics"):
+			_, _ = io.WriteString(w, "flag{name=\"maxLabelsPerTimeseries\", value=\"2\", is_set=\"true\"} 1\n")
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer downstream.Close()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	config := uploadConfig{Endpoint: downstream.URL, TenantID: "12"}
+	configBytes, _ := json.Marshal(config)
+	_ = writer.WriteField("config", string(configBytes))
+	fileWriter, _ := writer.CreateFormFile("bundle", "labels.jsonl")
+	_, _ = fmt.Fprintf(fileWriter, `{"metric":{"__name__":"demo_metric","job":"demo","instance":"i-1"},"values":[1],"timestamps":[%d]}`, recentTimestampMs())
+	_ = writer.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/upload", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+
+	srv := NewServer("test")
+	srv.handleUpload(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var created struct {
+		JobID string `json:"job_id"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+
+	job := waitForJobCompletion(t, srv, created.JobID, 2*time.Second)
+	if job.State != jobStateCompleted {
+		t.Fatalf("job failed: %+v", job)
+	}
+	if job.Summary == nil {
+		t.Fatalf("missing summary in completed job")
+	}
+	if job.Summary.MaxLabelsSeen == 0 {
+		t.Fatalf("expected max labels to be tracked, got %+v", job.Summary)
+	}
+	if job.Summary.OverLabelLimit == 0 {
+		t.Fatalf("expected over label limit count > 0, got %+v", job.Summary)
+	}
+	if job.Summary.OverLimitPts == 0 {
+		t.Fatalf("expected over-limit points > 0, got %+v", job.Summary)
 	}
 }
 
@@ -332,7 +601,7 @@ func TestHandleCheckEndpoint(t *testing.T) {
 	}))
 	defer downstream.Close()
 
-	srv := NewServer("test")
+	srv := newServer("test", filepath.Join(t.TempDir(), "profiles.json"))
 	reqBody := bytes.NewBufferString(fmt.Sprintf(`{"endpoint":"%s","tenant_id":"42"}`, downstream.URL))
 	req := httptest.NewRequest(http.MethodPost, "/api/check-endpoint", reqBody)
 	recorder := httptest.NewRecorder()
@@ -340,6 +609,13 @@ func TestHandleCheckEndpoint(t *testing.T) {
 	srv.handleCheckEndpoint(recorder, req)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", recorder.Code)
+	}
+	profiles := srv.recentProfilesSnapshot()
+	if len(profiles) != 1 {
+		t.Fatalf("expected 1 recent profile, got %d", len(profiles))
+	}
+	if profiles[0].Endpoint != downstream.URL || profiles[0].TenantID != "42" {
+		t.Fatalf("unexpected recent profile: %+v", profiles[0])
 	}
 }
 
@@ -369,12 +645,14 @@ func TestNormalizeStringValuesDuringImport(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"flag"}]}`))
-		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"90d"}}`))
-		default:
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
+			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"90d"}}`))
+			case strings.HasSuffix(r.URL.Path, "/metrics"):
+				w.WriteHeader(http.StatusNotFound)
+			default:
+				t.Fatalf("unexpected path %s", r.URL.Path)
+			}
 	}))
 	defer downstream.Close()
 
@@ -442,12 +720,14 @@ func TestResumeImportAfterFailure(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"demo"}]}`))
-		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"30d"}}`))
-		default:
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
+			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"30d"}}`))
+			case strings.HasSuffix(r.URL.Path, "/metrics"):
+				w.WriteHeader(http.StatusNotFound)
+			default:
+				t.Fatalf("unexpected path %s", r.URL.Path)
+			}
 	}))
 	defer downstream.Close()
 
@@ -517,12 +797,14 @@ func TestTenantIsolationHeaders(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"demo"}]}`))
-		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"400d"}}`))
-		default:
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
+			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"400d"}}`))
+			case strings.HasSuffix(r.URL.Path, "/metrics"):
+				w.WriteHeader(http.StatusNotFound)
+			default:
+				t.Fatalf("unexpected path %s", r.URL.Path)
+			}
 	}))
 	defer downstream.Close()
 
@@ -577,13 +859,15 @@ func TestRetentionDropsOldPoints(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"demo"}]}`))
-		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-			w.Header().Set("Content-Type", "application/json")
-			// 1 hour retention ensures oldTs is dropped, newTs kept
-			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"1h"}}`))
-		default:
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
+			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+				w.Header().Set("Content-Type", "application/json")
+				// 1 hour retention ensures oldTs is dropped, newTs kept
+				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"1h"}}`))
+			case strings.HasSuffix(r.URL.Path, "/metrics"):
+				w.WriteHeader(http.StatusNotFound)
+			default:
+				t.Fatalf("unexpected path %s", r.URL.Path)
+			}
 	}))
 	defer downstream.Close()
 
@@ -638,12 +922,14 @@ func TestSkipsNonNumericValues(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"demo"}]}`))
-		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"365d"}}`))
-		default:
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
+			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"365d"}}`))
+			case strings.HasSuffix(r.URL.Path, "/metrics"):
+				w.WriteHeader(http.StatusNotFound)
+			default:
+				t.Fatalf("unexpected path %s", r.URL.Path)
+			}
 	}))
 	defer downstream.Close()
 
@@ -699,16 +985,271 @@ func TestAnalyzeBundleRetentionAndWarnings(t *testing.T) {
 
 	srv := NewServer("test")
 	bundle := &bundleInfo{MetricsPath: tmpPath, OriginalBytes: int64(len(payload)), ExtractedBytes: int64(len(payload))}
-	summary, err := srv.analyzeBundle(context.Background(), bundle, 5000, 0)
+	summary, err := srv.analyzeBundle(context.Background(), bundle, 5000, 0, 0, nil, 0)
 	if err != nil {
 		t.Fatalf("analyze failed: %v", err)
 	}
 	if summary.DroppedOld == 0 {
 		t.Fatalf("expected old samples dropped, got %+v", summary)
 	}
-	warnings := buildAnalysisWarnings(summary, 5000)
+	warnings := buildAnalysisWarnings(summary, 5000, 0)
 	if len(warnings) == 0 {
 		t.Fatalf("expected retention warning")
+	}
+}
+
+func TestAnalyzeBundleWarnsOnTargetLabelLimit(t *testing.T) {
+	payload := `{"metric":{"__name__":"demo","job":"preflight","instance":"i-1"},"values":[1],"timestamps":[20000]}`
+	tmpPath := ensureTestFile(t, "bundle-label-limit.jsonl", func(w io.Writer) error {
+		_, err := io.WriteString(w, payload)
+		return err
+	})
+
+	srv := NewServer("test")
+	bundle := &bundleInfo{MetricsPath: tmpPath, OriginalBytes: int64(len(payload)), ExtractedBytes: int64(len(payload))}
+	summary, err := srv.analyzeBundle(context.Background(), bundle, 0, 0, 2, nil, 0)
+	if err != nil {
+		t.Fatalf("analyze failed: %v", err)
+	}
+	if summary.OverLabelLimit == 0 {
+		t.Fatalf("expected over-limit series, got %+v", summary)
+	}
+	warnings := buildAnalysisWarnings(summary, 0, 2)
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "maxLabelsPerTimeseries=2") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected maxLabels warning, got %v", warnings)
+	}
+}
+
+func TestAnalyzeBundleDropLabelsCanReduceLimitRisk(t *testing.T) {
+	payload := `{"metric":{"__name__":"demo","job":"preflight","instance":"i-1","cluster":"c1","pod":"p1"},"values":[1],"timestamps":[20000]}`
+	tmpPath := ensureTestFile(t, "bundle-label-limit-drop.jsonl", func(w io.Writer) error {
+		_, err := io.WriteString(w, payload)
+		return err
+	})
+
+	srv := NewServer("test")
+	bundle := &bundleInfo{MetricsPath: tmpPath, OriginalBytes: int64(len(payload)), ExtractedBytes: int64(len(payload))}
+	summary, err := srv.analyzeBundle(context.Background(), bundle, 0, 0, 4, []string{"cluster", "pod"}, 0)
+	if err != nil {
+		t.Fatalf("analyze failed: %v", err)
+	}
+	if summary.TotalLabels != 5 {
+		t.Fatalf("expected total labels=5 before drops, got %d", summary.TotalLabels)
+	}
+	if summary.OverLabelLimit != 0 {
+		t.Fatalf("expected no over-limit series after label drop, got %+v", summary)
+	}
+	if summary.MaxLabelsSeen > 4 {
+		t.Fatalf("expected max labels <= 4 after drop, got %d", summary.MaxLabelsSeen)
+	}
+}
+
+func TestHandleAnalyzeDropLabelsReduceLabelRisk(t *testing.T) {
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/status/tsdb":
+			w.WriteHeader(http.StatusNotFound)
+		case "/metrics":
+			_, _ = io.WriteString(w, "flag{name=\"maxLabelsPerTimeseries\", value=\"4\", is_set=\"true\"} 1\n")
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer downstream.Close()
+
+	srv := NewServer("test")
+	rec := httptest.NewRecorder()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	config := uploadConfig{
+		Endpoint:   downstream.URL,
+		DropOld:    true,
+		DropLabels: []string{"cluster", "pod"},
+	}
+	cfgBytes, _ := json.Marshal(config)
+	_ = writer.WriteField("config", string(cfgBytes))
+	fw, _ := writer.CreateFormFile("bundle", "demo.jsonl")
+	_, _ = io.WriteString(fw, `{"metric":{"__name__":"demo","job":"preflight","instance":"i-1","cluster":"c1","pod":"p1"},"values":[1],"timestamps":[20000]}`)
+	_ = writer.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/analyze", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	srv.handleAnalyze(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Summary struct {
+			OverLabelLimit int         `json:"over_label_limit"`
+			TotalLabels    int         `json:"total_labels"`
+			LabelStats     []labelStat `json:"label_stats"`
+		} `json:"summary"`
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if resp.Summary.OverLabelLimit != 0 {
+		t.Fatalf("expected zero over-limit series after drop labels, got %d", resp.Summary.OverLabelLimit)
+	}
+	if len(resp.Summary.LabelStats) == 0 {
+		t.Fatalf("expected label stats to be present")
+	}
+	if resp.Summary.TotalLabels != 5 {
+		t.Fatalf("expected total_labels=5, got %d", resp.Summary.TotalLabels)
+	}
+	for _, warning := range resp.Warnings {
+		if strings.Contains(warning, "maxLabelsPerTimeseries") {
+			t.Fatalf("did not expect label-limit warning after drops, got %v", resp.Warnings)
+		}
+	}
+}
+
+func TestBuildLabelStatsSortedAndLimited(t *testing.T) {
+	stats := buildLabelStats(map[string]int{
+		"z": 3,
+		"a": 3,
+		"m": 5,
+		"b": 1,
+	}, 3)
+	if len(stats) != 3 {
+		t.Fatalf("expected 3 stats, got %d", len(stats))
+	}
+	if stats[0].Name != "m" || stats[0].Count != 5 {
+		t.Fatalf("unexpected top stat: %+v", stats[0])
+	}
+	// tie on count=3 should be name ascending
+	if stats[1].Name != "a" || stats[2].Name != "z" {
+		t.Fatalf("unexpected tie ordering: %+v", stats)
+	}
+}
+
+func TestAnalyzeBundleReportsAllDetectedLabels(t *testing.T) {
+	metric := map[string]string{
+		"__name__": "demo_total_labels",
+		"job":      "preflight",
+		"instance": "i-1",
+	}
+	for i := 0; i < 45; i++ {
+		metric[fmt.Sprintf("label_%02d", i)] = "v"
+	}
+	lineBytes, err := json.Marshal(metricLine{
+		Metric:     metric,
+		Values:     []json.RawMessage{json.RawMessage("1")},
+		Timestamps: []int64{recentTimestampMs()},
+	})
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	tmpPath := ensureTestFile(t, "bundle-total-labels.jsonl", func(w io.Writer) error {
+		_, writeErr := fmt.Fprintf(w, "%s\n", lineBytes)
+		return writeErr
+	})
+	srv := NewServer("test")
+	bundle := &bundleInfo{MetricsPath: tmpPath, OriginalBytes: int64(len(lineBytes)), ExtractedBytes: int64(len(lineBytes))}
+	summary, err := srv.analyzeBundle(context.Background(), bundle, 0, 0, 0, nil, 0)
+	if err != nil {
+		t.Fatalf("analyze failed: %v", err)
+	}
+	if summary.TotalLabels != 48 {
+		t.Fatalf("expected total labels=48, got %d", summary.TotalLabels)
+	}
+	if len(summary.LabelStats) != 48 {
+		t.Fatalf("expected all 48 label stats, got %d", len(summary.LabelStats))
+	}
+	if len(summary.LabelUniverse) != 48 {
+		t.Fatalf("expected label universe size=48, got %d", len(summary.LabelUniverse))
+	}
+	if len(summary.LabelBitsets) != 1 {
+		t.Fatalf("expected 1 label bitset row, got %d", len(summary.LabelBitsets))
+	}
+	if len(summary.LabelCounts) != 1 || summary.LabelCounts[0] != 48 {
+		t.Fatalf("expected one series label count=48, got %v", summary.LabelCounts)
+	}
+	if len(summary.PointCounts) != 1 || summary.PointCounts[0] != 1 {
+		t.Fatalf("expected one series point count=1, got %v", summary.PointCounts)
+	}
+	if summary.SimSeries != 1 {
+		t.Fatalf("expected simulation_series=1, got %d", summary.SimSeries)
+	}
+}
+
+func TestAnalyzeBundleSampleLimitAndFullCollection(t *testing.T) {
+	tmpPath := ensureTestFile(t, "bundle-sample-limit.jsonl", func(w io.Writer) error {
+		ts := recentTimestampMs()
+		for i := 0; i < 2105; i++ {
+			if _, err := fmt.Fprintf(w, `{"metric":{"__name__":"sample_limit_demo","job":"preflight","instance":"i-%d","label_%d":"x"},"values":[1],"timestamps":[%d]}`+"\n", i, i, ts); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	srv := NewServer("test")
+	bundle := &bundleInfo{
+		MetricsPath:    tmpPath,
+		OriginalBytes:  1,
+		ExtractedBytes: 1,
+	}
+
+	sampleSummary, err := srv.analyzeBundle(context.Background(), bundle, 0, 0, 0, nil, defaultAnalyzeSampleLines)
+	if err != nil {
+		t.Fatalf("sample analyze failed: %v", err)
+	}
+	if sampleSummary.ScannedLines != defaultAnalyzeSampleLines {
+		t.Fatalf("expected scanned_lines=%d, got %d", defaultAnalyzeSampleLines, sampleSummary.ScannedLines)
+	}
+	if !sampleSummary.SampleCut {
+		t.Fatalf("expected sample_cut=true for sample-limited analysis")
+	}
+
+	fullSummary, err := srv.analyzeBundle(context.Background(), bundle, 0, 0, 0, nil, 0)
+	if err != nil {
+		t.Fatalf("full analyze failed: %v", err)
+	}
+	if fullSummary.ScannedLines != 2105 {
+		t.Fatalf("expected full scanned_lines=2105, got %d", fullSummary.ScannedLines)
+	}
+	if fullSummary.SampleCut {
+		t.Fatalf("expected sample_cut=false for full analysis")
+	}
+}
+
+func TestSanitizeDropLabelsProtectsCoreLabels(t *testing.T) {
+	got := sanitizeDropLabels([]string{"cluster", "job", "__name__", "instance", "pod", "cluster", ""})
+	want := []string{"cluster", "pod"}
+	if len(got) != len(want) {
+		t.Fatalf("unexpected sanitized labels: got %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected sanitized labels: got %v want %v", got, want)
+		}
+	}
+}
+
+func TestMaxLabelsPerTimeseriesFromMetrics(t *testing.T) {
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/metrics" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = io.WriteString(w, "flag{name=\"maxLabelsPerTimeseries\", value=\"77\", is_set=\"true\"} 1\n")
+	}))
+	defer downstream.Close()
+
+	srv := NewServer("test")
+	limit := srv.maxLabelsPerTimeseries(context.Background(), uploadConfig{Endpoint: downstream.URL})
+	if limit != 77 {
+		t.Fatalf("expected maxLabelsPerTimeseries=77, got %d", limit)
 	}
 }
 
@@ -752,6 +1293,403 @@ func TestHandleAnalyzeEndpoint(t *testing.T) {
 	}
 	if payloadResp.Summary.DroppedOld == 0 {
 		t.Fatalf("expected dropped old samples due to retention")
+	}
+}
+
+func TestHandleAnalyzeIncludesLabelLimitWarning(t *testing.T) {
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/status/tsdb":
+			w.WriteHeader(http.StatusNotFound)
+		case "/metrics":
+			_, _ = io.WriteString(w, "flag{name=\"retentionPeriod\", value=\"1d\", is_set=\"true\"} 1\n")
+			_, _ = io.WriteString(w, "flag{name=\"maxLabelsPerTimeseries\", value=\"2\", is_set=\"true\"} 1\n")
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer downstream.Close()
+
+	srv := NewServer("test")
+	rec := httptest.NewRecorder()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	config := uploadConfig{Endpoint: downstream.URL, DropOld: true}
+	cfgBytes, _ := json.Marshal(config)
+	writer.WriteField("config", string(cfgBytes))
+	fw, _ := writer.CreateFormFile("bundle", "demo.jsonl")
+	_, _ = io.WriteString(fw, `{"metric":{"__name__":"demo","job":"preflight","instance":"i-1"},"values":[1],"timestamps":[20000]}`)
+	_ = writer.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/analyze", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	srv.handleAnalyze(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		MaxLabelsLimit int      `json:"max_labels_limit"`
+		Protected      []string `json:"protected_labels"`
+		Summary        struct {
+			OverLabelLimit int `json:"over_label_limit"`
+			TotalLabels    int `json:"total_labels"`
+		} `json:"summary"`
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if resp.MaxLabelsLimit != 2 {
+		t.Fatalf("expected max label limit 2, got %d", resp.MaxLabelsLimit)
+	}
+	if resp.Summary.OverLabelLimit == 0 {
+		t.Fatalf("expected over label limit > 0, got %+v", resp.Summary)
+	}
+	if resp.Summary.TotalLabels == 0 {
+		t.Fatalf("expected non-zero total labels in summary")
+	}
+	if len(resp.Protected) == 0 || resp.Protected[0] != "__name__" {
+		t.Fatalf("expected protected label list in response, got %v", resp.Protected)
+	}
+	found := false
+	for _, w := range resp.Warnings {
+		if strings.Contains(w, "maxLabelsPerTimeseries=2") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected label limit warning, got %v", resp.Warnings)
+	}
+}
+
+func TestHandleAnalyzeWarnsWhenMaxLabelsUnknownAndHighSeen(t *testing.T) {
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/status/tsdb":
+			w.WriteHeader(http.StatusNotFound)
+		case "/metrics":
+			_, _ = io.WriteString(w, "flag{name=\"retentionPeriod\", value=\"1d\", is_set=\"true\"} 1\n")
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer downstream.Close()
+
+	srv := NewServer("test")
+	rec := httptest.NewRecorder()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	config := uploadConfig{Endpoint: downstream.URL, DropOld: true}
+	cfgBytes, _ := json.Marshal(config)
+	_ = writer.WriteField("config", string(cfgBytes))
+	fw, _ := writer.CreateFormFile("bundle", "labels.jsonl")
+	metric := map[string]string{
+		"__name__": "demo_labels",
+		"job":      "preflight",
+		"instance": "i-1",
+	}
+	for i := 0; i < 50; i++ {
+		metric[fmt.Sprintf("label_%d", i)] = "x"
+	}
+	line, _ := json.Marshal(metricLine{
+		Metric:     metric,
+		Values:     []json.RawMessage{json.RawMessage("1")},
+		Timestamps: []int64{recentTimestampMs()},
+	})
+	_, _ = io.WriteString(fw, string(line))
+	_ = writer.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/analyze", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	srv.handleAnalyze(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		MaxLabelsLimit int `json:"max_labels_limit"`
+		Summary        struct {
+			MaxLabelsSeen int `json:"max_labels_seen"`
+		} `json:"summary"`
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if resp.MaxLabelsLimit != 0 {
+		t.Fatalf("expected unknown max label limit (0), got %d", resp.MaxLabelsLimit)
+	}
+	if resp.Summary.MaxLabelsSeen <= 40 {
+		t.Fatalf("expected max labels seen > 40, got %d", resp.Summary.MaxLabelsSeen)
+	}
+	found := false
+	for _, warning := range resp.Warnings {
+		if strings.Contains(warning, "could not be read") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected warning for unknown maxLabelsPerTimeseries, got %v", resp.Warnings)
+	}
+}
+
+func TestHandleAnalyzeDefaultsToSampleModeWith2000Lines(t *testing.T) {
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/status/tsdb":
+			w.WriteHeader(http.StatusNotFound)
+		case "/metrics":
+			_, _ = io.WriteString(w, "flag{name=\"retentionPeriod\", value=\"1d\", is_set=\"true\"} 1\n")
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer downstream.Close()
+
+	srv := NewServer("test")
+	rec := httptest.NewRecorder()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	config := uploadConfig{Endpoint: downstream.URL, DropOld: true}
+	cfgBytes, _ := json.Marshal(config)
+	_ = writer.WriteField("config", string(cfgBytes))
+	fw, _ := writer.CreateFormFile("bundle", "sample-default.jsonl")
+	for i := 0; i < 2101; i++ {
+		_, _ = io.WriteString(fw, fmt.Sprintf(`{"metric":{"__name__":"demo","job":"preflight","instance":"i-%d"},"values":[1],"timestamps":[%d]}`+"\n", i, recentTimestampMs()))
+	}
+	_ = writer.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/analyze", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	srv.handleAnalyze(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		AnalysisMode string `json:"analysis_mode"`
+		Summary      struct {
+			ScannedLines int  `json:"scanned_lines"`
+			SampleCut    bool `json:"sample_cut"`
+			SampleLimit  int  `json:"sample_limit"`
+		} `json:"summary"`
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if resp.AnalysisMode != "sample" {
+		t.Fatalf("expected analysis_mode=sample, got %q", resp.AnalysisMode)
+	}
+	if resp.Summary.ScannedLines != defaultAnalyzeSampleLines {
+		t.Fatalf("expected scanned_lines=%d, got %d", defaultAnalyzeSampleLines, resp.Summary.ScannedLines)
+	}
+	if !resp.Summary.SampleCut {
+		t.Fatalf("expected sample_cut=true")
+	}
+	if resp.Summary.SampleLimit != defaultAnalyzeSampleLines {
+		t.Fatalf("expected sample_limit=%d, got %d", defaultAnalyzeSampleLines, resp.Summary.SampleLimit)
+	}
+	found := false
+	for _, warning := range resp.Warnings {
+		if strings.Contains(warning, "Use Full collection") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected sampling warning in %v", resp.Warnings)
+	}
+}
+
+func TestHandleAnalyzeFullCollectionMode(t *testing.T) {
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/status/tsdb":
+			w.WriteHeader(http.StatusNotFound)
+		case "/metrics":
+			_, _ = io.WriteString(w, "flag{name=\"retentionPeriod\", value=\"1d\", is_set=\"true\"} 1\n")
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer downstream.Close()
+
+	srv := NewServer("test")
+	rec := httptest.NewRecorder()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	config := uploadConfig{Endpoint: downstream.URL, DropOld: true}
+	cfgBytes, _ := json.Marshal(config)
+	_ = writer.WriteField("config", string(cfgBytes))
+	_ = writer.WriteField("full_collection", "1")
+	fw, _ := writer.CreateFormFile("bundle", "demo.jsonl")
+	for i := 0; i < 2101; i++ {
+		_, _ = io.WriteString(fw, fmt.Sprintf(`{"metric":{"__name__":"demo","job":"preflight","instance":"i-%d"},"values":[1],"timestamps":[%d]}`+"\n", i, recentTimestampMs()))
+	}
+	_ = writer.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/analyze", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	srv.handleAnalyze(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		AnalysisMode string `json:"analysis_mode"`
+		Summary      struct {
+			ScannedLines int  `json:"scanned_lines"`
+			SampleCut    bool `json:"sample_cut"`
+		} `json:"summary"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if resp.AnalysisMode != "full" {
+		t.Fatalf("expected analysis_mode=full, got %q", resp.AnalysisMode)
+	}
+	if resp.Summary.ScannedLines != 2101 {
+		t.Fatalf("expected scanned_lines=2101, got %d", resp.Summary.ScannedLines)
+	}
+	if resp.Summary.SampleCut {
+		t.Fatalf("expected sample_cut=false for full collection")
+	}
+}
+
+func TestHandleAnalyzeUsesManualMaxLabelsOverride(t *testing.T) {
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/status/tsdb":
+			w.WriteHeader(http.StatusNotFound)
+		case "/metrics":
+			_, _ = io.WriteString(w, "flag{name=\"retentionPeriod\", value=\"1d\", is_set=\"true\"} 1\n")
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer downstream.Close()
+
+	srv := NewServer("test")
+	rec := httptest.NewRecorder()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	config := uploadConfig{
+		Endpoint:          downstream.URL,
+		DropOld:           true,
+		MaxLabelsOverride: 20,
+	}
+	cfgBytes, _ := json.Marshal(config)
+	_ = writer.WriteField("config", string(cfgBytes))
+	fw, _ := writer.CreateFormFile("bundle", "labels.jsonl")
+	metric := map[string]string{
+		"__name__": "demo_labels",
+		"job":      "preflight",
+		"instance": "i-1",
+	}
+	for i := 0; i < 50; i++ {
+		metric[fmt.Sprintf("label_%d", i)] = "x"
+	}
+	line, _ := json.Marshal(metricLine{
+		Metric:     metric,
+		Values:     []json.RawMessage{json.RawMessage("1")},
+		Timestamps: []int64{recentTimestampMs()},
+	})
+	_, _ = io.WriteString(fw, string(line))
+	_ = writer.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/analyze", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	srv.handleAnalyze(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		MaxLabelsLimit int    `json:"max_labels_limit"`
+		MaxLabelsSrc   string `json:"max_labels_source"`
+		Summary        struct {
+			MaxLabelsSeen int `json:"max_labels_seen"`
+			OverLabel     int `json:"over_label_limit"`
+		} `json:"summary"`
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if resp.MaxLabelsLimit != 20 {
+		t.Fatalf("expected manual max labels limit 20, got %d", resp.MaxLabelsLimit)
+	}
+	if resp.MaxLabelsSrc != "manual" {
+		t.Fatalf("expected max_labels_source=manual, got %q", resp.MaxLabelsSrc)
+	}
+	if resp.Summary.MaxLabelsSeen <= 20 {
+		t.Fatalf("expected max labels seen > 20, got %d", resp.Summary.MaxLabelsSeen)
+	}
+	if resp.Summary.OverLabel == 0 {
+		t.Fatalf("expected over_label_limit > 0 with manual limit override")
+	}
+	found := false
+	for _, warning := range resp.Warnings {
+		if strings.Contains(warning, "maxLabelsPerTimeseries=20") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected warning with manual limit 20, got %v", resp.Warnings)
+	}
+}
+
+func TestStreamImportDropsSelectedLabelsButKeepsProtected(t *testing.T) {
+	var imported []byte
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/api/v1/import") {
+			var err error
+			imported, err = io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("failed reading body: %v", err)
+			}
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer downstream.Close()
+
+	tmpPath := ensureTestFile(t, "demo-drop-labels.jsonl", func(w io.Writer) error {
+		_, err := fmt.Fprintf(w, `{"metric":{"__name__":"demo","job":"j1","instance":"i1","cluster":"c1","pod":"p1"},"values":[1],"timestamps":[%d]}`+"\n", recentTimestampMs())
+		return err
+	})
+
+	bundle := &bundleInfo{MetricsPath: tmpPath, OriginalBytes: 128, ExtractedBytes: 128}
+	srv := NewServer("test")
+	cfg := uploadConfig{DropLabels: []string{"cluster", "pod", "job"}}
+	_, _, err := srv.streamImport(context.Background(), cfg, bundle, downstream.URL+"/api/v1/import", 0, 0, 0, 0, nil)
+	if err != nil {
+		t.Fatalf("streamImport failed: %v", err)
+	}
+	if len(imported) == 0 {
+		t.Fatalf("expected import body")
+	}
+	line := strings.TrimSpace(string(imported))
+	var payload struct {
+		Metric map[string]string `json:"metric"`
+	}
+	if err := json.Unmarshal([]byte(line), &payload); err != nil {
+		t.Fatalf("failed to decode import line: %v, line=%s", err, line)
+	}
+	if _, exists := payload.Metric["cluster"]; exists {
+		t.Fatalf("expected cluster to be dropped, got %v", payload.Metric)
+	}
+	if _, exists := payload.Metric["pod"]; exists {
+		t.Fatalf("expected pod to be dropped, got %v", payload.Metric)
+	}
+	if payload.Metric["job"] == "" || payload.Metric["instance"] == "" || payload.Metric["__name__"] == "" {
+		t.Fatalf("protected labels must remain, got %v", payload.Metric)
 	}
 }
 
@@ -860,7 +1798,7 @@ func TestStreamImportNoCutoffWhenDisabled(t *testing.T) {
 	bundle := &bundleInfo{MetricsPath: tmpPath, OriginalBytes: 63, ExtractedBytes: 63}
 	srv := NewServer("test")
 	cfg := uploadConfig{}
-	_, summary, err := srv.streamImport(context.Background(), cfg, bundle, downstream.URL+"/api/v1/import", 0, 0, 0, nil)
+	_, summary, err := srv.streamImport(context.Background(), cfg, bundle, downstream.URL+"/api/v1/import", 0, 0, 0, 0, nil)
 	if err != nil {
 		t.Fatalf("streamImport failed: %v", err)
 	}
@@ -885,7 +1823,7 @@ func TestAnalyzeBundleSuggestedShiftAndWarnings(t *testing.T) {
 	srv := NewServer("test")
 	bundle := &bundleInfo{MetricsPath: tmpPath, OriginalBytes: int64(len(payload)), ExtractedBytes: int64(len(payload))}
 	retentionCutoff := now - int64(1*time.Hour/time.Millisecond)
-	summary, err := srv.analyzeBundle(context.Background(), bundle, retentionCutoff, 0)
+	summary, err := srv.analyzeBundle(context.Background(), bundle, retentionCutoff, 0, 0, nil, 0)
 	if err != nil {
 		t.Fatalf("analyzeBundle failed: %v", err)
 	}
@@ -895,7 +1833,7 @@ func TestAnalyzeBundleSuggestedShiftAndWarnings(t *testing.T) {
 	if summary.DroppedOld == 0 {
 		t.Fatalf("expected drops under retention cutoff, got %+v", summary)
 	}
-	warnings := buildAnalysisWarnings(summary, retentionCutoff)
+	warnings := buildAnalysisWarnings(summary, retentionCutoff, 0)
 	if len(warnings) == 0 {
 		t.Fatalf("expected warnings for retention and span")
 	}
@@ -912,7 +1850,7 @@ func TestAnalyzeBundleSkipsInvalidTimestamps(t *testing.T) {
 	})
 	srv := NewServer("test")
 	bundle := &bundleInfo{MetricsPath: tmpPath, OriginalBytes: int64(len(payload)), ExtractedBytes: int64(len(payload))}
-	summary, err := srv.analyzeBundle(context.Background(), bundle, 0, 0)
+	summary, err := srv.analyzeBundle(context.Background(), bundle, 0, 0, 0, nil, 0)
 	if err != nil {
 		t.Fatalf("analyzeBundle failed: %v", err)
 	}
@@ -928,7 +1866,7 @@ func TestBuildAnalysisWarningsSpanExceedsWindow(t *testing.T) {
 		Start: now.Add(-3 * time.Hour),
 		End:   now.Add(-30 * time.Minute),
 	}
-	w := buildAnalysisWarnings(summary, cutoff.UnixMilli())
+	w := buildAnalysisWarnings(summary, cutoff.UnixMilli(), 0)
 	if len(w) == 0 {
 		t.Fatalf("expected warnings for span exceeding window")
 	}
