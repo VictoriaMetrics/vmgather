@@ -34,6 +34,13 @@ function sanitizeWebAddr(addr) {
 }
 
 const safeWebAddr = sanitizeWebAddr(webAddr || defaultWebAddr);
+try {
+  const parsed = new URL(baseURL);
+  parsed.host = safeWebAddr;
+  baseURL = parsed.toString().replace(/\/$/, '');
+} catch (_err) {
+  baseURL = `http://${safeWebAddr}`;
+}
 
 module.exports = defineConfig({
   testDir: './importer-specs',
