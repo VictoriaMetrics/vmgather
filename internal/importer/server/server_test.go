@@ -218,12 +218,14 @@ func TestHandleUploadSuccess(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"test_metric"}]}`))
-		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"1y"}}`))
-		default:
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
+			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"1y"}}`))
+			case strings.HasSuffix(r.URL.Path, "/metrics"):
+				w.WriteHeader(http.StatusNotFound)
+			default:
+				t.Fatalf("unexpected path %s", r.URL.Path)
+			}
 	}))
 	defer downstream.Close()
 
@@ -359,12 +361,14 @@ func TestHandleUploadZipChunking(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"demo"}]}`))
-		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"30d"}}`))
-		default:
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
+			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"30d"}}`))
+			case strings.HasSuffix(r.URL.Path, "/metrics"):
+				w.WriteHeader(http.StatusNotFound)
+			default:
+				t.Fatalf("unexpected path %s", r.URL.Path)
+			}
 	}))
 	defer downstream.Close()
 
@@ -414,6 +418,69 @@ func TestHandleUploadZipChunking(t *testing.T) {
 	}
 	if bytes.Contains(imports[0], []byte(`"values":["`)) {
 		t.Fatalf("expected numeric values, got %s", imports[0])
+	}
+}
+
+func TestHandleUploadAppliesMaxLabelsLimitToSummary(t *testing.T) {
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/api/v1/import"):
+			w.WriteHeader(http.StatusAccepted)
+		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"demo"}]}`))
+		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"30d"}}`))
+		case strings.HasSuffix(r.URL.Path, "/metrics"):
+			_, _ = io.WriteString(w, "flag{name=\"maxLabelsPerTimeseries\", value=\"2\", is_set=\"true\"} 1\n")
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer downstream.Close()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	config := uploadConfig{Endpoint: downstream.URL, TenantID: "12"}
+	configBytes, _ := json.Marshal(config)
+	_ = writer.WriteField("config", string(configBytes))
+	fileWriter, _ := writer.CreateFormFile("bundle", "labels.jsonl")
+	_, _ = fmt.Fprintf(fileWriter, `{"metric":{"__name__":"demo_metric","job":"demo","instance":"i-1"},"values":[1],"timestamps":[%d]}`, recentTimestampMs())
+	_ = writer.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/upload", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+
+	srv := NewServer("test")
+	srv.handleUpload(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var created struct {
+		JobID string `json:"job_id"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+
+	job := waitForJobCompletion(t, srv, created.JobID, 2*time.Second)
+	if job.State != jobStateCompleted {
+		t.Fatalf("job failed: %+v", job)
+	}
+	if job.Summary == nil {
+		t.Fatalf("missing summary in completed job")
+	}
+	if job.Summary.MaxLabelsSeen == 0 {
+		t.Fatalf("expected max labels to be tracked, got %+v", job.Summary)
+	}
+	if job.Summary.OverLabelLimit == 0 {
+		t.Fatalf("expected over label limit count > 0, got %+v", job.Summary)
+	}
+	if job.Summary.OverLimitPts == 0 {
+		t.Fatalf("expected over-limit points > 0, got %+v", job.Summary)
 	}
 }
 
@@ -578,12 +645,14 @@ func TestNormalizeStringValuesDuringImport(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"flag"}]}`))
-		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"90d"}}`))
-		default:
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
+			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"90d"}}`))
+			case strings.HasSuffix(r.URL.Path, "/metrics"):
+				w.WriteHeader(http.StatusNotFound)
+			default:
+				t.Fatalf("unexpected path %s", r.URL.Path)
+			}
 	}))
 	defer downstream.Close()
 
@@ -651,12 +720,14 @@ func TestResumeImportAfterFailure(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"demo"}]}`))
-		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"30d"}}`))
-		default:
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
+			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"30d"}}`))
+			case strings.HasSuffix(r.URL.Path, "/metrics"):
+				w.WriteHeader(http.StatusNotFound)
+			default:
+				t.Fatalf("unexpected path %s", r.URL.Path)
+			}
 	}))
 	defer downstream.Close()
 
@@ -726,12 +797,14 @@ func TestTenantIsolationHeaders(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"demo"}]}`))
-		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"400d"}}`))
-		default:
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
+			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"400d"}}`))
+			case strings.HasSuffix(r.URL.Path, "/metrics"):
+				w.WriteHeader(http.StatusNotFound)
+			default:
+				t.Fatalf("unexpected path %s", r.URL.Path)
+			}
 	}))
 	defer downstream.Close()
 
@@ -786,13 +859,15 @@ func TestRetentionDropsOldPoints(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"demo"}]}`))
-		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-			w.Header().Set("Content-Type", "application/json")
-			// 1 hour retention ensures oldTs is dropped, newTs kept
-			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"1h"}}`))
-		default:
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
+			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+				w.Header().Set("Content-Type", "application/json")
+				// 1 hour retention ensures oldTs is dropped, newTs kept
+				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"1h"}}`))
+			case strings.HasSuffix(r.URL.Path, "/metrics"):
+				w.WriteHeader(http.StatusNotFound)
+			default:
+				t.Fatalf("unexpected path %s", r.URL.Path)
+			}
 	}))
 	defer downstream.Close()
 
@@ -847,12 +922,14 @@ func TestSkipsNonNumericValues(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"demo"}]}`))
-		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"365d"}}`))
-		default:
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
+			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"365d"}}`))
+			case strings.HasSuffix(r.URL.Path, "/metrics"):
+				w.WriteHeader(http.StatusNotFound)
+			default:
+				t.Fatalf("unexpected path %s", r.URL.Path)
+			}
 	}))
 	defer downstream.Close()
 

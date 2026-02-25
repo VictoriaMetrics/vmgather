@@ -797,16 +797,7 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	retentionCutoff := s.retentionCutoff(ctx, cfg)
-	detectedMaxLabelsLimit := s.maxLabelsPerTimeseries(ctx, cfg)
-	maxLabelsLimit := detectedMaxLabelsLimit
-	maxLabelsSource := "metrics"
-	if detectedMaxLabelsLimit <= 0 {
-		maxLabelsSource = "unknown"
-	}
-	if cfg.MaxLabelsOverride > 0 {
-		maxLabelsLimit = cfg.MaxLabelsOverride
-		maxLabelsSource = "manual"
-	}
+	detectedMaxLabelsLimit, maxLabelsLimit, maxLabelsSource := s.resolveMaxLabelsLimit(ctx, cfg)
 	if !cfg.DropOld {
 		retentionCutoff = 0
 	}
@@ -1267,8 +1258,9 @@ func (s *Server) runImportJob(ctx context.Context, job *importJob, cfg uploadCon
 	}
 
 	retentionCutoff := s.retentionCutoff(ctx, cfg)
+	_, maxLabelsLimit, _ := s.resolveMaxLabelsLimit(ctx, cfg)
 
-	_, summary, err := s.streamImport(ctx, cfg, bundle, importURL, startOffset, retentionCutoff, cfg.TimeShiftMs, 0, progress)
+	_, summary, err := s.streamImport(ctx, cfg, bundle, importURL, startOffset, retentionCutoff, cfg.TimeShiftMs, maxLabelsLimit, progress)
 	if err != nil {
 		s.updateJob(job, func(j *importJob) {
 			j.State = jobStateFailed
@@ -2091,6 +2083,20 @@ func (s *Server) maxLabelsPerTimeseries(ctx context.Context, cfg uploadConfig) i
 		return limit
 	}
 	return 0
+}
+
+func (s *Server) resolveMaxLabelsLimit(ctx context.Context, cfg uploadConfig) (detected int, effective int, source string) {
+	detected = s.maxLabelsPerTimeseries(ctx, cfg)
+	effective = detected
+	source = "metrics"
+	if detected <= 0 {
+		source = "unknown"
+	}
+	if cfg.MaxLabelsOverride > 0 {
+		effective = cfg.MaxLabelsOverride
+		source = "manual"
+	}
+	return detected, effective, source
 }
 
 func readFlagValue(metricsLine, flagName string) (string, bool) {

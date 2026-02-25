@@ -185,7 +185,9 @@ function initializeMaxLabelsOverrideInput() {
             }
         }
         if (lastAnalysisSummary) {
-            updateMaxLabelsRisk(lastAnalysisSummary, lastMaxLabelsLimit, lastMaxLabelsSource);
+            const currentLimit = getManualMaxLabelsOverride();
+            const currentSource = currentLimit > 0 ? 'manual' : lastMaxLabelsSource;
+            updateMaxLabelsRisk(lastAnalysisSummary, currentLimit, currentSource);
         } else {
             clearMaxLabelsRisk();
         }
@@ -193,7 +195,9 @@ function initializeMaxLabelsOverrideInput() {
     input.addEventListener('blur', () => {
         ensureDefaultMaxLabelsOverride();
         if (lastAnalysisSummary) {
-            updateMaxLabelsRisk(lastAnalysisSummary, lastMaxLabelsLimit, lastMaxLabelsSource);
+            const currentLimit = getManualMaxLabelsOverride();
+            const currentSource = currentLimit > 0 ? 'manual' : lastMaxLabelsSource;
+            updateMaxLabelsRisk(lastAnalysisSummary, currentLimit, currentSource);
         }
     });
 }

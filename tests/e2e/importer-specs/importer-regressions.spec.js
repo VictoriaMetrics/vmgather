@@ -201,6 +201,7 @@ test.describe('VMImporter regressions', () => {
       await expect(page.locator('#maxLabelsRisk')).toContainText('Need at least');
 
       await page.fill('#maxLabelsOverride', '20');
+      await expect(page.locator('#maxLabelsRisk')).toContainText('exceeds limit 20');
       await page.click('#fullPreflightBtn');
 
       await expect(details).toContainText('target maxLabelsPerTimeseries=20 (manual override)', { timeout: 15000 });
