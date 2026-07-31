@@ -602,6 +602,7 @@ func (s *exportServiceImpl) processMetricsIntoWriter(
 	}
 
 	decoder := vm.NewExportDecoder(reader)
+	encoder := json.NewEncoder(writer)
 	metricsCount := 0
 
 	for {
@@ -626,16 +627,8 @@ func (s *exportServiceImpl) processMetricsIntoWriter(
 			s.applyObfuscation(metric, obfuscator, obfConfig)
 		}
 
-		data, err := json.Marshal(metric)
-		if err != nil {
+		if err := encoder.Encode(metric); err != nil {
 			return 0, fmt.Errorf("marshal error: %w", err)
-		}
-
-		if _, err := writer.Write(data); err != nil {
-			return 0, fmt.Errorf("write error: %w", err)
-		}
-		if _, err := writer.Write([]byte{'\n'}); err != nil {
-			return 0, fmt.Errorf("write error: %w", err)
 		}
 		metricsCount++
 	}
