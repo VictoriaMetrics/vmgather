@@ -264,6 +264,8 @@ type Server struct {
 	jobs                map[string]*importJob
 	jobsMu              sync.RWMutex
 	insecureTLSWarnOnce sync.Once
+	insecureClientOnce  sync.Once
+	insecureClient      *http.Client
 	profilesPath        string
 	profiles            []recentProfile
 	profilesMu          sync.RWMutex
@@ -559,8 +561,11 @@ func (s *Server) withInsecure(insecure bool, endpoint string) *http.Client {
 	s.insecureTLSWarnOnce.Do(func() {
 		log.Printf("[WARN] vmimporter is using skip_tls_verify for endpoint %s. Use only in trusted lab/dev environments.", redactURLForLog(endpoint))
 	})
-	transport := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}} // #nosec G402 - intentional for air-gapped envs
-	return &http.Client{Timeout: importerHTTPTimeout, Transport: transport}
+	s.insecureClientOnce.Do(func() {
+		transport := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}} // #nosec G402 - intentional for air-gapped envs
+		s.insecureClient = &http.Client{Timeout: importerHTTPTimeout, Transport: transport}
+	})
+	return s.insecureClient
 }
 
 func redactURLForLog(raw string) string {
