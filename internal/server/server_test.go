@@ -19,6 +19,30 @@ import (
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
 )
 
+// TestLoggingMiddleware_SkipsHealthChecks verifies /api/health requests are
+// not logged (avoids log noise from frequent k8s liveness/readiness probes)
+// while other requests still are.
+func TestLoggingMiddleware_SkipsHealthChecks(t *testing.T) {
+	origOutput := log.Writer()
+	defer log.SetOutput(origOutput)
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+
+	server := NewServer(t.TempDir(), "test-version", false)
+	router := server.Router()
+
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/health", nil))
+	if strings.Contains(buf.String(), "/api/health") {
+		t.Fatalf("expected /api/health request not to be logged, got: %s", buf.String())
+	}
+
+	buf.Reset()
+	router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	if !strings.Contains(buf.String(), "/api/config") {
+		t.Fatalf("expected /api/config request to be logged, got: %s", buf.String())
+	}
+}
+
 // TestServer_GetSampleDataFromResult tests getSampleDataFromResult function
 // This test verifies that sample data is correctly formatted with 'name' field
 // and handles edge cases like empty MetricName
