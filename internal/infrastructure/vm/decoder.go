@@ -12,8 +12,8 @@ type ExportDecoder struct {
 	scanner *bufio.Scanner
 }
 
-// newLineScanner builds a bufio.Scanner sized for metric lines with many labels.
-func newLineScanner(r io.Reader) *bufio.Scanner {
+// NewLineScanner builds a bufio.Scanner sized for JSONL metric lines with many labels.
+func NewLineScanner(r io.Reader) *bufio.Scanner {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 64KB initial, 1MB max
 	return scanner
@@ -22,7 +22,7 @@ func newLineScanner(r io.Reader) *bufio.Scanner {
 // NewExportDecoder creates a new export decoder
 func NewExportDecoder(r io.Reader) *ExportDecoder {
 	return &ExportDecoder{
-		scanner: newLineScanner(r),
+		scanner: NewLineScanner(r),
 	}
 }
 
@@ -33,7 +33,7 @@ func NewExportDecoder(r io.Reader) *ExportDecoder {
 // round trip. Use this instead of Decode+re-marshal when no per-line
 // transformation is needed.
 func CopyLines(r io.Reader, w io.Writer) (int, error) {
-	scanner := newLineScanner(r)
+	scanner := NewLineScanner(r)
 	count := 0
 	for scanner.Scan() {
 		line := scanner.Bytes()

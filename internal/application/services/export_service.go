@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/valyala/fastjson"
+
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
 	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/archive"
 	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/obfuscation"
@@ -601,36 +603,78 @@ func (s *exportServiceImpl) processMetricsIntoWriter(
 		return count, nil
 	}
 
-	decoder := vm.NewExportDecoder(reader)
-	encoder := json.NewEncoder(writer)
+	// Only the "metric" labels object needs to change here (drop/obfuscate);
+	// "values"/"timestamps" pass through untouched. Parse with fastjson and
+	// mutate the label object in place instead of decoding the whole line
+	// into a typed struct (with its Values []interface{} reflection cost)
+	// and re-marshaling it via encoding/json.
+	scanner := vm.NewLineScanner(reader)
+	var parser fastjson.Parser
+	var arena fastjson.Arena
+	var buf []byte
 	metricsCount := 0
 
-	for {
-		metric, err := decoder.Decode()
-		if err == io.EOF {
-			break
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
 		}
+
+		v, err := parser.ParseBytes(line)
 		if err != nil {
 			return 0, fmt.Errorf("decode error: %w", err)
 		}
 
-		if len(obfConfig.DropLabels) > 0 {
+		metricObj := v.GetObject("metric")
+
+		if metricObj != nil && len(obfConfig.DropLabels) > 0 {
 			for _, label := range obfConfig.DropLabels {
-				delete(metric.Metric, label)
+				metricObj.Del(label)
 			}
 		}
 
-		if obfConfig.Enabled {
+		if metricObj != nil && obfConfig.Enabled {
 			if obfuscator == nil {
 				obfuscator = obfuscation.NewObfuscator()
 			}
-			s.applyObfuscation(metric, obfuscator, obfConfig)
+
+			labels := make(map[string]string, metricObj.Len())
+			metricObj.Visit(func(key []byte, val *fastjson.Value) {
+				sb, _ := val.StringBytes()
+				labels[string(key)] = string(sb)
+			})
+
+			s.applyObfuscation(&vm.ExportedMetric{Metric: labels}, obfuscator, obfConfig)
+
+			if obfConfig.ObfuscateInstance {
+				if val, ok := labels["instance"]; ok {
+					metricObj.Set("instance", arena.NewString(val))
+				}
+			}
+			if obfConfig.ObfuscateJob {
+				if val, ok := labels["job"]; ok {
+					metricObj.Set("job", arena.NewString(val))
+				}
+			}
+			for _, labelName := range obfConfig.CustomLabels {
+				if val, ok := labels[labelName]; ok {
+					metricObj.Set(labelName, arena.NewString(val))
+				}
+			}
 		}
 
-		if err := encoder.Encode(metric); err != nil {
-			return 0, fmt.Errorf("marshal error: %w", err)
+		buf = v.MarshalTo(buf[:0])
+		if _, err := writer.Write(buf); err != nil {
+			return 0, fmt.Errorf("write error: %w", err)
 		}
+		if _, err := writer.Write([]byte{'\n'}); err != nil {
+			return 0, fmt.Errorf("write error: %w", err)
+		}
+		arena.Reset()
 		metricsCount++
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, fmt.Errorf("decode error: %w", err)
 	}
 
 	return metricsCount, nil

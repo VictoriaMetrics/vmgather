@@ -647,6 +647,56 @@ func TestProcessMetricsIntoWriterPassthroughRejectsMalformedLines(t *testing.T) 
 	}
 }
 
+// TestProcessMetricsIntoWriterTransformPreservesValuesAndTimestamps verifies
+// the fastjson-based transform path (drop-labels/obfuscation) leaves "values"
+// and "timestamps" byte-identical, since only the "metric" object is mutated.
+func TestProcessMetricsIntoWriterTransformPreservesValuesAndTimestamps(t *testing.T) {
+	service := &exportServiceImpl{}
+
+	metricsData := `{"metric":{"__name__":"up","instance":"a","job":"j","env":"prod"},"values":[1.10,0.30000000000000004,-2],"timestamps":[1699728000000,1699728030000]}` + "\n"
+
+	var out bytes.Buffer
+	count, err := service.processMetricsIntoWriter(strings.NewReader(metricsData), domain.ObfuscationConfig{DropLabels: []string{"env"}}, nil, &out)
+	if err != nil {
+		t.Fatalf("processMetricsIntoWriter failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("metrics count = %d, want 1", count)
+	}
+	if !strings.Contains(out.String(), `"values":[1.10,0.30000000000000004,-2]`) {
+		t.Fatalf("values were reformatted, want byte-identical: got %s", out.String())
+	}
+	if !strings.Contains(out.String(), `"timestamps":[1699728000000,1699728030000]`) {
+		t.Fatalf("timestamps were reformatted, want byte-identical: got %s", out.String())
+	}
+	if strings.Contains(out.String(), `"env"`) {
+		t.Fatalf("dropped label still present: got %s", out.String())
+	}
+}
+
+// TestProcessMetricsIntoWriterTransformHandlesMissingMetricObject verifies a
+// line lacking a "metric" object doesn't panic when drop-labels/obfuscation
+// are configured (metricObj is nil in that case).
+func TestProcessMetricsIntoWriterTransformHandlesMissingMetricObject(t *testing.T) {
+	service := &exportServiceImpl{}
+
+	metricsData := `{"values":[1],"timestamps":[1]}` + "\n"
+	obfConfig := domain.ObfuscationConfig{
+		Enabled:           true,
+		ObfuscateInstance: true,
+		DropLabels:        []string{"env"},
+	}
+
+	var out bytes.Buffer
+	count, err := service.processMetricsIntoWriter(strings.NewReader(metricsData), obfConfig, nil, &out)
+	if err != nil {
+		t.Fatalf("processMetricsIntoWriter failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("metrics count = %d, want 1", count)
+	}
+}
+
 // TestExportService_ProcessMetrics_EmptyStream tests empty metrics stream
 func TestExportService_ProcessMetrics_EmptyStream(t *testing.T) {
 	service := &exportServiceImpl{}
