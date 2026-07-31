@@ -363,6 +363,27 @@ func TestClient_Export_LargeResponse(t *testing.T) {
 	}
 }
 
+// TestNewClient_CompressionConfigurable verifies compression is enabled by
+// default (the normal CPU-for-bandwidth trade-off) but can be turned off via
+// VMConnection.DisableCompression when vmgather runs alongside the VM
+// instance it exports from and CPU is the constrained resource instead.
+func TestNewClient_CompressionConfigurable(t *testing.T) {
+	transportOf := func(conn domain.VMConnection) *http.Transport {
+		transport, ok := NewClient(conn).httpClient.Transport.(*http.Transport)
+		if !ok {
+			t.Fatalf("expected *http.Transport, got %T", NewClient(conn).httpClient.Transport)
+		}
+		return transport
+	}
+
+	if transportOf(domain.VMConnection{URL: "http://localhost:8428"}).DisableCompression {
+		t.Error("expected DisableCompression to default to false")
+	}
+	if !transportOf(domain.VMConnection{URL: "http://localhost:8428", DisableCompression: true}).DisableCompression {
+		t.Error("expected DisableCompression to be true when explicitly set")
+	}
+}
+
 // TestClient_Export_GzipCompression tests gzip compressed responses
 func TestClient_Export_GzipCompression(t *testing.T) {
 	server := newIPv4TestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

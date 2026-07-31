@@ -63,6 +63,11 @@ type VMConnection struct {
 	Auth          AuthConfig `json:"auth"`
 	SkipTLSVerify bool       `json:"skip_tls_verify"`
 	Debug         bool       `json:"debug,omitempty"`
+	// DisableCompression turns off gzip-compressed export responses. Defaults
+	// to off (compression enabled), which is the normal trade-off of CPU for
+	// fewer network bytes. Set this when vmgather runs alongside the VM
+	// instance it exports from and CPU is the constrained resource instead.
+	DisableCompression bool `json:"disable_compression,omitempty"`
 }
 
 // VMComponent represents a discovered VictoriaMetrics component
