@@ -84,7 +84,7 @@ The binary starts an HTTP server and opens a browser window at `http://localhost
 
 ### From source
 
-Requirements: Go 1.21+, Make, Git.
+Requirements: Go 1.24+, Make, Git.
 
 ```bash
 git clone https://github.com/VictoriaMetrics/vmgather.git

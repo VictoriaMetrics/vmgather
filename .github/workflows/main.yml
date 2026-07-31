@@ -15,24 +15,24 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go: ['1.21', '1.22']
+        go: ['1.24', '1.25', '1.26']
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
-      
+
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5.6.0
         with:
           go-version: ${{ matrix.go }}
 
       - name: Lint
-        if: matrix.os == 'ubuntu-latest' && matrix.go == '1.22'
+        if: matrix.os == 'ubuntu-latest'
         uses: golangci/golangci-lint-action@d6238b002a20823d52840fda27e2d4891c5952dc  # v4.0.1
         with:
           version: v1.59.1
           args: --timeout=5m
-      
+
       - name: Run tests
         run: make test
-      
+
       - name: Build
         run: make build
 
@@ -45,7 +45,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5.6.0
         with:
-          go-version: '1.22'
+          go-version: '1.24'
 
       - name: Run integration suite
         shell: bash
@@ -108,24 +108,24 @@ jobs:
   #   runs-on: ubuntu-latest
   #   steps:
   #     - uses: actions/checkout@v4
-  #     
+  #
   #     - uses: actions/setup-go@v5
   #       with:
   #         go-version: '1.21'
-  #     
+  #
   #     - uses: actions/setup-node@v4
   #       with:
   #         node-version: '18'
-  #     
+  #
   #     - name: Start test environment
   #       run: make test-env-up
-  #     
+  #
   #     - name: Run E2E tests
   #       run: |
   #         cd tests/e2e
   #         npm install
   #         npm test
-  #     
+  #
   #     - name: Upload test results
   #       if: failure()
   #       uses: actions/upload-artifact@v4
