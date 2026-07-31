@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"go.uber.org/automaxprocs/maxprocs"
+
 	importer "github.com/VictoriaMetrics/vmgather/internal/importer/server"
 )
 
@@ -21,6 +23,10 @@ import (
 var version = "dev"
 
 func main() {
+	if _, err := maxprocs.Set(maxprocs.Logger(log.Printf)); err != nil {
+		log.Printf("failed to set GOMAXPROCS: %v", err)
+	}
+
 	addr := flag.String("addr", "0.0.0.0:8081", "HTTP server address")
 	noBrowser := flag.Bool("no-browser", false, "Do not open browser on start")
 	flag.Parse()

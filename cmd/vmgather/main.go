@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	"go.uber.org/automaxprocs/maxprocs"
+
 	"github.com/VictoriaMetrics/vmgather/internal/application/services"
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
 	"github.com/VictoriaMetrics/vmgather/internal/server"
@@ -26,6 +28,10 @@ import (
 var version = "dev"
 
 func main() {
+	if _, err := maxprocs.Set(maxprocs.Logger(log.Printf)); err != nil {
+		log.Printf("failed to set GOMAXPROCS: %v", err)
+	}
+
 	// Parse flags
 	addr := flag.String("addr", "localhost:8080", "HTTP server address")
 	outputDirFlag := flag.String("output", "", "Export output directory")
