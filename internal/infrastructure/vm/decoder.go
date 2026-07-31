@@ -27,11 +27,14 @@ func NewExportDecoder(r io.Reader) *ExportDecoder {
 }
 
 // CopyLines streams each JSONL line from r to w unchanged (appending a trailing
-// newline), returning the number of lines copied. Each line is checked with
-// json.Valid (a syntax-only scan, far cheaper than decoding into a struct) so
-// malformed input is still rejected without paying for a full decode+re-marshal
-// round trip. Use this instead of Decode+re-marshal when no per-line
-// transformation is needed.
+// newline), returning the number of lines copied. Each line is sanity-checked
+// (non-empty, starts with '{' and ends with '}') rather than fully validated
+// with json.Valid: a live CPU profile showed json.Valid's byte-by-byte scan
+// (including inside every string) as the single largest JSON-related cost on
+// this path, more expensive than the decode+re-marshal it was meant to avoid
+// paying for. The source here is VictoriaMetrics's own /api/v1/export output,
+// not untrusted input, so a cheap shape check to catch genuinely broken
+// responses is enough - it isn't meant to catch every malformed edge case.
 func CopyLines(r io.Reader, w io.Writer) (int, error) {
 	scanner := NewLineScanner(r)
 	count := 0
@@ -40,7 +43,7 @@ func CopyLines(r io.Reader, w io.Writer) (int, error) {
 		if len(line) == 0 {
 			continue
 		}
-		if !json.Valid(line) {
+		if line[0] != '{' || line[len(line)-1] != '}' {
 			return count, fmt.Errorf("invalid JSON line: %s", line)
 		}
 		if _, err := w.Write(line); err != nil {
