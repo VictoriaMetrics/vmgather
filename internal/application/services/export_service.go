@@ -590,6 +590,17 @@ func (s *exportServiceImpl) processMetricsIntoWriter(
 	obfuscator *obfuscation.Obfuscator,
 	writer io.Writer,
 ) (int, error) {
+	// No transformation requested: skip the decode/re-marshal round trip and
+	// stream lines through as-is. This avoids a reflection-based JSON
+	// unmarshal+marshal on every metric line, which dominates CPU on large exports.
+	if !obfConfig.Enabled && len(obfConfig.DropLabels) == 0 {
+		count, err := vm.CopyLines(reader, writer)
+		if err != nil {
+			return 0, fmt.Errorf("copy error: %w", err)
+		}
+		return count, nil
+	}
+
 	decoder := vm.NewExportDecoder(reader)
 	metricsCount := 0
 

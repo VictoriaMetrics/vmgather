@@ -3,6 +3,7 @@ package vm
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 )
 
@@ -11,15 +12,49 @@ type ExportDecoder struct {
 	scanner *bufio.Scanner
 }
 
+// newLineScanner builds a bufio.Scanner sized for metric lines with many labels.
+func newLineScanner(r io.Reader) *bufio.Scanner {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 64KB initial, 1MB max
+	return scanner
+}
+
 // NewExportDecoder creates a new export decoder
 func NewExportDecoder(r io.Reader) *ExportDecoder {
-	scanner := bufio.NewScanner(r)
-	// Set larger buffer for metrics with many labels
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 64KB initial, 1MB max
-
 	return &ExportDecoder{
-		scanner: scanner,
+		scanner: newLineScanner(r),
 	}
+}
+
+// CopyLines streams each JSONL line from r to w unchanged (appending a trailing
+// newline), returning the number of lines copied. Each line is checked with
+// json.Valid (a syntax-only scan, far cheaper than decoding into a struct) so
+// malformed input is still rejected without paying for a full decode+re-marshal
+// round trip. Use this instead of Decode+re-marshal when no per-line
+// transformation is needed.
+func CopyLines(r io.Reader, w io.Writer) (int, error) {
+	scanner := newLineScanner(r)
+	count := 0
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		if !json.Valid(line) {
+			return count, fmt.Errorf("invalid JSON line: %s", line)
+		}
+		if _, err := w.Write(line); err != nil {
+			return count, err
+		}
+		if _, err := w.Write([]byte{'\n'}); err != nil {
+			return count, err
+		}
+		count++
+	}
+	if err := scanner.Err(); err != nil {
+		return count, err
+	}
+	return count, nil
 }
 
 // Decode decodes next metric from stream

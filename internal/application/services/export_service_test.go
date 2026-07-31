@@ -611,6 +611,42 @@ func TestProcessMetricsIntoWriterFile(t *testing.T) {
 	}
 }
 
+// TestProcessMetricsIntoWriterPassthroughIsByteIdentical verifies that with no
+// obfuscation and no drop-labels configured, output is byte-for-byte identical
+// to input (proves the CopyLines fast path is taken instead of decode+re-marshal).
+func TestProcessMetricsIntoWriterPassthroughIsByteIdentical(t *testing.T) {
+	service := &exportServiceImpl{}
+
+	metricsData := `{"metric":{"__name__":"vm_app_version","instance":"10.0.1.5:8482","job":"vmstorage-prod"},"values":[1],"timestamps":[1699728000000]}
+{"metric":{"__name__":"go_goroutines","instance":"10.0.1.5:8482","job":"vmstorage-prod"},"values":[42],"timestamps":[1699728000000]}
+`
+
+	var out bytes.Buffer
+	count, err := service.processMetricsIntoWriter(strings.NewReader(metricsData), domain.ObfuscationConfig{}, nil, &out)
+	if err != nil {
+		t.Fatalf("processMetricsIntoWriter failed: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("metrics count = %d, want 2", count)
+	}
+	if out.String() != metricsData {
+		t.Fatalf("output not byte-identical to input:\ngot:  %q\nwant: %q", out.String(), metricsData)
+	}
+}
+
+// TestProcessMetricsIntoWriterPassthroughRejectsMalformedLines verifies the
+// fast path still fails fast on malformed input via json.Valid, matching the
+// decode path's error-on-malformed-JSONL behavior.
+func TestProcessMetricsIntoWriterPassthroughRejectsMalformedLines(t *testing.T) {
+	service := &exportServiceImpl{}
+
+	var out bytes.Buffer
+	_, err := service.processMetricsIntoWriter(strings.NewReader("this is not json at all"), domain.ObfuscationConfig{}, nil, &out)
+	if err == nil {
+		t.Fatal("expected error on malformed JSONL in passthrough fast path")
+	}
+}
+
 // TestExportService_ProcessMetrics_EmptyStream tests empty metrics stream
 func TestExportService_ProcessMetrics_EmptyStream(t *testing.T) {
 	service := &exportServiceImpl{}
