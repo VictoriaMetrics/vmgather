@@ -1494,10 +1494,13 @@ func staticFileServer(fsys fs.FS) http.Handler {
 	})
 }
 
-// loggingMiddleware logs HTTP requests
+// loggingMiddleware logs HTTP requests, except health checks: k8s liveness/
+// readiness probes hit this endpoint frequently and add pure log noise.
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("%s %s %s", r.RemoteAddr, r.Method, r.URL.Path)
+		if r.URL.Path != "/api/health" {
+			log.Printf("%s %s %s", r.RemoteAddr, r.Method, r.URL.Path)
+		}
 		next.ServeHTTP(w, r)
 	})
 }
