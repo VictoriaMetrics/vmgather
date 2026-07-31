@@ -582,6 +582,46 @@ func TestExportService_ProcessMetrics_WithObfuscation(t *testing.T) {
 	}
 }
 
+// TestAppendFile verifies appendFile correctly appends source content onto an
+// existing destination file using the explicit large-buffer copy, both for a
+// small case and a case spanning multiple appendCopyBufferSize-sized chunks.
+func TestAppendFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	dest := filepath.Join(tmpDir, "dest.jsonl")
+
+	if err := os.WriteFile(dest, []byte("line1\n"), 0o640); err != nil {
+		t.Fatalf("failed to seed destination: %v", err)
+	}
+
+	src1 := filepath.Join(tmpDir, "src1.jsonl")
+	if err := os.WriteFile(src1, []byte("line2\n"), 0o640); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	if err := appendFile(dest, src1); err != nil {
+		t.Fatalf("appendFile failed: %v", err)
+	}
+
+	// Second source larger than appendCopyBufferSize to exercise multiple
+	// internal CopyBuffer iterations, not just a single chunk.
+	large := bytes.Repeat([]byte("x"), appendCopyBufferSize*2+123)
+	src2 := filepath.Join(tmpDir, "src2.bin")
+	if err := os.WriteFile(src2, large, 0o640); err != nil {
+		t.Fatalf("failed to write large source: %v", err)
+	}
+	if err := appendFile(dest, src2); err != nil {
+		t.Fatalf("appendFile failed on large source: %v", err)
+	}
+
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("failed to read destination: %v", err)
+	}
+	want := append([]byte("line1\nline2\n"), large...)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("destination content mismatch: got %d bytes, want %d bytes", len(got), len(want))
+	}
+}
+
 func TestProcessMetricsIntoWriterFile(t *testing.T) {
 	service := &exportServiceImpl{}
 	tmpDir := t.TempDir()

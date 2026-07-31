@@ -25,6 +25,17 @@ import (
 
 const defaultBatchTimeout = 2 * time.Minute
 
+// writeBufferSize sizes the bufio.Writer used for batch/attempt output files.
+// The stdlib default (4KB) meant a Write syscall roughly every 15-40 metric
+// lines; profiling a live export showed write(2) syscalls as the single
+// largest CPU cost, so a much bigger buffer cuts syscall count accordingly.
+const writeBufferSize = 256 * 1024
+
+// appendCopyBufferSize sizes the explicit copy buffer used by appendFile.
+// Chosen large since appendFile copies whole attempt files, potentially
+// hundreds of MB, in one call.
+const appendCopyBufferSize = 1024 * 1024
+
 var (
 	metricSelectorPattern = regexp.MustCompile(`^([a-zA-Z_:][a-zA-Z0-9_:]*)\s*\{(.*)\}$`)
 	metricNamePattern     = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]*$`)
@@ -239,7 +250,7 @@ func (s *exportServiceImpl) exportToWriter(ctx context.Context, config domain.Ex
 		obfuscator = obfuscation.NewObfuscator()
 	}
 
-	buffered := bufio.NewWriter(writer)
+	buffered := bufio.NewWriterSize(writer, writeBufferSize)
 	for _, window := range batchWindows {
 		batchCtx, cancelBatch := context.WithTimeout(ctx, defaultBatchTimeout)
 		exportReader, err := s.fetchBatch(batchCtx, client, selector, window, config.MetricStepSeconds, useQueryRange)
@@ -509,7 +520,7 @@ func (s *exportServiceImpl) fetchAndProcessAttempt(
 	}
 	defer func() { _ = handle.Close() }()
 
-	writer := bufio.NewWriter(handle)
+	writer := bufio.NewWriterSize(handle, writeBufferSize)
 
 	batchCtx, cancelBatch := context.WithTimeout(ctx, defaultBatchTimeout)
 	defer cancelBatch()
@@ -547,7 +558,14 @@ func appendFile(destination, source string) error {
 		return fmt.Errorf("failed to append staging file: %w", err)
 	}
 
-	if _, err := io.Copy(dst, src); err != nil {
+	// Force a large explicit buffer instead of plain io.Copy: both src and dst
+	// are *os.File, so io.Copy defers to their ReadFrom/WriteTo fast paths
+	// (copy_file_range/sendfile) - on sandboxed/gVisor nodes those silently
+	// fail and fall back to Go's default 32KB-chunk loop, which profiling
+	// showed as the single largest CPU cost for large exports. Wrapping both
+	// sides to hide ReadFrom/WriteTo guarantees this buffer size is actually used.
+	buf := make([]byte, appendCopyBufferSize)
+	if _, err := io.CopyBuffer(struct{ io.Writer }{dst}, struct{ io.Reader }{src}, buf); err != nil {
 		_ = dst.Close()
 		return fmt.Errorf("failed to append attempt output: %w", err)
 	}
