@@ -3,6 +3,7 @@ package vm
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 )
 
@@ -11,15 +12,53 @@ type ExportDecoder struct {
 	scanner *bufio.Scanner
 }
 
+// NewLineScanner builds a bufio.Scanner sized for JSONL metric lines with many labels.
+func NewLineScanner(r io.Reader) *bufio.Scanner {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 64KB initial, 1MB max
+	return scanner
+}
+
 // NewExportDecoder creates a new export decoder
 func NewExportDecoder(r io.Reader) *ExportDecoder {
-	scanner := bufio.NewScanner(r)
-	// Set larger buffer for metrics with many labels
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 64KB initial, 1MB max
-
 	return &ExportDecoder{
-		scanner: scanner,
+		scanner: NewLineScanner(r),
 	}
+}
+
+// CopyLines streams each JSONL line's content from r to w unchanged, writing a
+// single '\n' after each line, and returning the number of lines copied. Line
+// endings are normalized to LF (the scanner splits on bufio.ScanLines, which
+// strips a trailing '\r'), matching the LF-only output of VictoriaMetrics's
+// own /api/v1/export - this is not a byte-identical passthrough for arbitrary
+// CRLF input. Each line is sanity-checked
+// (non-empty, starts with '{' and ends with '}') rather than fully validated
+// with json.Valid: a live CPU profile showed json.Valid's byte-by-byte scan
+// (including inside every string) as the single largest JSON-related cost on
+// this path, more expensive than the decode+re-marshal it was meant to avoid
+// paying for. The source here is VictoriaMetrics's own /api/v1/export output,
+// not untrusted input, so a cheap shape check to catch genuinely broken
+// responses is enough - it isn't meant to catch every malformed edge case.
+func CopyLines(r io.Reader, w io.Writer) (int, error) {
+	scanner := NewLineScanner(r)
+	count := 0
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 || line[0] != '{' || line[len(line)-1] != '}' {
+			return count, fmt.Errorf("invalid JSON line: %s", line)
+		}
+		if _, err := w.Write(line); err != nil {
+			return count, err
+		}
+		if _, err := w.Write([]byte{'\n'}); err != nil {
+			return count, err
+		}
+		count++
+	}
+	if err := scanner.Err(); err != nil {
+		return count, err
+	}
+	return count, nil
 }
 
 // Decode decodes next metric from stream

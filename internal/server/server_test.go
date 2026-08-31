@@ -19,6 +19,26 @@ import (
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
 )
 
+// TestRouter_PprofMountedOnlyWithDebug verifies pprof is exposed when -debug
+// is set and returns 404 otherwise, since pprof is unauthenticated.
+func TestRouter_PprofMountedOnlyWithDebug(t *testing.T) {
+	withoutDebug := NewServer(t.TempDir(), "test-version", false)
+	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	rec := httptest.NewRecorder()
+	withoutDebug.Router().ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatalf("expected pprof to be unavailable without -debug, got status %d", rec.Code)
+	}
+
+	withDebug := NewServer(t.TempDir(), "test-version", true)
+	req = httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	rec = httptest.NewRecorder()
+	withDebug.Router().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected pprof to be available with -debug, got status %d", rec.Code)
+	}
+}
+
 // TestServer_GetSampleDataFromResult tests getSampleDataFromResult function
 // This test verifies that sample data is correctly formatted with 'name' field
 // and handles edge cases like empty MetricName

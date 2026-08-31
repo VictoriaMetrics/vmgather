@@ -84,6 +84,8 @@ func NewClient(conn domain.VMConnection) *Client {
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 100,
 		IdleConnTimeout:     90 * time.Second,
+		// See VMConnection.DisableCompression: compression is on by default.
+		DisableCompression: conn.DisableCompression,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			host, _, err := net.SplitHostPort(addr)
 			if err == nil && host == "localhost" {

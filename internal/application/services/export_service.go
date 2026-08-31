@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/valyala/fastjson"
+
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
 	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/archive"
 	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/obfuscation"
@@ -22,6 +24,17 @@ import (
 )
 
 const defaultBatchTimeout = 2 * time.Minute
+
+// writeBufferSize sizes the bufio.Writer used for batch/attempt output files.
+// The stdlib default (4KB) meant a Write syscall roughly every 15-40 metric
+// lines; profiling a live export showed write(2) syscalls as the single
+// largest CPU cost, so a much bigger buffer cuts syscall count accordingly.
+const writeBufferSize = 256 * 1024
+
+// appendCopyBufferSize sizes the explicit copy buffer used by appendFile.
+// Chosen large since appendFile copies whole attempt files, potentially
+// hundreds of MB, in one call.
+const appendCopyBufferSize = 1024 * 1024
 
 var (
 	metricSelectorPattern = regexp.MustCompile(`^([a-zA-Z_:][a-zA-Z0-9_:]*)\s*\{(.*)\}$`)
@@ -237,7 +250,7 @@ func (s *exportServiceImpl) exportToWriter(ctx context.Context, config domain.Ex
 		obfuscator = obfuscation.NewObfuscator()
 	}
 
-	buffered := bufio.NewWriter(writer)
+	buffered := bufio.NewWriterSize(writer, writeBufferSize)
 	for _, window := range batchWindows {
 		batchCtx, cancelBatch := context.WithTimeout(ctx, defaultBatchTimeout)
 		exportReader, err := s.fetchBatch(batchCtx, client, selector, window, config.MetricStepSeconds, useQueryRange)
@@ -507,7 +520,7 @@ func (s *exportServiceImpl) fetchAndProcessAttempt(
 	}
 	defer func() { _ = handle.Close() }()
 
-	writer := bufio.NewWriter(handle)
+	writer := bufio.NewWriterSize(handle, writeBufferSize)
 
 	batchCtx, cancelBatch := context.WithTimeout(ctx, defaultBatchTimeout)
 	defer cancelBatch()
@@ -545,7 +558,14 @@ func appendFile(destination, source string) error {
 		return fmt.Errorf("failed to append staging file: %w", err)
 	}
 
-	if _, err := io.Copy(dst, src); err != nil {
+	// Force a large explicit buffer instead of plain io.Copy: both src and dst
+	// are *os.File, so io.Copy defers to their ReadFrom/WriteTo fast paths
+	// (copy_file_range/sendfile) - on sandboxed/gVisor nodes those silently
+	// fail and fall back to Go's default 32KB-chunk loop, which profiling
+	// showed as the single largest CPU cost for large exports. Wrapping both
+	// sides to hide ReadFrom/WriteTo guarantees this buffer size is actually used.
+	buf := make([]byte, appendCopyBufferSize)
+	if _, err := io.CopyBuffer(struct{ io.Writer }{dst}, struct{ io.Reader }{src}, buf); err != nil {
 		_ = dst.Close()
 		return fmt.Errorf("failed to append attempt output: %w", err)
 	}
@@ -590,43 +610,89 @@ func (s *exportServiceImpl) processMetricsIntoWriter(
 	obfuscator *obfuscation.Obfuscator,
 	writer io.Writer,
 ) (int, error) {
-	decoder := vm.NewExportDecoder(reader)
+	// No transformation requested: skip the decode/re-marshal round trip and
+	// stream lines through as-is. This avoids a reflection-based JSON
+	// unmarshal+marshal on every metric line, which dominates CPU on large exports.
+	if !obfConfig.Enabled && len(obfConfig.DropLabels) == 0 {
+		count, err := vm.CopyLines(reader, writer)
+		if err != nil {
+			return 0, fmt.Errorf("copy error: %w", err)
+		}
+		return count, nil
+	}
+
+	// Only the "metric" labels object needs to change here (drop/obfuscate);
+	// "values"/"timestamps" pass through untouched. Parse with fastjson and
+	// mutate the label object in place instead of decoding the whole line
+	// into a typed struct (with its Values []interface{} reflection cost)
+	// and re-marshaling it via encoding/json.
+	scanner := vm.NewLineScanner(reader)
+	var parser fastjson.Parser
+	var arena fastjson.Arena
+	var buf []byte
 	metricsCount := 0
 
-	for {
-		metric, err := decoder.Decode()
-		if err == io.EOF {
-			break
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
 		}
+
+		v, err := parser.ParseBytes(line)
 		if err != nil {
 			return 0, fmt.Errorf("decode error: %w", err)
 		}
 
-		if len(obfConfig.DropLabels) > 0 {
+		metricObj := v.GetObject("metric")
+
+		if metricObj != nil && len(obfConfig.DropLabels) > 0 {
 			for _, label := range obfConfig.DropLabels {
-				delete(metric.Metric, label)
+				metricObj.Del(label)
 			}
 		}
 
-		if obfConfig.Enabled {
+		if metricObj != nil && obfConfig.Enabled {
 			if obfuscator == nil {
 				obfuscator = obfuscation.NewObfuscator()
 			}
-			s.applyObfuscation(metric, obfuscator, obfConfig)
+
+			labels := make(map[string]string, metricObj.Len())
+			metricObj.Visit(func(key []byte, val *fastjson.Value) {
+				sb, _ := val.StringBytes()
+				labels[string(key)] = string(sb)
+			})
+
+			s.applyObfuscation(&vm.ExportedMetric{Metric: labels}, obfuscator, obfConfig)
+
+			if obfConfig.ObfuscateInstance {
+				if val, ok := labels["instance"]; ok {
+					metricObj.Set("instance", arena.NewString(val))
+				}
+			}
+			if obfConfig.ObfuscateJob {
+				if val, ok := labels["job"]; ok {
+					metricObj.Set("job", arena.NewString(val))
+				}
+			}
+			for _, labelName := range obfConfig.CustomLabels {
+				if val, ok := labels[labelName]; ok {
+					metricObj.Set(labelName, arena.NewString(val))
+				}
+			}
 		}
 
-		data, err := json.Marshal(metric)
-		if err != nil {
-			return 0, fmt.Errorf("marshal error: %w", err)
-		}
-
-		if _, err := writer.Write(data); err != nil {
+		buf = v.MarshalTo(buf[:0])
+		if _, err := writer.Write(buf); err != nil {
 			return 0, fmt.Errorf("write error: %w", err)
 		}
 		if _, err := writer.Write([]byte{'\n'}); err != nil {
 			return 0, fmt.Errorf("write error: %w", err)
 		}
+		arena.Reset()
 		metricsCount++
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, fmt.Errorf("decode error: %w", err)
 	}
 
 	return metricsCount, nil

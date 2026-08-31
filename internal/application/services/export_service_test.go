@@ -582,6 +582,46 @@ func TestExportService_ProcessMetrics_WithObfuscation(t *testing.T) {
 	}
 }
 
+// TestAppendFile verifies appendFile correctly appends source content onto an
+// existing destination file using the explicit large-buffer copy, both for a
+// small case and a case spanning multiple appendCopyBufferSize-sized chunks.
+func TestAppendFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	dest := filepath.Join(tmpDir, "dest.jsonl")
+
+	if err := os.WriteFile(dest, []byte("line1\n"), 0o640); err != nil {
+		t.Fatalf("failed to seed destination: %v", err)
+	}
+
+	src1 := filepath.Join(tmpDir, "src1.jsonl")
+	if err := os.WriteFile(src1, []byte("line2\n"), 0o640); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	if err := appendFile(dest, src1); err != nil {
+		t.Fatalf("appendFile failed: %v", err)
+	}
+
+	// Second source larger than appendCopyBufferSize to exercise multiple
+	// internal CopyBuffer iterations, not just a single chunk.
+	large := bytes.Repeat([]byte("x"), appendCopyBufferSize*2+123)
+	src2 := filepath.Join(tmpDir, "src2.bin")
+	if err := os.WriteFile(src2, large, 0o640); err != nil {
+		t.Fatalf("failed to write large source: %v", err)
+	}
+	if err := appendFile(dest, src2); err != nil {
+		t.Fatalf("appendFile failed on large source: %v", err)
+	}
+
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("failed to read destination: %v", err)
+	}
+	want := append([]byte("line1\nline2\n"), large...)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("destination content mismatch: got %d bytes, want %d bytes", len(got), len(want))
+	}
+}
+
 func TestProcessMetricsIntoWriterFile(t *testing.T) {
 	service := &exportServiceImpl{}
 	tmpDir := t.TempDir()
@@ -608,6 +648,92 @@ func TestProcessMetricsIntoWriterFile(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"__name__":"up"`) {
 		t.Fatalf("expected metric contents in staging file, got %s", string(data))
+	}
+}
+
+// TestProcessMetricsIntoWriterPassthroughIsByteIdentical verifies that with no
+// obfuscation and no drop-labels configured, output is byte-for-byte identical
+// to input (proves the CopyLines fast path is taken instead of decode+re-marshal).
+func TestProcessMetricsIntoWriterPassthroughIsByteIdentical(t *testing.T) {
+	service := &exportServiceImpl{}
+
+	metricsData := `{"metric":{"__name__":"vm_app_version","instance":"10.0.1.5:8482","job":"vmstorage-prod"},"values":[1],"timestamps":[1699728000000]}
+{"metric":{"__name__":"go_goroutines","instance":"10.0.1.5:8482","job":"vmstorage-prod"},"values":[42],"timestamps":[1699728000000]}
+`
+
+	var out bytes.Buffer
+	count, err := service.processMetricsIntoWriter(strings.NewReader(metricsData), domain.ObfuscationConfig{}, nil, &out)
+	if err != nil {
+		t.Fatalf("processMetricsIntoWriter failed: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("metrics count = %d, want 2", count)
+	}
+	if out.String() != metricsData {
+		t.Fatalf("output not byte-identical to input:\ngot:  %q\nwant: %q", out.String(), metricsData)
+	}
+}
+
+// TestProcessMetricsIntoWriterPassthroughRejectsMalformedLines verifies the
+// fast path still fails fast on malformed input via json.Valid, matching the
+// decode path's error-on-malformed-JSONL behavior.
+func TestProcessMetricsIntoWriterPassthroughRejectsMalformedLines(t *testing.T) {
+	service := &exportServiceImpl{}
+
+	var out bytes.Buffer
+	_, err := service.processMetricsIntoWriter(strings.NewReader("this is not json at all"), domain.ObfuscationConfig{}, nil, &out)
+	if err == nil {
+		t.Fatal("expected error on malformed JSONL in passthrough fast path")
+	}
+}
+
+// TestProcessMetricsIntoWriterTransformPreservesValuesAndTimestamps verifies
+// the fastjson-based transform path (drop-labels/obfuscation) leaves "values"
+// and "timestamps" byte-identical, since only the "metric" object is mutated.
+func TestProcessMetricsIntoWriterTransformPreservesValuesAndTimestamps(t *testing.T) {
+	service := &exportServiceImpl{}
+
+	metricsData := `{"metric":{"__name__":"up","instance":"a","job":"j","env":"prod"},"values":[1.10,0.30000000000000004,-2],"timestamps":[1699728000000,1699728030000]}` + "\n"
+
+	var out bytes.Buffer
+	count, err := service.processMetricsIntoWriter(strings.NewReader(metricsData), domain.ObfuscationConfig{DropLabels: []string{"env"}}, nil, &out)
+	if err != nil {
+		t.Fatalf("processMetricsIntoWriter failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("metrics count = %d, want 1", count)
+	}
+	if !strings.Contains(out.String(), `"values":[1.10,0.30000000000000004,-2]`) {
+		t.Fatalf("values were reformatted, want byte-identical: got %s", out.String())
+	}
+	if !strings.Contains(out.String(), `"timestamps":[1699728000000,1699728030000]`) {
+		t.Fatalf("timestamps were reformatted, want byte-identical: got %s", out.String())
+	}
+	if strings.Contains(out.String(), `"env"`) {
+		t.Fatalf("dropped label still present: got %s", out.String())
+	}
+}
+
+// TestProcessMetricsIntoWriterTransformHandlesMissingMetricObject verifies a
+// line lacking a "metric" object doesn't panic when drop-labels/obfuscation
+// are configured (metricObj is nil in that case).
+func TestProcessMetricsIntoWriterTransformHandlesMissingMetricObject(t *testing.T) {
+	service := &exportServiceImpl{}
+
+	metricsData := `{"values":[1],"timestamps":[1]}` + "\n"
+	obfConfig := domain.ObfuscationConfig{
+		Enabled:           true,
+		ObfuscateInstance: true,
+		DropLabels:        []string{"env"},
+	}
+
+	var out bytes.Buffer
+	count, err := service.processMetricsIntoWriter(strings.NewReader(metricsData), obfConfig, nil, &out)
+	if err != nil {
+		t.Fatalf("processMetricsIntoWriter failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("metrics count = %d, want 1", count)
 	}
 }
 

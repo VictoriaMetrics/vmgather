@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -178,6 +179,17 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/download", s.handleDownload)
 	mux.HandleFunc("/api/health", s.handleHealth)
+
+	// pprof is only mounted with -debug: it's unauthenticated and exposes
+	// runtime internals, so it must never be on by default.
+	if s.debug {
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		log.Println("[DEBUG] pprof endpoints mounted at /debug/pprof/")
+	}
 
 	// Serve static files with proper MIME types
 	staticFS, _ := fs.Sub(staticFiles, "static")

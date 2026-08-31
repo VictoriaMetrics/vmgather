@@ -1,13 +1,7 @@
-version: 2
+version: "2"
 
 run:
-  timeout: 5m
   tests: false
-
-issues:
-  exclude-dirs:
-    - build
-    - tests
 
 linters:
   enable:
@@ -16,7 +10,10 @@ linters:
     - staticcheck
     - unused
     - ineffassign
-
-linters-settings:
-  errcheck:
-    check-blank: false
+  settings:
+    errcheck:
+      check-blank: false
+  exclusions:
+    paths:
+      - build
+      - tests
