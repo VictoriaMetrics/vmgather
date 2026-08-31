@@ -144,7 +144,7 @@ Both Dockerfiles live in `build/docker/` and follow distroless best practices (s
 
 Both `vmgather` and `vmimporter` support `-addr` (bind address) and `-no-browser` to skip auto-launching a browser during scripting or Docker-based runs. vmgather's default is `localhost:8080` with automatic fallback to a free port; VMImport defaults to `0.0.0.0:8081` to avoid clashing with vmgather. vmgather also accepts `-output` to choose the directory for generated archives (defaults to `./exports`).
 
-Both binaries also accept `-debug` for verbose logging. On vmgather, `-debug` additionally mounts Go's [`net/http/pprof`](https://pkg.go.dev/net/http/pprof) profiling endpoints at `/debug/pprof/` — useful for diagnosing high CPU usage during large exports, but pprof is unauthenticated, so only enable it on a deployment that isn't publicly reachable.
+vmgather also accepts `-debug` for verbose logging. On vmgather, `-debug` additionally mounts Go's [`net/http/pprof`](https://pkg.go.dev/net/http/pprof) profiling endpoints at `/debug/pprof/` — useful for diagnosing high CPU usage during large exports, but pprof is unauthenticated, so only enable it on a deployment that isn't publicly reachable.
 
 ## VMImport companion
 
