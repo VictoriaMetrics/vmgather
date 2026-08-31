@@ -40,10 +40,7 @@ func CopyLines(r io.Reader, w io.Writer) (int, error) {
 	count := 0
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		if line[0] != '{' || line[len(line)-1] != '}' {
+		if len(line) == 0 || line[0] != '{' || line[len(line)-1] != '}' {
 			return count, fmt.Errorf("invalid JSON line: %s", line)
 		}
 		if _, err := w.Write(line); err != nil {
