@@ -26,8 +26,12 @@ func NewExportDecoder(r io.Reader) *ExportDecoder {
 	}
 }
 
-// CopyLines streams each JSONL line from r to w unchanged (appending a trailing
-// newline), returning the number of lines copied. Each line is sanity-checked
+// CopyLines streams each JSONL line's content from r to w unchanged, writing a
+// single '\n' after each line, and returning the number of lines copied. Line
+// endings are normalized to LF (the scanner splits on bufio.ScanLines, which
+// strips a trailing '\r'), matching the LF-only output of VictoriaMetrics's
+// own /api/v1/export - this is not a byte-identical passthrough for arbitrary
+// CRLF input. Each line is sanity-checked
 // (non-empty, starts with '{' and ends with '}') rather than fully validated
 // with json.Valid: a live CPU profile showed json.Valid's byte-by-byte scan
 // (including inside every string) as the single largest JSON-related cost on
