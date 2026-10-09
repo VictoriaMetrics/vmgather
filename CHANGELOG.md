@@ -2,6 +2,17 @@
 
 All notable changes to vmgather are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and versions adhere to semantic versioning.
 
+## [v1.12.0] - 2026-10-09
+
+### Changed
+- Optimize JSONL exports with passthrough, fastjson label processing and larger I/O buffers. Unmodified exports check only record shape and trust VictoriaMetrics JSON.
+- Respect Linux container CPU quotas in both binaries unless `GOMAXPROCS` is set. Reuse vmimporter's HTTP client in `skip_tls_verify` mode.
+- Add `connection.disable_compression` for exports and queries. Gzip remains enabled by default.
+- Add unauthenticated `/debug/pprof/` endpoints with vmgather's `-debug` flag.
+- Require Go 1.24+ for source builds. Use Go 1.26.9 for release binaries, Docker builders and CI security scans.
+- Keep raw records out of passthrough errors and reject non-string labels during obfuscation.
+- Update CI linting, vulnerability checks and Go compatibility coverage. Add export benchmarks and regression tests.
+
 ## [v1.11.0] - 2026-06-12
 
 ### Added
