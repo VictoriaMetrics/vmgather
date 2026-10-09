@@ -18,7 +18,7 @@ Security-sensitive problems should be reported privately via `info@victoriametri
 
 Prerequisites:
 
-- Go 1.21 or newer,
+- Go 1.24 or newer,
 - GNU Make,
 - Docker (integration tests),
 - Node.js 18+ and npm (E2E UI tests).

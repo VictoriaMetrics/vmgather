@@ -423,7 +423,7 @@ lint:
 	@echo "Running linter..."
 	@if ! command -v golangci-lint &> /dev/null; then \
 		echo "[ERROR] golangci-lint not found. Installing..."; \
-		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin v1.59.1; \
+		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin v2.13.2; \
 	fi
 	@golangci-lint run --timeout=5m
 	@echo "[OK] Lint complete"

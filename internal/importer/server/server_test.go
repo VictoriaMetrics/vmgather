@@ -27,6 +27,20 @@ func recentTimeRange() (string, string) {
 	return start.Format(time.RFC3339), end.Format(time.RFC3339)
 }
 
+func TestWithInsecureReusesCachedClient(t *testing.T) {
+	srv := newServer("test", filepath.Join(t.TempDir(), "profiles.json"))
+
+	if got := srv.withInsecure(false, "https://example.com"); got != srv.httpClient {
+		t.Fatalf("withInsecure(false, ...) = %p, want the shared httpClient %p", got, srv.httpClient)
+	}
+
+	first := srv.withInsecure(true, "https://example.com")
+	second := srv.withInsecure(true, "https://example.com")
+	if first != second {
+		t.Fatalf("withInsecure(true, ...) returned different clients across calls (%p != %p), want the same cached client reused instead of a new Transport per call", first, second)
+	}
+}
+
 func TestRedactURLForLog(t *testing.T) {
 	t.Parallel()
 

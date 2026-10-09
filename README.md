@@ -84,7 +84,7 @@ The binary starts an HTTP server and opens a browser window at `http://localhost
 
 ### From source
 
-Requirements: Go 1.21+, Make, Git.
+Requirements: Go 1.24+, Make, Git.
 
 ```bash
 git clone https://github.com/VictoriaMetrics/vmgather.git
@@ -143,6 +143,8 @@ Both Dockerfiles live in `build/docker/` and follow distroless best practices (s
 ### CLI flags
 
 Both `vmgather` and `vmimporter` support `-addr` (bind address) and `-no-browser` to skip auto-launching a browser during scripting or Docker-based runs. vmgather's default is `localhost:8080` with automatic fallback to a free port; VMImport defaults to `0.0.0.0:8081` to avoid clashing with vmgather. vmgather also accepts `-output` to choose the directory for generated archives (defaults to `./exports`).
+
+vmgather also accepts `-debug` for verbose logging. On vmgather, `-debug` additionally mounts Go's [`net/http/pprof`](https://pkg.go.dev/net/http/pprof) profiling endpoints at `/debug/pprof/` — useful for diagnosing high CPU usage during large exports, but pprof is unauthenticated, so only enable it on a deployment that isn't publicly reachable.
 
 ## VMImport companion
 
@@ -214,6 +216,8 @@ Sample `export.json`:
   "batching": { "enabled": false }
 }
 ```
+
+The `connection` object also accepts `skip_tls_verify` (bool, disables TLS certificate verification – lab/dev only) and `disable_compression` (bool, defaults to `false`; set `true` to skip gzip-compressed export responses when vmgather runs alongside the VictoriaMetrics instance it exports from and CPU, not network bandwidth, is the constrained resource).
 
 Importer
 1. Start `./vmimporter` (or Docker) – UI runs at `:8081` by default.

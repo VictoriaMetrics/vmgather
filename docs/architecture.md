@@ -29,7 +29,7 @@ A high-level breakdown of how the VictoriaMetrics metrics exporter is structured
 
 ### Backend
 
-- Go 1.21+ HTTP server using the standard library.
+- Go 1.24+ HTTP server using the standard library.
 - Defaults to `localhost:8080` (exporter) and `0.0.0.0:8081` (importer); falls back to a free port when busy.
 - Provides REST APIs mirroring other VictoriaMetrics tools.
 

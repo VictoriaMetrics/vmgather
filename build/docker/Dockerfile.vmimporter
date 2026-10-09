@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
-ARG GO_VERSION=1.25.11
-FROM golang:${GO_VERSION}-alpine@sha256:c05ba4b73604069d376c4f41346b05374335b5ca0c46fb6dfede5a59f5196931 AS builder
+ARG GO_VERSION=1.26.9
+FROM golang:${GO_VERSION}-alpine@sha256:cdfd4fe2da6b225d8b40c6b7a105736e548e83ff56d5d8f9394446eeb5eb84e0 AS builder
 WORKDIR /src
 COPY . .
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /out/vmimporter ./cmd/vmimporter && \

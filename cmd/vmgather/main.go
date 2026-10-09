@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	"go.uber.org/automaxprocs/maxprocs"
+
 	"github.com/VictoriaMetrics/vmgather/internal/application/services"
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
 	"github.com/VictoriaMetrics/vmgather/internal/server"
@@ -26,11 +28,15 @@ import (
 var version = "dev"
 
 func main() {
+	if _, err := maxprocs.Set(maxprocs.Logger(log.Printf)); err != nil {
+		log.Printf("failed to set GOMAXPROCS: %v", err)
+	}
+
 	// Parse flags
 	addr := flag.String("addr", "localhost:8080", "HTTP server address")
 	outputDirFlag := flag.String("output", "", "Export output directory")
 	noBrowser := flag.Bool("no-browser", false, "Don't open browser automatically")
-	debug := flag.Bool("debug", false, "Enable debug logging")
+	debug := flag.Bool("debug", false, "Enable debug logging and unauthenticated /debug/pprof endpoints")
 	oneshot := flag.Bool("oneshot", false, "Run a single export and exit (experimental)")
 	oneshotConfig := flag.String("oneshot-config", "", "Path to export config JSON for oneshot (use '-' for stdin)")
 	exportStdout := flag.Bool("export-stdout", false, "Stream exported metrics to stdout (oneshot only)")
