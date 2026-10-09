@@ -42,6 +42,7 @@ func NewExportDecoder(r io.Reader) *ExportDecoder {
 func CopyLines(r io.Reader, w io.Writer) (int, error) {
 	scanner := NewLineScanner(r)
 	count := 0
+	newline := []byte{'\n'}
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 || line[0] != '{' || line[len(line)-1] != '}' {
@@ -50,7 +51,7 @@ func CopyLines(r io.Reader, w io.Writer) (int, error) {
 		if _, err := w.Write(line); err != nil {
 			return count, err
 		}
-		if _, err := w.Write([]byte{'\n'}); err != nil {
+		if _, err := w.Write(newline); err != nil {
 			return count, err
 		}
 		count++

@@ -631,6 +631,7 @@ func (s *exportServiceImpl) processMetricsIntoWriter(
 	var arena fastjson.Arena
 	var buf []byte
 	metricsCount := 0
+	newline := []byte{'\n'}
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -696,7 +697,7 @@ func (s *exportServiceImpl) processMetricsIntoWriter(
 		if _, err := writer.Write(buf); err != nil {
 			return 0, fmt.Errorf("write error: %w", err)
 		}
-		if _, err := writer.Write([]byte{'\n'}); err != nil {
+		if _, err := writer.Write(newline); err != nil {
 			return 0, fmt.Errorf("write error: %w", err)
 		}
 		arena.Reset()
