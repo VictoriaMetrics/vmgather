@@ -45,7 +45,7 @@ func CopyLines(r io.Reader, w io.Writer) (int, error) {
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 || line[0] != '{' || line[len(line)-1] != '}' {
-			return count, fmt.Errorf("invalid JSON line: %s", line)
+			return count, fmt.Errorf("invalid JSON line %d: expected an object", count+1)
 		}
 		if _, err := w.Write(line); err != nil {
 			return count, err

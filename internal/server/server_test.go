@@ -2,9 +2,11 @@ package server
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -26,7 +28,7 @@ func TestRouter_PprofMountedOnlyWithDebug(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
 	rec := httptest.NewRecorder()
 	withoutDebug.Router().ServeHTTP(rec, req)
-	if rec.Code == http.StatusOK {
+	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected pprof to be unavailable without -debug, got status %d", rec.Code)
 	}
 
@@ -36,6 +38,36 @@ func TestRouter_PprofMountedOnlyWithDebug(t *testing.T) {
 	withDebug.Router().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected pprof to be available with -debug, got status %d", rec.Code)
+	}
+}
+
+func TestRouter_PprofProfileExtendsWriteDeadline(t *testing.T) {
+	server := NewServer(t.TempDir(), "test-version", true)
+	httpServer := httptest.NewUnstartedServer(server.Router())
+	httpServer.Config.WriteTimeout = 500 * time.Millisecond
+	httpServer.Start()
+	defer httpServer.Close()
+
+	// A complete one-second profile must arrive despite the shorter server
+	// timeout. net/http/pprof extends the write deadline via ResponseController.
+	client := httpServer.Client()
+	client.Timeout = 5 * time.Second
+	resp, err := client.Get(httpServer.URL + "/debug/pprof/profile?seconds=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("profile status=%d", resp.StatusCode)
+	}
+	reader, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Close() }()
+	profile, err := io.ReadAll(reader)
+	if err != nil || len(profile) == 0 {
+		t.Fatalf("incomplete profile: bytes=%d, err=%v", len(profile), err)
 	}
 }
 

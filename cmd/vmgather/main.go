@@ -36,7 +36,7 @@ func main() {
 	addr := flag.String("addr", "localhost:8080", "HTTP server address")
 	outputDirFlag := flag.String("output", "", "Export output directory")
 	noBrowser := flag.Bool("no-browser", false, "Don't open browser automatically")
-	debug := flag.Bool("debug", false, "Enable debug logging")
+	debug := flag.Bool("debug", false, "Enable debug logging and unauthenticated /debug/pprof endpoints")
 	oneshot := flag.Bool("oneshot", false, "Run a single export and exit (experimental)")
 	oneshotConfig := flag.String("oneshot-config", "", "Path to export config JSON for oneshot (use '-' for stdin)")
 	exportStdout := flag.Bool("export-stdout", false, "Stream exported metrics to stdout (oneshot only)")

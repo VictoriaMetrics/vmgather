@@ -736,6 +736,24 @@ func TestProcessMetricsIntoWriterTransformHandlesMissingMetricObject(t *testing.
 	}
 }
 
+func TestProcessMetricsIntoWriterRejectsNonStringLabels(t *testing.T) {
+	service := &exportServiceImpl{}
+	config := domain.ObfuscationConfig{Enabled: true, ObfuscateInstance: true}
+	for _, value := range []string{"42", "true", "[]", "{}", "null"} {
+		t.Run(value, func(t *testing.T) {
+			data := `{"metric":{"__name__":"up","instance":` + value + `},"values":[1],"timestamps":[1]}` + "\n"
+			var out bytes.Buffer
+			_, err := service.processMetricsIntoWriter(strings.NewReader(data), config, nil, &out)
+			if err == nil {
+				t.Fatal("expected a decode error for a non-string label")
+			}
+			if out.Len() != 0 {
+				t.Fatalf("invalid metric was written: %s", out.String())
+			}
+		})
+	}
+}
+
 // TestExportService_ProcessMetrics_EmptyStream tests empty metrics stream
 func TestExportService_ProcessMetrics_EmptyStream(t *testing.T) {
 	service := &exportServiceImpl{}

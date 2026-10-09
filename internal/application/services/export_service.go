@@ -657,10 +657,21 @@ func (s *exportServiceImpl) processMetricsIntoWriter(
 			}
 
 			labels := make(map[string]string, metricObj.Len())
+			var labelErr error
 			metricObj.Visit(func(key []byte, val *fastjson.Value) {
-				sb, _ := val.StringBytes()
+				if labelErr != nil {
+					return
+				}
+				sb, err := val.StringBytes()
+				if err != nil {
+					labelErr = err
+					return
+				}
 				labels[string(key)] = string(sb)
 			})
+			if labelErr != nil {
+				return 0, fmt.Errorf("decode error: invalid metric label value: %w", labelErr)
+			}
 
 			s.applyObfuscation(&vm.ExportedMetric{Metric: labels}, obfuscator, obfConfig)
 

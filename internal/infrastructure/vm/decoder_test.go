@@ -64,3 +64,22 @@ func TestCopyLines_EmptyStream(t *testing.T) {
 		t.Fatalf("count = %d, want 0", count)
 	}
 }
+
+func TestCopyLines_ErrorDoesNotExposeRecord(t *testing.T) {
+	privateValue := "private-instance.example:8482"
+	brokenLine := "[" + strings.Repeat(privateValue, 16*1024) + "]"
+	var out bytes.Buffer
+	count, err := CopyLines(strings.NewReader("{}\n"+brokenLine+"\n"), &out)
+	if err == nil {
+		t.Fatal("expected an error for a non-object record")
+	}
+	if count != 1 || out.String() != "{}\n" {
+		t.Fatalf("count=%d, output=%q", count, out.String())
+	}
+	if strings.Contains(err.Error(), privateValue) || len(err.Error()) > 128 {
+		t.Fatal("error exposes metric contents or is too large")
+	}
+	if !strings.Contains(err.Error(), "line 2") {
+		t.Fatalf("error does not identify the failed record: %v", err)
+	}
+}
