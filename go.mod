@@ -2,7 +2,7 @@ module github.com/VictoriaMetrics/vmgather
 
 go 1.24
 
-toolchain go1.24.11
+toolchain go1.26.9
 
 require (
 	github.com/stretchr/testify v1.11.1
