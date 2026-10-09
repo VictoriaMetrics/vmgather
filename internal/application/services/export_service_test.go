@@ -675,8 +675,7 @@ func TestProcessMetricsIntoWriterPassthroughIsByteIdentical(t *testing.T) {
 }
 
 // TestProcessMetricsIntoWriterPassthroughRejectsMalformedLines verifies the
-// fast path still fails fast on malformed input via json.Valid, matching the
-// decode path's error-on-malformed-JSONL behavior.
+// fast path rejects input that does not have the shape of a JSON object.
 func TestProcessMetricsIntoWriterPassthroughRejectsMalformedLines(t *testing.T) {
 	service := &exportServiceImpl{}
 

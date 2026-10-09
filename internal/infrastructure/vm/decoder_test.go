@@ -24,11 +24,33 @@ func TestCopyLines_PassthroughIsByteIdentical(t *testing.T) {
 }
 
 func TestCopyLines_RejectsLinesNotShapedLikeJSONObjects(t *testing.T) {
-	for _, line := range []string{"this is not json at all", `["array", "not", "object"]`, `{"unterminated":`} {
+	for _, line := range []string{"\n", "this is not json at all", `["array", "not", "object"]`, `{"unterminated":`} {
 		var out bytes.Buffer
 		if _, err := CopyLines(strings.NewReader(line), &out); err == nil {
 			t.Errorf("expected error for line %q shaped like it isn't a JSON object", line)
 		}
+	}
+}
+
+func TestCopyLines_NormalizesLineEndings(t *testing.T) {
+	data := "{\"metric\":{\"__name__\":\"up\"},\"values\":[1],\"timestamps\":[1]}"
+	for _, input := range []string{data, data + "\r\n", data + "\n"} {
+		var out bytes.Buffer
+		count, err := CopyLines(strings.NewReader(input), &out)
+		if err != nil || count != 1 || out.String() != data+"\n" {
+			t.Fatalf("input=%q: count=%d, err=%v, output=%q", input, count, err, out.String())
+		}
+	}
+}
+
+func TestCopyLines_TrustsObjectContents(t *testing.T) {
+	// CopyLines deliberately checks only the outer braces of trusted VM
+	// export records. Keep this separate from tests of the parsing path.
+	data := `{"metric":{"__name__":"up"},"values":[1,],"timestamps":[1]}` + "\n"
+	var out bytes.Buffer
+	count, err := CopyLines(strings.NewReader(data), &out)
+	if err != nil || count != 1 || out.String() != data {
+		t.Fatalf("count=%d, err=%v, output=%q", count, err, out.String())
 	}
 }
 
