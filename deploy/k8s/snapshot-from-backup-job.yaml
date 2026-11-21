@@ -15,11 +15,12 @@
 # snapshot-cronjob.yaml would also start the hourly CronJob against the live VictoriaMetrics:
 #
 #   kubectl -n monitoring create serviceaccount vmgather-snapshot
-#   kubectl -n monitoring create secret generic vmgather-snapshot \
-#     --from-literal=AWS_ACCESS_KEY_ID=<key> --from-literal=AWS_SECRET_ACCESS_KEY=<secret>
+#   kubectl -n monitoring create secret generic vmgather-snapshot --from-env-file=vmgather-snapshot.env
 #
-# The Secret holds the S3 keys for vmrestore and vmgather. With IRSA or workload identity, annotate the
-# ServiceAccount, give it access to both buckets and create the Secret without keys (envFrom needs it).
+# vmgather-snapshot.env holds the S3 keys for vmrestore and vmgather as AWS_ACCESS_KEY_ID=... and
+# AWS_SECRET_ACCESS_KEY=... lines; keep it readable only by you and out of git, so the keys stay out of
+# the shell history. With IRSA or workload identity, annotate the ServiceAccount, give it access to both
+# buckets and create the Secret without --from-env-file (envFrom needs it to exist).
 #
 #   kubectl -n monitoring apply -f snapshot-from-backup-job.yaml
 ---
