@@ -65,6 +65,7 @@ func BenchmarkProcessMetricsIntoWriter(b *testing.B) {
 					b.Run(name, func(b *testing.B) {
 						proc := newLineProcessor(mode.config)
 						defer proc.close()
+						obfuscator := obfuscation.NewLabels(mode.config.Obfuscation.LabelNames())
 						b.SetBytes(int64(len(data)))
 						b.ReportAllocs()
 						b.ResetTimer()
@@ -73,7 +74,7 @@ func BenchmarkProcessMetricsIntoWriter(b *testing.B) {
 							var count int
 							var err error
 							if baseline {
-								count, err = benchmarkDecodeAndMarshal(reader, mode.config.Obfuscation)
+								count, err = benchmarkDecodeAndMarshal(reader, mode.config.Obfuscation, obfuscator)
 							} else {
 								count, err = proc.process(reader, io.Discard)
 							}
@@ -88,9 +89,10 @@ func BenchmarkProcessMetricsIntoWriter(b *testing.B) {
 	}
 }
 
-func benchmarkDecodeAndMarshal(reader io.Reader, config domain.ObfuscationConfig) (int, error) {
+// benchmarkDecodeAndMarshal is the old decode, change and json.Marshal path. The obfuscator is created
+// once per benchmark, like the line processor, so both sides use a warm digest cache.
+func benchmarkDecodeAndMarshal(reader io.Reader, config domain.ObfuscationConfig, obfuscator *obfuscation.Labels) (int, error) {
 	decoder := vm.NewExportDecoder(reader)
-	obfuscator := obfuscation.NewLabels(config.LabelNames())
 	count := 0
 	for {
 		metric, err := decoder.Decode()

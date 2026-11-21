@@ -163,9 +163,52 @@ func TestRouter_RejectsCrossOriginUpload(t *testing.T) {
 	req.Header.Set("Origin", "https://evil.example")
 	rr := httptest.NewRecorder()
 	s.Router().ServeHTTP(rr, req)
-	time.Sleep(300 * time.Millisecond)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("cross-origin upload: want 403, got %d; data received by VM: %q", rr.Code, vm.body())
+	}
+	// An import runs in the background: give a wrongly started one time to reach the fake VM.
+	time.Sleep(300 * time.Millisecond)
+	if got := vm.body(); got != "" {
+		t.Fatalf("rejected upload still reached VictoriaMetrics: %q", got)
+	}
+}
+
+// Text fields are read into memory, so the form is capped as a whole, not only per field.
+func TestReadUploadForm_LimitsTheWholeForm(t *testing.T) {
+	build := func(fields int, size int) *http.Request {
+		var body bytes.Buffer
+		mw := multipart.NewWriter(&body)
+		value := strings.Repeat("x", size)
+		for i := 0; i < fields; i++ {
+			_ = mw.WriteField(fmt.Sprintf("f%d", i), value)
+		}
+		_ = mw.Close()
+		req := httptest.NewRequest(http.MethodPost, "http://localhost/api/upload", &body)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		return req
+	}
+	if _, status, err := readUploadForm(build(maxUploadFields+1, 1)); err == nil || status != http.StatusBadRequest {
+		t.Fatalf("too many fields: status %d, err %v", status, err)
+	}
+	// Every field is under the 1 MiB limit, together they are over 4 MiB.
+	if _, status, err := readUploadForm(build(5, maxUploadFieldBytes-1)); err == nil || status != http.StatusBadRequest {
+		t.Fatalf("too large form: status %d, err %v", status, err)
+	}
+	form, _, err := readUploadForm(build(3, 100))
+	if err != nil || len(form.Fields) != 3 {
+		t.Fatalf("normal form: %v, %d fields", err, len(form.Fields))
+	}
+}
+
+// 0 turns the retention filter off; a cutoff before 1970 (-retentionPeriod=100y) still applies.
+func TestFilterTimestampsAndValues_NegativeCutoff(t *testing.T) {
+	values := []json.RawMessage{json.RawMessage("1"), json.RawMessage("2")}
+	ts, _, dropped := filterTimestampsAndValues([]int64{-5000, 1000}, values, -1000)
+	if dropped != 1 || len(ts) != 1 || ts[0] != 1000 {
+		t.Fatalf("negative cutoff: kept %v, dropped %d", ts, dropped)
+	}
+	if _, _, dropped := filterTimestampsAndValues([]int64{-5000, 1000}, values, 0); dropped != 0 {
+		t.Fatalf("cutoff 0 must not filter, dropped %d", dropped)
 	}
 }
 

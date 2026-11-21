@@ -200,7 +200,8 @@ services:
     volumes:
       - ./test-configs/prometheus.yml:/etc/prometheus/prometheus.yml
     tmpfs:
-      # Prometheus runs as nobody; a default tmpfs is owned by root and it fails to start.
+      # Docker creates the tmpfs owned by root with the mode of the image's /prometheus (775), so
+      # Prometheus, which runs as nobody, cannot write to it ("queries.active: permission denied").
       - /prometheus:mode=1777
     networks:
       - vmtest

@@ -67,7 +67,8 @@ type exportJob struct {
 	config        domain.ExportConfig
 	resumeFrom    int
 	baseMetrics   int
-	// resume keeps the obfuscator, metric count and staging size between runs of this job.
+	// resume keeps the metric count and the staging size of the last completed batch between runs of
+	// this job. Obfuscation is deterministic, so it needs no state.
 	resume *services.ResumeState
 }
 

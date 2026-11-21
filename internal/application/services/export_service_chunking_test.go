@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -114,12 +113,8 @@ func TestQueryRangeTimeoutSplitsTimeWindow(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		startRaw := r.URL.Query().Get("start")
-		endRaw := r.URL.Query().Get("end")
-		startSecs, _ := strconv.ParseInt(startRaw, 10, 64)
-		endSecs, _ := strconv.ParseInt(endRaw, 10, 64)
-		startUnix := time.Unix(startSecs, 0)
-		endUnix := time.Unix(endSecs, 0)
+		startUnix := time.UnixMilli(parseVMTime(t, r.URL.Query().Get("start")))
+		endUnix := time.UnixMilli(parseVMTime(t, r.URL.Query().Get("end")))
 		duration := endUnix.Sub(startUnix)
 		requests = append(requests, duration.String())
 		if duration > 15*time.Second {
@@ -343,10 +338,8 @@ func TestAdaptiveRetryDoesNotAppendFailedPartialAttempt(t *testing.T) {
 		if r.URL.Path != "/api/v1/query_range" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		startSecs, _ := strconv.ParseInt(r.URL.Query().Get("start"), 10, 64)
-		endSecs, _ := strconv.ParseInt(r.URL.Query().Get("end"), 10, 64)
-		rangeStart := time.Unix(startSecs, 0)
-		rangeEnd := time.Unix(endSecs, 0)
+		rangeStart := time.UnixMilli(parseVMTime(t, r.URL.Query().Get("start")))
+		rangeEnd := time.UnixMilli(parseVMTime(t, r.URL.Query().Get("end")))
 		duration := rangeEnd.Sub(rangeStart)
 		if duration == time.Hour && !largeAttemptFailed && rangeStart.Equal(start) {
 			largeAttemptFailed = true
@@ -445,10 +438,8 @@ func TestSplitByTimeFailureDoesNotAppendPartialSubSplit(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		startSecs, _ := strconv.ParseInt(r.URL.Query().Get("start"), 10, 64)
-		endSecs, _ := strconv.ParseInt(r.URL.Query().Get("end"), 10, 64)
-		rangeStart := time.Unix(startSecs, 0)
-		rangeEnd := time.Unix(endSecs, 0)
+		rangeStart := time.UnixMilli(parseVMTime(t, r.URL.Query().Get("start")))
+		rangeEnd := time.UnixMilli(parseVMTime(t, r.URL.Query().Get("end")))
 		duration := rangeEnd.Sub(rangeStart)
 		switch {
 		case duration == 2*time.Hour:

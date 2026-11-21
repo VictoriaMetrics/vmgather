@@ -98,8 +98,9 @@ test.describe('UI regressions', () => {
 
       await step3.locator('#testConnectionBtn').click();
 
-      // The host check is best-effort, but it must not hang the UI.
-      await expect(step3.locator('#validationSteps')).toContainText('Host is reachable', { timeout: 4500 });
+      // The host check is best-effort, but it must not hang the UI, and it must not claim an answer it did not get.
+      await expect(step3.locator('#validationSteps')).toContainText('No answer to the browser in 3s', { timeout: 4500 });
+      await expect(step3.locator('#validationSteps')).not.toContainText('Host is reachable');
       await page.waitForSelector('#step3Next:enabled');
     } finally {
       await new Promise(resolve => server.close(resolve));

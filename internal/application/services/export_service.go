@@ -123,10 +123,15 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 	}
 	resuming := config.ResumeFromBatch > 0
 	state := resumeStateFrom(ctx, resuming)
+	if resuming && !state.recorded {
+		// Without the metric count and the staging size of the failed run the archive would count
+		// wrong and keep a partly appended batch.
+		return nil, fmt.Errorf("cannot resume from batch %d: no progress was recorded for this export", config.ResumeFromBatch)
+	}
 	if err := initializeStagingFile(config.StagingFile, resuming); err != nil {
 		return nil, fmt.Errorf("failed to initialize staging file: %w", err)
 	}
-	if resuming && state.recorded {
+	if resuming {
 		// Drop a partially appended batch (for example after a full disk) before appending again.
 		if err := os.Truncate(config.StagingFile, state.StagingBytes); err != nil {
 			return nil, fmt.Errorf("failed to restore staging file for resume: %w", err)
@@ -213,12 +218,11 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 	if err != nil {
 		return nil, fmt.Errorf("failed to open staging file for archive: %w", err)
 	}
-	defer func() {
-		_ = processedReader.Close()
-	}()
 
 	archiveStartTime := time.Now()
 	archivePath, sha256sum, err := s.archiveWriter.CreateArchive(exportID, processedReader, metadata)
+	// Close before the staging file is removed below: Windows cannot delete an open file.
+	_ = processedReader.Close()
 	if err != nil {
 		fmt.Printf("[ERROR] Archive creation failed: %v\n", err)
 		return nil, fmt.Errorf("archive creation failed: %w", err)
@@ -234,10 +238,9 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 	fmt.Printf("Archive size: %.2f MB\n", float64(archiveSize)/(1024*1024))
 	fmt.Printf("SHA256: %s\n", sha256sum)
 
-	if config.ResumeFromBatch == 0 {
-		if err := os.Remove(config.StagingFile); err != nil {
-			log.Printf("[WARN] Failed to remove staging file %s: %v", config.StagingFile, err)
-		}
+	// The archive holds everything now; a resumed export also leaves no raw JSONL behind.
+	if err := os.Remove(config.StagingFile); err != nil {
+		log.Printf("[WARN] Failed to remove staging file %s: %v", config.StagingFile, err)
 	}
 
 	// Build result
@@ -614,7 +617,7 @@ func (s *exportServiceImpl) buildSelector(jobs []string) string {
 }
 
 // ValidateExportConfig rejects configs that would export the whole database by accident:
-// cluster mode without jobs (ESUPP-1043, ESUPP-950) and custom mode without a query.
+// cluster mode without jobs and custom mode without a query.
 func ValidateExportConfig(config domain.ExportConfig) error {
 	if config.Mode == domain.ExportModeCustom {
 		if strings.TrimSpace(config.Query) == "" {

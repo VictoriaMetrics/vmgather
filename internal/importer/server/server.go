@@ -908,7 +908,7 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		"protected_labels":          protectedDropLabels,
 		"warnings":                  buildAnalysisWarnings(summary, retentionCutoff, maxLabelsLimit),
 		"suggested_shift_ms": func() int64 {
-			if retentionCutoff > 0 && !summary.Start.IsZero() && summary.Start.UnixMilli() < retentionCutoff {
+			if retentionCutoff != 0 && !summary.Start.IsZero() && summary.Start.UnixMilli() < retentionCutoff {
 				return retentionCutoff - summary.Start.UnixMilli() + int64(time.Hour/time.Millisecond)
 			}
 			return 0
@@ -926,17 +926,24 @@ type uploadForm struct {
 	Size     int64
 }
 
-const maxUploadFieldBytes = 1 << 20
+const (
+	maxUploadFieldBytes = 1 << 20
+	// maxUploadFormBytes and maxUploadFields cap all text fields together, so a form with many
+	// uniquely named fields cannot fill the memory.
+	maxUploadFormBytes = 4 << 20
+	maxUploadFields    = 64
+)
 
 // readUploadForm streams a multipart upload: the bundle part goes straight to a temp file, other fields
-// are read into memory (1 MB each at most). ParseMultipartForm(512 MB) kept the bundle in RAM and then
-// copied it again: 1 GB peak RSS for a 419 MB bundle.
+// are read into memory (1 MB each, 4 MB and 64 fields in total at most). ParseMultipartForm(512 MB)
+// kept the bundle in RAM and then copied it again: 1 GB peak RSS for a 419 MB bundle.
 func readUploadForm(r *http.Request) (*uploadForm, int, error) {
 	mr, err := r.MultipartReader()
 	if err != nil {
 		return nil, http.StatusBadRequest, fmt.Errorf("failed to parse form: %w", err)
 	}
 	form := &uploadForm{Fields: make(map[string]string)}
+	formBytes := 0
 	for {
 		part, err := mr.NextPart()
 		if err == io.EOF {
@@ -956,12 +963,19 @@ func readUploadForm(r *http.Request) (*uploadForm, int, error) {
 			form.Path, form.FileName, form.Size = path, part.FileName(), n
 			continue
 		}
-		value, err := io.ReadAll(io.LimitReader(part, maxUploadFieldBytes+1))
-		_ = part.Close()
-		if err != nil || len(value) > maxUploadFieldBytes {
+		if len(form.Fields) >= maxUploadFields {
+			_ = part.Close()
 			form.discard()
-			return nil, http.StatusBadRequest, fmt.Errorf("invalid form field %q", part.FormName())
+			return nil, http.StatusBadRequest, fmt.Errorf("too many form fields (%d at most)", maxUploadFields)
 		}
+		limit := min(maxUploadFieldBytes, maxUploadFormBytes-formBytes)
+		value, err := io.ReadAll(io.LimitReader(part, int64(limit)+1))
+		_ = part.Close()
+		if err != nil || len(value) > limit {
+			form.discard()
+			return nil, http.StatusBadRequest, fmt.Errorf("invalid form field %q: too large or the form is too large", part.FormName())
+		}
+		formBytes += len(part.FormName()) + len(value)
 		form.Fields[part.FormName()] = string(value)
 	}
 }
@@ -1171,7 +1185,7 @@ func encodeSeriesLabelBitsets(seriesLabels [][]string, universe []string) []stri
 
 func buildAnalysisWarnings(summary importSummary, cutoffMs int64, maxLabelsLimit int) []string {
 	var warnings []string
-	if cutoffMs > 0 && !summary.Start.IsZero() {
+	if cutoffMs != 0 && !summary.Start.IsZero() {
 		cutoff := time.UnixMilli(cutoffMs)
 		if summary.Start.Before(cutoff) {
 			total := summary.Points + summary.DroppedOld
@@ -1774,8 +1788,9 @@ func detectTimestampUnit(v int64) string {
 	}
 }
 
+// cutoffMs 0 means no filter. A cutoff before 1970 (-retentionPeriod=100y) is negative and still applies.
 func filterTimestampsAndValues(timestamps []int64, values []json.RawMessage, cutoffMs int64) ([]int64, []json.RawMessage, int) {
-	if cutoffMs <= 0 {
+	if cutoffMs == 0 {
 		return timestamps, values, 0
 	}
 	if len(timestamps) != len(values) {

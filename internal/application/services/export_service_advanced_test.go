@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
+	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/obfuscation"
 	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/vm"
 )
 
@@ -187,9 +188,17 @@ func TestExportService_ProcessMetrics_LargeStream(t *testing.T) {
 		t.Errorf("processing too slow: %.0f metrics/sec (want > 10000)", metricsPerSec)
 	}
 
-	// Verify output
-	if processedReader == nil {
-		t.Fatal("processedReader is nil")
+	out, err := io.ReadAll(processedReader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, original := range []string{`"instance":"10.0.1.5:8482"`, `"job":"test"`} {
+		if strings.Contains(string(out), original) {
+			t.Fatalf("%s is not obfuscated", original)
+		}
+	}
+	if want := `"instance":"` + obfuscation.Value("10.0.1.5:8482") + `"`; !strings.Contains(string(out), want) {
+		t.Fatalf("output has no obfuscated instance %s", want)
 	}
 }
 

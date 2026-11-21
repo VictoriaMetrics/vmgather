@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,7 +19,7 @@ import (
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
 )
 
-// Regression tests for export failures seen in support tickets (ESUPP-950, ESUPP-1043, ESUPP-1398, ESUPP-902).
+// Regression tests for export failures seen in production.
 
 func regressionConfig(url, dir string) domain.ExportConfig {
 	base := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
@@ -63,7 +64,7 @@ func readArchiveMetrics(t *testing.T, path string) []map[string]interface{} {
 	return out
 }
 
-// ESUPP-1043, ESUPP-950: a cluster-mode export without jobs must not fall back to {__name__!=""}
+// A cluster-mode export without jobs must not fall back to {__name__!=""}
 // (the whole database). It must fail fast before sending any export request.
 func TestExport_ClusterModeWithoutJobsIsRejected(t *testing.T) {
 	var mu sync.Mutex
@@ -90,7 +91,7 @@ func TestExport_ClusterModeWithoutJobsIsRejected(t *testing.T) {
 	}
 }
 
-// ESUPP-1398: a vmselect restart returns 502 for one request. The batch must be retried,
+// A vmselect restart returns 502 for one request. The batch must be retried,
 // not fail the whole export.
 func TestExport_RetriesTransientUpstreamError(t *testing.T) {
 	fastRetries(t)
@@ -158,7 +159,7 @@ func metricsQLConfig(url, dir string, rangeDur time.Duration) domain.ExportConfi
 	return cfg
 }
 
-// ESUPP-902 path: the query_range fallback wrote one JSON line per sample, repeating all labels.
+// The query_range fallback wrote one JSON line per sample, repeating all labels.
 // One series in one chunk must be one line.
 func TestExport_QueryRangeFallbackWritesOneLinePerSeries(t *testing.T) {
 	srv := queryRangeServer([]string{"1", "2", "3", "4", "5"})
@@ -194,8 +195,9 @@ func TestExport_QueryRangeFallbackKeepsSpecialValues(t *testing.T) {
 	for _, l := range lines {
 		values = append(values, l["values"].([]interface{})...)
 	}
+	// DeepEqual keeps the JSON types: the number 1 and the string "1" differ.
 	want := []interface{}{float64(1), nil, "Infinity", "-Infinity"}
-	if fmt.Sprint(values) != fmt.Sprint(want) {
+	if !reflect.DeepEqual(values, want) {
 		t.Fatalf("want values %v, got %v", want, values)
 	}
 }

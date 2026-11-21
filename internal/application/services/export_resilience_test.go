@@ -317,6 +317,10 @@ func TestExport_ResumeTruncatesPartialAppend(t *testing.T) {
 	if lines := readArchiveMetrics(t, res.ArchivePath); len(lines) != 2 {
 		t.Fatalf("want 2 valid lines, got %d", len(lines))
 	}
+	// The archive holds everything: a resumed export must not leave its raw staging file behind.
+	if _, err := os.Stat(cfg.StagingFile); !os.IsNotExist(err) {
+		t.Fatalf("staging file left after the resumed export: %v", err)
+	}
 }
 
 // The first batch was empty (0 bytes in staging), then a later batch was partly appended.
@@ -410,8 +414,28 @@ func TestExport_LongLinesFromVictoriaMetrics(t *testing.T) {
 	for _, obfuscate := range []bool{false, true} {
 		cfg := oneHourConfig(srv.URL, t.TempDir())
 		cfg.Obfuscation = domain.ObfuscationConfig{Enabled: obfuscate, ObfuscateInstance: true}
-		if _, err := NewExportService(t.TempDir(), "test").ExecuteExport(context.Background(), cfg); err != nil {
+		res, err := NewExportService(t.TempDir(), "test").ExecuteExport(context.Background(), cfg)
+		if err != nil {
 			t.Fatalf("obfuscation=%v: a %d-byte line failed: %v", obfuscate, len(line), err)
+		}
+		if lines := readArchiveMetrics(t, res.ArchivePath); len(lines) != 1 || res.MetricsExported != 1 {
+			t.Fatalf("obfuscation=%v: want the long line once, got %d lines, count %d", obfuscate, len(lines), res.MetricsExported)
+		}
+	}
+}
+
+// A resume needs the progress of the failed run; without it the count and the staging file would be wrong.
+func TestExport_ResumeWithoutRecordedProgressIsRejected(t *testing.T) {
+	srv := newIPv4Server(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = fmt.Fprint(w, exportLineFor(r)) }))
+	defer srv.Close()
+	cfg := regressionConfig(srv.URL, t.TempDir())
+	cfg.ResumeFromBatch = 1
+	for name, ctx := range map[string]context.Context{
+		"no state":    context.Background(),
+		"empty state": WithResumeState(context.Background(), &ResumeState{}),
+	} {
+		if _, err := NewExportService(t.TempDir(), "test").ExecuteExport(ctx, cfg); err == nil || !strings.Contains(err.Error(), "no progress was recorded") {
+			t.Fatalf("%s: want a resume error, got %v", name, err)
 		}
 	}
 }

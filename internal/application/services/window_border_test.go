@@ -27,6 +27,11 @@ func parseVMTime(t *testing.T, s string) int64 {
 	return int64(f*1000 + 0.5)
 }
 
+// queryRangePoint formats a query_range point at tsMs like the Prometheus API: [unix seconds, "value"].
+func queryRangePoint(tsMs int64) string {
+	return fmt.Sprintf(`[%s,"1"]`, strconv.FormatFloat(float64(tsMs)/1000, 'f', -1, 64))
+}
+
 // vmWindow returns the start/end of an /api/v1/export request.
 func vmWindow(t *testing.T, r *http.Request) (time.Time, time.Time) {
 	t.Helper()
@@ -92,12 +97,11 @@ func TestExport_SampleOnWindowBorderIsExportedOnce(t *testing.T) {
 func TestExport_QueryRangeChunkBorderPointIsExportedOnce(t *testing.T) {
 	srv := newIPv4Server(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		start, _ := strconv.ParseInt(q.Get("start"), 10, 64)
-		end, _ := strconv.ParseInt(q.Get("end"), 10, 64)
+		start, end := parseVMTime(t, q.Get("start")), parseVMTime(t, q.Get("end"))
 		step, _ := time.ParseDuration(q.Get("step"))
 		var pts []string
-		for ts := start; ts <= end; ts += int64(step.Seconds()) { // Prometheus API: start and end are inclusive
-			pts = append(pts, fmt.Sprintf(`[%d,"1"]`, ts))
+		for ts := start; ts <= end; ts += step.Milliseconds() { // Prometheus API: start and end are inclusive
+			pts = append(pts, queryRangePoint(ts))
 		}
 		fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"__name__":"m","job":"j"},"values":[%s]}]}}`, strings.Join(pts, ","))
 	}))
@@ -123,21 +127,56 @@ func TestExport_QueryRangeChunkBorderPointIsExportedOnce(t *testing.T) {
 	}
 }
 
+// query_range sent start and end as whole seconds. With a start at a fraction of a second, the chunk that ends
+// 1ms before the border and the next chunk both became the same second, and the border point came twice.
+func TestExport_QueryRangeFractionalBorderPointIsExportedOnce(t *testing.T) {
+	srv := newIPv4Server(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		start, end := parseVMTime(t, q.Get("start")), parseVMTime(t, q.Get("end"))
+		step, _ := time.ParseDuration(q.Get("step"))
+		var pts []string
+		for ts := start; ts <= end; ts += step.Milliseconds() {
+			pts = append(pts, queryRangePoint(ts))
+		}
+		fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"__name__":"m","job":"j"},"values":[%s]}]}}`, strings.Join(pts, ","))
+	}))
+	defer srv.Close()
+
+	cfg := metricsQLConfig(srv.URL, t.TempDir(), 2*time.Hour)
+	cfg.TimeRange.Start = cfg.TimeRange.Start.Add(500 * time.Millisecond)
+	cfg.MetricStepSeconds = 60
+	cfg.Safety.Mode = domain.ExportAdaptivityOff
+	res, err := NewExportService(t.TempDir(), "test").ExecuteExport(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[float64]int{}
+	for _, l := range readArchiveMetrics(t, res.ArchivePath) {
+		for _, ts := range l["timestamps"].([]interface{}) {
+			seen[ts.(float64)]++
+		}
+	}
+	for ts, n := range seen {
+		if n > 1 {
+			t.Fatalf("timestamp %d exported %d times", int64(ts), n)
+		}
+	}
+}
+
 // After a timeout split in query_range mode the halves must stay on the step grid and must not evaluate the
 // border timestamp twice (the window ends 1ms before the next one, which put the midpoint on a fraction of a second).
 func TestExport_QueryRangeSplitKeepsStepGrid(t *testing.T) {
 	srv := newIPv4Server(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		start, _ := strconv.ParseInt(q.Get("start"), 10, 64)
-		end, _ := strconv.ParseInt(q.Get("end"), 10, 64)
+		start, end := parseVMTime(t, q.Get("start")), parseVMTime(t, q.Get("end"))
 		step, _ := time.ParseDuration(q.Get("step"))
-		if end-start > 1000 { // heavy: VictoriaMetrics times out on windows longer than ~16 minutes
+		if end-start > 1000*1000 { // heavy: VictoriaMetrics times out on windows longer than ~16 minutes
 			http.Error(w, `{"status":"error","error":"timeout exceeded during query execution: 30.000 seconds"}`, 422)
 			return
 		}
 		var pts []string
-		for ts := start; ts <= end; ts += int64(step.Seconds()) {
-			pts = append(pts, fmt.Sprintf(`[%d,"1"]`, ts))
+		for ts := start; ts <= end; ts += step.Milliseconds() {
+			pts = append(pts, queryRangePoint(ts))
 		}
 		fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"__name__":"m","job":"j"},"values":[%s]}]}}`, strings.Join(pts, ","))
 	}))

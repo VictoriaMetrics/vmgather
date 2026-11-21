@@ -1,14 +1,17 @@
 package snapshot
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/backup/actions"
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/backup/common"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/backup/fslocal"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/snapshot/snapshotutil"
 
@@ -54,6 +57,9 @@ func TestStateStoreRoundTrip(t *testing.T) {
 func TestBackupUploaderRoundTripWithRestore(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
+	// After a rerun actions.Backup calls RemoveEmptyDirs, which in VictoriaMetrics v1.156.0 leaves
+	// directory handles open until a GC; Windows cannot delete a directory with an open handle.
+	t.Cleanup(runtime.GC)
 	src := filepath.Join(root, "staging", snapshotutil.NewName())
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
@@ -75,6 +81,16 @@ func TestBackupUploaderRoundTripWithRestore(t *testing.T) {
 		t.Fatalf("second upload: %v", err)
 	}
 
+	want := payload + "vm_rows 2\n"
+	if got := readRemoteFile(t, dst, bundleFilename); string(got) != want {
+		t.Fatalf("remote has %d bytes; want the second upload (%d bytes)", len(got), len(want))
+	}
+
+	// vmrestore runs on Linux; fslocal.FinalizeFile fsyncs a file opened read-only, which Windows rejects.
+	if runtime.GOOS == "windows" {
+		t.Log("actions.Restore is not checked on Windows")
+		return
+	}
 	remote, err := actions.NewRemoteFS(ctx, dst, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -89,9 +105,47 @@ func TestBackupUploaderRoundTripWithRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != payload+"vm_rows 2\n" {
-		t.Fatalf("restored %d bytes; want the second upload (%d bytes)", len(got), len(payload)+10)
+	if string(got) != want {
+		t.Fatalf("restored %d bytes; want the second upload (%d bytes)", len(got), len(want))
 	}
+}
+
+// readRemoteFile returns the content of file in the snapshot at dst. Every part must belong to the
+// current version of the file, so a rerun into the same place keeps one copy.
+func readRemoteFile(t *testing.T, dst, file string) []byte {
+	t.Helper()
+	fs, err := actions.NewRemoteFS(context.Background(), dst, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs.MustStop()
+	parts, err := fs.ListParts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fileParts []common.Part
+	for _, p := range parts {
+		if p.Path == file {
+			fileParts = append(fileParts, p)
+		}
+	}
+	if len(fileParts) == 0 {
+		t.Fatalf("%s has no parts of %s", dst, file)
+	}
+	common.SortParts(fileParts)
+	var buf bytes.Buffer
+	for _, p := range fileParts {
+		if p.FileSize != fileParts[0].FileSize || p.Offset != uint64(buf.Len()) {
+			t.Fatalf("%s: parts of different versions or with gaps: %v", file, fileParts)
+		}
+		if err := fs.DownloadPart(p, &buf); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if uint64(buf.Len()) != fileParts[0].FileSize {
+		t.Fatalf("%s: got %d bytes from parts; want %d", file, buf.Len(), fileParts[0].FileSize)
+	}
+	return buf.Bytes()
 }
 
 func TestSnapshotName(t *testing.T) {

@@ -4,7 +4,6 @@ package httpguard
 import (
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 )
 
@@ -12,20 +11,17 @@ import (
 // page open in the user's browser can POST to vmgather or vmimporter on localhost: "simple" requests
 // (text/plain, multipart/form-data) need no CORS preflight.
 //
-// The rules follow net/http.CrossOriginProtection (Go 1.25+); this copy exists while Go 1.24 is
-// supported. GET, HEAD and OPTIONS always pass. If Sec-Fetch-Site is present, only "same-origin" and
-// "none" pass. Otherwise, if Origin is present, its host must equal the request Host. Requests without
-// both headers (curl, scripts) pass.
+// It is net/http.CrossOriginProtection with a JSON error for the UIs. GET, HEAD and OPTIONS always pass.
+// If Sec-Fetch-Site is present, only "same-origin" and "none" pass. Otherwise, if Origin is present, its
+// host must equal the request Host. Requests without both headers (curl, scripts) pass.
 func SameOrigin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !isSafeMethod(r.Method) && isCrossOrigin(r) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusForbidden)
-			_, _ = w.Write([]byte(`{"error":"cross-origin request rejected"}` + "\n"))
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+	p := http.NewCrossOriginProtection()
+	p.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"cross-origin request rejected"}` + "\n"))
+	}))
+	return p.Handler(next)
 }
 
 // LocalHostOnly blocks DNS rebinding. A page from an attacker's domain whose name later resolves to
@@ -38,7 +34,8 @@ func SameOrigin(next http.Handler) http.Handler {
 func LocalHostOnly(next http.Handler, allowedHosts ...string) http.Handler {
 	allowed := make(map[string]struct{}, len(allowedHosts))
 	for _, h := range allowedHosts {
-		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
+		// Requests are matched by host name without port, so "proxy.local:8443" allows proxy.local.
+		if h = hostName(strings.TrimSpace(h)); h != "" {
 			allowed[h] = struct{}{}
 		}
 	}
@@ -90,28 +87,4 @@ func ParseHostList(value string) []string {
 		}
 	}
 	return hosts
-}
-
-func isSafeMethod(method string) bool {
-	return method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions
-}
-
-func isCrossOrigin(r *http.Request) bool {
-	switch r.Header.Get("Sec-Fetch-Site") {
-	case "":
-		// Older browser or non-browser client: fall back to Origin.
-	case "same-origin", "none":
-		return false
-	default:
-		return true
-	}
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return false
-	}
-	u, err := url.Parse(origin)
-	if err != nil || u.Host == "" {
-		return true // "null" (sandboxed page, file://) or malformed
-	}
-	return u.Host != r.Host
 }

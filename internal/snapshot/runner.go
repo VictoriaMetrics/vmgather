@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"log"
 	"math"
 	"os"
@@ -29,7 +30,8 @@ type Config struct {
 	Export domain.ExportConfig
 	// Dst is the snapshot root: s3://bucket/prefix, gs://, azblob:// or fs:///abs/path.
 	Dst string
-	// Period is the length of one snapshot window. Windows are aligned to it.
+	// Period is the length of one snapshot window, at least one minute and a whole number of seconds
+	// (snapshot names have second precision). Window ends are aligned to it.
 	Period time.Duration
 	// Lag keeps the newest data out of the window, so late samples are included.
 	Lag time.Duration
@@ -53,8 +55,8 @@ func (c Config) validate() error {
 	switch {
 	case c.Dst == "":
 		return errors.New("snapshot destination is empty")
-	case c.Period <= 0:
-		return fmt.Errorf("snapshot period must be positive, got %s", c.Period)
+	case c.Period < time.Minute || c.Period%time.Second != 0:
+		return fmt.Errorf("snapshot period must be at least 1m and a whole number of seconds, got %s", c.Period)
 	case c.Retention < 0:
 		return fmt.Errorf("snapshot retention must not be negative, got %s", c.Retention)
 	case c.Lag < 0:
@@ -127,7 +129,7 @@ func (r *Runner) RunOnce(ctx context.Context) (err error) {
 
 	backfill := !r.cfg.End.IsZero()
 	end := r.now().Add(-r.cfg.Lag)
-	var windows []domain.TimeRange
+	var windows iter.Seq[domain.TimeRange]
 	if backfill {
 		if r.cfg.End.After(end) {
 			return fmt.Errorf("snapshot end %s is less than -snapshot.lag behind now", r.cfg.End.Format(time.RFC3339))
@@ -144,10 +146,9 @@ func (r *Runner) RunOnce(ctx context.Context) (err error) {
 		}
 		windows = planWindows(st.LastEnd, r.cfg.Start, end, r.cfg.Period, r.cfg.MaxCatchUp)
 	}
-	if len(windows) == 0 {
-		log.Printf("[SNAPSHOT] nothing to do: the next window is not complete yet")
-	}
-	for _, w := range windows {
+	planned := 0
+	for w := range windows {
+		planned++
 		name := snapshotName(w)
 		if backfill {
 			// A backfill keeps no state; skipping uploaded windows makes a failed backfill restartable.
@@ -176,6 +177,9 @@ func (r *Runner) RunOnce(ctx context.Context) (err error) {
 			continue
 		}
 		log.Printf("[SNAPSHOT][OK] %s: %d export lines in %s", name, metrics, time.Since(started).Round(time.Millisecond))
+	}
+	if planned == 0 {
+		log.Printf("[SNAPSHOT] nothing to do: the next window is not complete yet")
 	}
 	if !backfill && r.cfg.Retention > 0 {
 		if _, err := applyRetention(rootFS, r.now().Add(-r.cfg.Retention)); err != nil {

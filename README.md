@@ -27,7 +27,7 @@ vmgather collects VictoriaMetrics internal metrics, obfuscates sensitive data, a
 - **vmagent-compatible obfuscation**: selected label values become SHA-256 digests, the same as vmagent `-remoteWrite.obfuscateLabels`, so values match across exports and MDX streams.
 - **Snapshot mode (experimental)**: scheduled exports of MDX metrics to your own S3, GCS, Azure Blob or local storage, ready for a Kubernetes CronJob; storage access is the vmbackup code.
 - **Disk-safe staging** – exporter streams batches to a chosen directory so partial files survive crashes or manual interrupts.
-- **Adjustable metric cadence**: choose a 30s/1m/5m sampling step for MetricsQL (query_range) exports; selector and cluster exports always keep raw samples.
+- **Adjustable metric cadence**: choose a 30s/1m/5m sampling step for MetricsQL (query_range) exports. Cluster exports and selectors keep raw samples; a selector that already has a `job` matcher and selected jobs also runs through query_range and uses the step.
 - **Batched exports with ETA** – splits long ranges into windows and shows progress + forecasted completion.
 - **Wide auth surface** – Basic, Bearer, custom headers, multi-tenant VMAuth flows; importer forwards tenant headers.
 - **Chunked importing** – importer streams vmgather bundles in resumable chunks with post-upload verification.
@@ -86,7 +86,7 @@ The binary starts an HTTP server and opens a browser window at `http://localhost
 
 ### From source
 
-Requirements: Go 1.24+, Make, Git.
+Requirements: Go 1.27.3+, Make, Git.
 
 ```bash
 git clone https://github.com/VictoriaMetrics/vmgather.git
@@ -146,7 +146,7 @@ Both Dockerfiles live in `build/docker/` and follow distroless best practices (`
 
 Both `vmgather` and `vmimporter` support `-addr` (bind address) and `-no-browser` to skip auto-launching a browser during scripting or Docker-based runs. vmgather's default is `localhost:8080` with automatic fallback to a free port; VMImport defaults to `0.0.0.0:8081` to avoid clashing with vmgather. vmgather also accepts `-output` to choose the directory for generated archives (defaults to `./exports`).
 
-Both binaries accept `-allowed-hosts host1,host2`: extra Host names accepted from clients on the same machine, for a local reverse proxy. `localhost`, `*.localhost` and IP addresses are always accepted; other names from local clients are rejected to block DNS rebinding.
+Both binaries accept `-allowed-hosts host1,host2`: extra Host names accepted from clients on the same machine, for a local reverse proxy (a port in an entry is ignored: names are matched without it). `localhost`, `*.localhost` and IP addresses are always accepted; other names from local clients are rejected to block DNS rebinding.
 
 vmgather also accepts `-debug` for verbose logging. On vmgather, `-debug` additionally mounts Go's [`net/http/pprof`](https://pkg.go.dev/net/http/pprof) profiling endpoints at `/debug/pprof/` — useful for diagnosing high CPU usage during large exports, but pprof is unauthenticated, so only enable it on a deployment that isn't publicly reachable.
 
@@ -264,7 +264,7 @@ Keep secrets out of the file: `VMGATHER_VM_PASSWORD`, `VMGATHER_VM_BEARER_TOKEN`
 |---|---|---|
 | `-snapshot.dst` | | Destination. Setting it turns on snapshot mode |
 | `-snapshot.config` | | Export config JSON |
-| `-snapshot.period` | `1h` | Window length. Windows are aligned to it (UTC) |
+| `-snapshot.period` | `1h` | Window length, at least `1m` and a whole number of seconds. Window ends are aligned to it (UTC); an off-grid `-snapshot.start` makes only the first window shorter |
 | `-snapshot.lag` | `5m` | A window is exported only when its end is at least this far behind now |
 | `-snapshot.maxCatchUp` | `24` | Maximum windows per run after downtime; the next run continues |
 | `-snapshot.start` | | Start of the first window when the destination has no state yet. Default: one period before the newest complete window end |
@@ -287,17 +287,17 @@ vmrestore -src=s3://my-bucket/vmgather/20261121T090000Z_20261121T100000Z -storag
 ```
 
 Disk space, local and remote, stays bounded also when runs fail:
-- The local work directory `<-output>/snapshots` is emptied before and after every run, including failed and interrupted ones. During a run it holds one window: raw JSONL plus its zip.
+- The local work directory `<-output>/vmgather-snapshot-work` is emptied before and after every run, including failed and interrupted ones. During a run it holds one window: raw JSONL plus its zip.
 - A failed window is retried into the same place and overwrites it, so failed attempts do not pile up in the bucket.
 - `-snapshot.retention` deletes old snapshots, complete or not, after every scheduled run. A backfill never deletes anything, so give backfills their own prefix.
 - For a bucket with object versioning add the vmbackup flag `-deleteAllObjectVersions`, otherwise deleted snapshots stay as old versions.
 - A killed multipart upload (bundles over 5 MB) can leave invisible parts in S3: add a lifecycle rule that aborts incomplete multipart uploads.
 
 Things to know:
-- Run one writer per destination (`concurrencyPolicy: Forbid` for a CronJob).
+- Run one writer per destination (`concurrencyPolicy: Forbid` for a CronJob), and one snapshot process per `-output` directory: every run empties `<-output>/vmgather-snapshot-work`, also when another process uses it. A scheduled process and a backfill on the same host need different `-output` values.
 - The storage user needs read, write, delete and list on the prefix (for S3: `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, `s3:ListBucket`).
 - Samples that arrive later than `-snapshot.lag` (for example from a vmagent persistent queue after a long outage) are not exported again.
-- S3 and S3-compatible storage (MinIO) and `fs://` are tested. GCS, Azure Blob and bundles over 1 GiB use the same vmbackup code, but vmgather does not test them yet.
+- Tested: S3-compatible storage (Garage) and `fs://`. GCS, Azure Blob and bundles over 1 GiB use the same vmbackup code, but vmgather does not test them yet.
 
 Kubernetes manifests: [deploy/k8s/](deploy/k8s/) has a CronJob and a one-time Job that exports MDX metrics from a vmbackup backup (vmrestore into a temporary vmsingle, then a backfill).
 

@@ -31,7 +31,7 @@ type mdxFilter struct {
 	filter *mdx.Filter
 	labels []prompb.Label
 	tss    [1]prompb.TimeSeries
-	// dropped counts series removed by the filter, for logs.
+	// dropped counts series removed by the filter in the whole export, for logs.
 	dropped int
 }
 
@@ -80,8 +80,16 @@ func (f *mdxFilter) keep(metric *fastjson.Object) (keep, setApp bool, err error)
 	return keep, setApp, nil
 }
 
-// prime registers the instances of the vm_app_version series read from r.
+// prime replaces the known instances with those of the vm_app_version series read from r.
+//
+// lib/mdx keeps an instance for one hour of wall-clock time, while an export reads days of history in
+// minutes; without the reset an instance seen in an earlier window would keep its series in every later
+// window. Each window is decided only by its own vm_app_version series.
 func (f *mdxFilter) prime(r io.Reader) error {
+	f.filter.MustStop()
+	f.filter = mdx.NewFilter()
+	dropped := f.dropped
+	defer func() { f.dropped = dropped }()
 	scanner := vm.NewLineScanner(r)
 	var parser fastjson.Parser
 	for scanner.Scan() {
@@ -102,7 +110,6 @@ func (f *mdxFilter) prime(r io.Reader) error {
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("decode error: %w", err)
 	}
-	f.dropped = 0
 	return nil
 }
 
@@ -112,8 +119,8 @@ func (f *mdxFilter) close() {
 
 // primeMDX loads the vm_app_version series of the window into the filter; it does nothing without one.
 // Transient errors are retried like export attempts; any other error fails the export, because an
-// unprimed filter would silently drop every series. lib/mdx forgets an instance after one hour without
-// a hit, so priming runs before every batch.
+// unprimed filter would silently drop every series. Priming runs before every batch and replaces the
+// instances of the previous one.
 func (s *exportServiceImpl) primeMDX(ctx context.Context, client *vm.Client, config domain.ExportConfig, f *mdxFilter, window domain.TimeRange) error {
 	if f == nil {
 		return nil

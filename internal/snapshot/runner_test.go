@@ -3,6 +3,7 @@ package snapshot
 import (
 	"archive/zip"
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,7 +20,6 @@ import (
 	"time"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/backup/actions"
-	"github.com/VictoriaMetrics/VictoriaMetrics/lib/backup/fslocal"
 
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
 )
@@ -165,30 +165,24 @@ func (e *testEnv) snapshots(t *testing.T) []string {
 	return names
 }
 
-// bundleLines downloads a snapshot with vmrestore's actions.Restore and returns its metrics lines.
+// bundleLines reads the bundle of a snapshot through the RemoteFS API and returns its metrics lines.
+// It does not use actions.Restore: its final fsync fails on Windows (see TestBackupUploaderRoundTripWithRestore).
 func (e *testEnv) bundleLines(t *testing.T, name string) []map[string]any {
 	t.Helper()
-	ctx := context.Background()
-	src, err := actions.NewRemoteFS(ctx, joinURL(e.dst, name), nil)
+	bundle := readRemoteFile(t, joinURL(e.dst, name), bundleFilename)
+	zr, err := zip.NewReader(bytes.NewReader(bundle), int64(len(bundle)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer src.MustStop()
-	out := filepath.Join(t.TempDir(), "restore")
-	if err := (&actions.Restore{Concurrency: 1, Src: src, Dst: &fslocal.FS{Dir: out}}).Run(ctx); err != nil {
-		t.Fatalf("restore %s: %v", name, err)
-	}
-	zr, err := zip.OpenReader(filepath.Join(out, bundleFilename))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = zr.Close() }()
 	var lines []map[string]any
 	for _, f := range zr.File {
 		if f.Name != "metrics.jsonl" {
 			continue
 		}
-		rc, _ := f.Open()
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
 		sc := bufio.NewScanner(rc)
 		for sc.Scan() {
 			var m map[string]any
@@ -309,11 +303,9 @@ func TestRunnerCanceledRunLeavesNoSnapshot(t *testing.T) {
 	if st := e.state(t); !st.LastEnd.IsZero() {
 		t.Fatalf("canceled run wrote state %+v", st)
 	}
-	entries, _ := os.ReadDir(e.cfg.WorkDir)
-	for _, en := range entries {
-		if en.Name() != "staging" {
-			t.Fatalf("local snapshot dir left after cancel: %s", en.Name())
-		}
+	// RunOnce empties the whole work dir, also after a cancel.
+	if entries, err := os.ReadDir(e.cfg.WorkDir); err != nil || len(entries) != 0 {
+		t.Fatalf("work dir after cancel: %v entries, err %v", len(entries), err)
 	}
 }
 
@@ -465,6 +457,10 @@ func TestConfigValidate(t *testing.T) {
 	bad := []Config{
 		{Period: time.Hour, MaxCatchUp: 1, WorkDir: "/w"},
 		{Dst: "fs:///x", MaxCatchUp: 1, WorkDir: "/w"},
+		// Snapshot names have second precision: shorter or fractional periods would collide.
+		{Dst: "fs:///x", Period: 100 * time.Millisecond, MaxCatchUp: 1, WorkDir: "/w"},
+		{Dst: "fs:///x", Period: 30 * time.Second, MaxCatchUp: 1, WorkDir: "/w"},
+		{Dst: "fs:///x", Period: 90*time.Second + 500*time.Millisecond, MaxCatchUp: 1, WorkDir: "/w"},
 		{Dst: "fs:///x", Period: time.Hour, WorkDir: "/w"},
 		{Dst: "fs:///x", Period: time.Hour, MaxCatchUp: 1, WorkDir: "/w", End: time.Now()},
 		{Dst: "fs:///x", Period: time.Hour, MaxCatchUp: 1, WorkDir: "/w", Start: time.Now(), End: time.Now().Add(-time.Hour)},

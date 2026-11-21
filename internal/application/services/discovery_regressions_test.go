@@ -90,7 +90,8 @@ func TestDiscoverVMJobs_CoversRangeAndDeniesPartialResponses(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	end := time.Date(2026, 11, 21, 10, 0, 0, 0, time.UTC)
+	// An end in the future is replaced by now, so keep it in the past for the [3600s] window below.
+	end := time.Now().Add(-time.Hour).Truncate(time.Second)
 	comps, err := DiscoverVMJobs(context.Background(), domain.VMConnection{URL: srv.URL}, domain.TimeRange{Start: end.Add(-time.Hour), End: end})
 	if err != nil {
 		t.Fatal(err)

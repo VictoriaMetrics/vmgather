@@ -175,8 +175,9 @@ func (c *Client) QueryRange(ctx context.Context, query string, start, end time.T
 	// Build query parameters
 	params := url.Values{}
 	params.Set("query", query)
-	params.Set("start", fmt.Sprintf("%d", start.Unix()))
-	params.Set("end", fmt.Sprintf("%d", end.Unix()))
+	// Millisecond precision: whole seconds would make adjacent chunks with fractional bounds overlap.
+	params.Set("start", formatVMTime(start))
+	params.Set("end", formatVMTime(end))
 	params.Set("step", fmt.Sprintf("%ds", int(step.Seconds())))
 
 	// Build request

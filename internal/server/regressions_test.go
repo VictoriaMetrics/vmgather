@@ -103,7 +103,10 @@ func TestExportJob_ResumeKeepsObfuscationAndMetricsCount(t *testing.T) {
 	lines := 0
 	metadataCount := -1
 	for _, f := range zr.File {
-		rc, _ := f.Open()
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatalf("open %s: %v", f.Name, err)
+		}
 		switch f.Name {
 		case "metrics.jsonl":
 			sc := bufio.NewScanner(rc)

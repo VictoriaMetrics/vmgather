@@ -6,7 +6,7 @@ A high-level breakdown of how the VictoriaMetrics metrics exporter is structured
 
 - **Single binary** – UI assets are embedded; the HTTP server defaults to localhost (configurable via `-addr` and auto-fallback to a free port).
 - **Privacy-first** – the pipeline obfuscates data as it streams instead of handling temporary plaintext copies.
-- **Stateless** – no configuration files or databases; everything is supplied per-run.
+- **Stateless** – no configuration files, databases or local state; everything is supplied per run. Snapshot mode keeps its window state (`vmgather_state.json`) in the destination.
 - **Predictable UX** – the same 6-step flow as other VictoriaMetrics utilities.
 
 ## Component overview
@@ -30,7 +30,7 @@ A high-level breakdown of how the VictoriaMetrics metrics exporter is structured
 
 ### Backend
 
-- Go 1.24+ HTTP server using the standard library.
+- Go 1.27.3+ HTTP server using the standard library.
 - Defaults to `localhost:8080` (exporter) and `0.0.0.0:8081` (importer); falls back to a free port when busy.
 - Provides REST APIs mirroring other VictoriaMetrics tools.
 
@@ -47,7 +47,8 @@ infrastructure/vm.Client ───→ VictoriaMetrics API
   ↓                                         ↑
 application/services.ExportService          │
   ↓                                         │
-infrastructure/obfuscation.Manager          │
+services.lineProcessor (MDX filter,         │
+  drop labels, obfuscation.Labels)          │
   ↓                                         │
 infrastructure/archive.Writer ──────────────┘
   ↓
@@ -113,7 +114,7 @@ One run:
 
 - Credentials remain in memory only for the duration of the call and are never written to disk.
 - The HTTP server binds to `localhost` and random ports to lower the risk surface.
-- Temporary files are removed immediately after the bundle is downloaded or when the process exits.
+- vmgather removes the staging file when the archive is written; a canceled or failed export keeps it in the staging directory for resume. vmimporter keeps the upload of a failed job for 1 hour for resume, then deletes it, and deletes all kept uploads on shutdown.
 
 ## Testing hooks
 

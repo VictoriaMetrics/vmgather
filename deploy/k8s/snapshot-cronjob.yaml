@@ -24,7 +24,10 @@ metadata:
   name: vmgather-snapshot
 type: Opaque
 stringData:
-  # Credentials for VictoriaMetrics; remove the ones you do not use.
+  # Credentials for VictoriaMetrics; remove the ones you do not use. Each one replaces a field of
+  # "auth" in snapshot.json and works only with the matching type: VMGATHER_VM_PASSWORD needs
+  # "type": "basic" and a "username", VMGATHER_VM_BEARER_TOKEN needs "type": "bearer", and
+  # VMGATHER_VM_HEADER_VALUE needs "type": "header" and a "header_name".
   VMGATHER_VM_PASSWORD: ""
   # S3 credentials; remove both when the ServiceAccount uses IRSA.
   # The user needs s3:GetObject, s3:PutObject, s3:DeleteObject and s3:ListBucket on the prefix.
@@ -38,6 +41,7 @@ metadata:
 data:
   # The oneshot config format. Empty "jobs" means discover VictoriaMetrics components on every run.
   # For a cluster use the vmselect URL with the tenant, for example http://vmselect:8481/select/0/prometheus.
+  # With a password in the Secret use "auth": { "type": "basic", "username": "<user>" }.
   snapshot.json: |
     {
       "connection": {

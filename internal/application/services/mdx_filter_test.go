@@ -55,6 +55,32 @@ func TestMDXFilterKeepsOnlyVictoriaMetricsInstances(t *testing.T) {
 	}
 }
 
+// Each window is decided by its own vm_app_version series: an instance seen in an earlier window is
+// forgotten. The drop count covers the whole export, not only the last window.
+func TestMDXFilterPrimeReplacesInstances(t *testing.T) {
+	data := mdxLine(`"__name__":"vm_rows","job":"vmstorage","instance":"a:8482"`)
+	out, proc := runMDX(t, domain.ExportConfig{}, mdxLine(`"__name__":"vm_app_version","job":"vmstorage","instance":"a:8482"`), data)
+	if !strings.Contains(out, `"vm_rows"`) {
+		t.Fatalf("first window: want vm_rows of a:8482, got %q", out)
+	}
+	for window := 2; window <= 3; window++ {
+		// a:8482 has no vm_app_version in the later windows.
+		if err := proc.mdx.prime(strings.NewReader(mdxLine(`"__name__":"vm_app_version","job":"vmstorage","instance":"b:8482"`))); err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		if _, err := proc.process(strings.NewReader(data), &buf); err != nil {
+			t.Fatal(err)
+		}
+		if buf.Len() != 0 {
+			t.Fatalf("window %d kept a series of an instance from an earlier window: %q", window, buf.String())
+		}
+	}
+	if proc.mdx.dropped != 2 {
+		t.Fatalf("dropped = %d; want 2 (one per later window)", proc.mdx.dropped)
+	}
+}
+
 // Without priming the filter knows no instance and drops everything, so ExecuteExport must prime it.
 func TestMDXFilterNeedsPriming(t *testing.T) {
 	out, _ := runMDX(t, domain.ExportConfig{}, "", mdxLine(`"__name__":"vm_rows","job":"vmstorage","instance":"a:8482"`))

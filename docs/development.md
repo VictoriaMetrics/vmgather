@@ -4,7 +4,7 @@ Step-by-step instructions for hacking on vmgather like any other VictoriaMetrics
 
 ## Prerequisites
 
-- Go 1.24 or newer,
+- Go 1.27.3 or newer (the VictoriaMetrics module requires it),
 - GNU Make,
 - Docker (integration and scenario tests),
 - Node.js 18+ with npm (Playwright UI tests).

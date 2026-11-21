@@ -51,4 +51,15 @@ func TestLabelsCacheIsBounded(t *testing.T) {
 	if len(l.cache) > maxCachedValues {
 		t.Fatalf("cache has %d entries; want at most %d", len(l.cache), maxCachedValues)
 	}
+	// A cache hit returns the same digest as the first call.
+	last := strconv.Itoa(maxCachedValues + 9)
+	if _, ok := l.cache[last]; !ok {
+		t.Fatalf("%q is not cached", last)
+	}
+	if got := l.ValueBytes([]byte(last)); got != Value(last) {
+		t.Fatalf("cache hit returned %q; want %q", got, Value(last))
+	}
+	if allocs := testing.AllocsPerRun(100, func() { l.ValueBytes([]byte(last)) }); allocs != 0 {
+		t.Fatalf("cache hit allocates %.0f times", allocs)
+	}
 }

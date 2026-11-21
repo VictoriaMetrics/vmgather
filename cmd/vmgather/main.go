@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -65,7 +66,14 @@ func main() {
 		log.Fatal("export-stdout is only supported with -oneshot")
 	}
 
-	if *snapshotFlags.dst != "" {
+	if *snapshotFlags.dst == "" {
+		// An empty -snapshot.dst= turns snapshot mode off, for templated deployments.
+		flag.Visit(func(f *flag.Flag) {
+			if strings.HasPrefix(f.Name, "snapshot.") && f.Name != "snapshot.dst" {
+				log.Fatalf("-%s needs -snapshot.dst: snapshot mode starts only with a destination", f.Name)
+			}
+		})
+	} else {
 		if *oneshot {
 			log.Fatal("-snapshot.dst and -oneshot cannot be used together")
 		}
@@ -168,7 +176,7 @@ func registerSnapshotFlags() snapshotFlagSet {
 			"Example: s3://bucket/prefix, gs://bucket/prefix, azblob://container/prefix, fs:///abs/path. Uses the vmbackup storage flags such as -customS3Endpoint and -credsFilePath"),
 		config: flag.String("snapshot.config", "", "Path to the export config JSON for snapshot mode, the same format as -oneshot-config. "+
 			"Empty jobs means discover VictoriaMetrics components on every run. Secrets can come from VMGATHER_VM_PASSWORD, VMGATHER_VM_BEARER_TOKEN and VMGATHER_VM_HEADER_VALUE"),
-		period:     flag.Duration("snapshot.period", time.Hour, "Length of one snapshot window. Windows are aligned to it"),
+		period:     flag.Duration("snapshot.period", time.Hour, "Length of one snapshot window, at least 1m and a whole number of seconds. Window ends are aligned to it"),
 		lag:        flag.Duration("snapshot.lag", 5*time.Minute, "How far behind now a window must end, so late samples are included"),
 		maxCatchUp: flag.Int("snapshot.maxCatchUp", 24, "Maximum number of windows one scheduled run uploads after downtime; the next run continues"),
 		start:      flag.String("snapshot.start", "", "RFC3339 start of the first window when the destination has no state yet. Required with -snapshot.end"),
@@ -210,8 +218,9 @@ func runSnapshot(f snapshotFlagSet, outputDir string) int {
 		Retention:  f.retention.Duration(),
 		Start:      start,
 		End:        end,
-		WorkDir:    filepath.Join(outputDir, "snapshots"),
-		Version:    version,
+		// A dedicated name: the runner empties this directory before and after every run.
+		WorkDir: filepath.Join(outputDir, "vmgather-snapshot-work"),
+		Version: version,
 	})
 	if err != nil {
 		log.Printf("[ERROR] %v", err)

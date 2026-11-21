@@ -45,6 +45,9 @@ func TestSameOrigin(t *testing.T) {
 			if got := rr.Code == http.StatusForbidden; got != tc.rejected {
 				t.Fatalf("rejected=%v, want %v (status %d)", got, tc.rejected, rr.Code)
 			}
+			if tc.rejected && rr.Header().Get("Content-Type") != "application/json" {
+				t.Fatalf("rejection is not JSON: %q", rr.Body.String())
+			}
 		})
 	}
 }
@@ -84,8 +87,12 @@ func TestLocalHostOnly(t *testing.T) {
 // A reverse proxy on the same machine forwards with its own Host name. The operator can allow that name.
 func TestLocalHostOnly_AllowedHosts(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
-	h := LocalHostOnly(next, "vmgather.example", "Metrics.Internal")
-	for host, rejected := range map[string]bool{"vmgather.example:443": false, "metrics.internal": false, "rebind.example": true} {
+	// An entry with a port allows the host name on any port: requests are matched without the port.
+	h := LocalHostOnly(next, "vmgather.example", "Metrics.Internal", "proxy.local:8443")
+	for host, rejected := range map[string]bool{
+		"vmgather.example:443": false, "metrics.internal": false, "rebind.example": true,
+		"proxy.local:8443": false, "proxy.local": false, "proxy.local.evil:8443": true,
+	} {
 		req := httptest.NewRequest(http.MethodGet, "http://x/", nil)
 		req.Host, req.RemoteAddr = host, "127.0.0.1:5000"
 		rr := httptest.NewRecorder()

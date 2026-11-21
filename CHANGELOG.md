@@ -5,7 +5,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 ## [v1.13.0] - 2026-11-21
 
 ### Added
-- **Experimental** snapshot mode (server mode) for teams that cannot send MDX: `-snapshot.dst=s3://bucket/prefix` exports the MDX metrics of VictoriaMetrics components in fixed, aligned, half-open windows (`-snapshot.period`, default 1h) and uploads every window with data to S3, GCS, Azure Blob or a local path; empty windows are skipped and do not block later ones. It runs once for a Kubernetes CronJob or in a loop with `-snapshot.interval`. The state is kept in the bucket and moves only after a complete upload, so a failed or interrupted window is exported again; `-snapshot.start`/`-snapshot.end` backfill a fixed range without touching the state. Unless jobs are set, the components are discovered for every window. See README, "Snapshot mode (experimental)".
+- **Experimental** snapshot mode (server mode) for teams that cannot send MDX: `-snapshot.dst=s3://bucket/prefix` exports the MDX metrics of VictoriaMetrics components in fixed, aligned, half-open windows (`-snapshot.period`, default 1h, at least 1m) and uploads every window with data to S3, GCS, Azure Blob or a local path; empty windows are skipped and do not block later ones. It runs once for a Kubernetes CronJob or in a loop with `-snapshot.interval`. The state is kept in the bucket and moves only after a complete upload, so a failed or interrupted window is exported again; `-snapshot.start`/`-snapshot.end` backfill a fixed range without touching the state. Unless jobs are set, the components are discovered for every window. See README, "Snapshot mode (experimental)".
 - **Experimental** snapshot mode reuses VictoriaMetrics code: the vmagent `-remoteWrite.mdx.enable` filter (`lib/mdx`) decides which series are exported, and the vmbackup storage layer (`lib/backup`) uploads them, with the same destinations, credentials and flags (`-customS3Endpoint`, `-credsFilePath`, ...). A snapshot uses the vmbackup layout and can be downloaded with vmrestore.
 - **Experimental** `-snapshot.retention` (default `30d`) deletes old snapshots, including incomplete uploads, after every scheduled run; the local work directory is emptied before and after every run, so failed runs do not fill the disk.
 - **Experimental** `mdx_filter` export option (cluster mode, used by snapshot mode) and `mdx_filtered` in `metadata.json`.
@@ -27,7 +27,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Discovery finds the components that had `vm_app_version` at any time in the selected range (`last_over_time` over the range), not only at its end, so a component that stopped before the end is no longer left out. Instant queries send `deny_partial_response=1`, so a cluster with an unavailable vmstorage fails discovery instead of returning part of the jobs.
 - Discovery names components by their full name (`victoria-metrics`, `victoria-logs`, `config-reloader`) instead of merging VictoriaMetrics and VictoriaLogs into `victoria`.
 - Cluster exports without jobs and custom exports without a query are rejected with HTTP 400 (also in CLI oneshot) instead of exporting everything.
-- The metric sampling step applies only to MetricsQL (query_range) exports; the UI says so. Selector and cluster exports always keep raw samples.
+- The metric sampling step applies only to query_range exports: MetricsQL, and a selector that already has a `job` matcher when jobs are selected; the UI says so. Cluster exports and other selectors keep raw samples.
 - Build, release binaries, Docker images and CI use Go 1.27.4; building from source needs Go 1.27.3 or newer, which the VictoriaMetrics module v1.156.0 requires. Docker images run on distroless `static-debian12` (static binaries, no OpenSSL). `make security-check` runs govulncheck v1.8.0 on the same Go version as CI; lint uses golangci-lint v2.14.0. CI tests Go 1.27 only (was 1.24 to 1.26).
 - The vmgather binary grows from 8.5 MB to 54 MB (linux/amd64, stripped), because `lib/backup` brings the AWS, GCS and Azure SDKs. vmimporter does not change (7.9 MB).
 
@@ -43,6 +43,9 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - vmimporter resume offsets were wrong for CRLF files, so some lines were sent twice.
 - vmimporter verification cut the `/api/v1/series` answer at 64 KB, did not escape quotes and backslashes in label values, used the unshifted time range after a shift, and gave up before new series became searchable (3-11s on VictoriaMetrics v1.155.0). It now waits up to 30s, retries only an empty answer, 5xx and network errors, and reports a 4xx answer at once.
 - vmimporter left the upload and the extracted file of a failed import in the temp dir forever.
+- The staging file (raw JSONL of the whole export) stayed on disk after a resumed export, and after every export on Windows, where it was still open when vmgather tried to remove it.
+- An export with `resume_from_batch` but without the progress of a failed run (for example in a oneshot config) counted metrics wrong and kept a partly written batch. It is rejected now.
+- The connection check said "Host is reachable" also when the browser got no answer in 3 seconds.
 - 9 e2e specs were broken since the autopilot UI (v1.10.0).
 - `make test-env-up` and `make manual-env-up` ran `docker system prune -af` and `docker builder prune -af` when Docker reported "no space left on device", which deleted the images, build cache and stopped containers of every project on the machine. They now stop only their own compose project and fail with a message.
 - The local e2e stand used `latest` images, and the current Prometheus image could not start on its tmpfs. The images are pinned now and the tmpfs is writable.
@@ -62,7 +65,8 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - Go 1.27.4: govulncheck finds no vulnerabilities. Go 1.26.9, used for v1.12.0, has GO-2026-6859 (net/http) and GO-2026-6809 (crypto/x509). Docker images were built with Go 1.26.9 by digest although the Makefile said 1.25.11.
 - `golang.org/x/crypto` v0.59.0 removes GO-2026-5932 (unmaintained `openpgp`, found at module level; vmgather does not call it).
 - The distroless `static-debian12` runtime removes CVE-2026-84782 (HIGH, libssl3) reported for the previous `base-debian12` image.
-- vmgather and vmimporter reject cross-origin state-changing requests (CSRF): another local page or a local HTML file could start exports, create directories or push data into a VictoriaMetrics reachable from the browser.
+- The vmgather UI inserted text from outside as HTML: connection and custom query errors, versions and endpoints from the target, job and component names, and label names and values in sample previews. A malicious target or proxy, or a label value in the scraped data, could run a script in the UI. All of it is escaped or set as text now.
+- vmgather and vmimporter reject cross-origin state-changing requests (CSRF) with `net/http.CrossOriginProtection`: another local page or a local HTML file could start exports, create directories or push data into a VictoriaMetrics reachable from the browser.
 - Clients on the same machine must use `localhost`, a `*.localhost` name, an IP address or a name from `-allowed-hosts`, which blocks DNS rebinding (a page could read directory listings). It does not cover Docker port mapping or a rebinding to a LAN address of a server listening on `0.0.0.0`; the cross-origin check still applies there.
 
 ## [v1.12.0] - 2026-10-09

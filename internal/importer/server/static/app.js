@@ -1178,8 +1178,11 @@ function renderImportResult(payload) {
     if (!statusPanel) return;
 
     const target = payload.remote_path || summary.remote_path || 'the target';
-    const volume = formatVolumeText(summary.source_bytes, summary.inflated_bytes, summary.chunks) || formatBytes(payload.bytes_sent || summary.bytes || 0);
-    let html = `<div><strong>Import complete:</strong> ${volume} sent to ${escapeHtml(target)}.</div>`;
+    let html = `<div><strong>Import complete:</strong> ${formatBytes(payload.bytes_sent || summary.bytes || 0)} sent to ${escapeHtml(target)}.</div>`;
+    const volume = formatVolumeText(summary.source_bytes, summary.inflated_bytes, summary.chunks);
+    if (volume) {
+        html += `<div>Source: ${volume}.</div>`;
+    }
     if (summary.start) {
         html += `<div>Data: ${formatRFC(summary.start)} to ${formatRFC(summary.end || summary.start)}.</div>`;
     }

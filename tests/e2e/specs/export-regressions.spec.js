@@ -1,4 +1,4 @@
-// Regression specs for export failures seen in support tickets (ESUPP-1043, ESUPP-950, ESUPP-1398).
+// Regression specs for export failures seen in production.
 const { test, expect } = require('@playwright/test');
 
 const COMPONENTS = [
@@ -33,11 +33,11 @@ async function startExport(page, components) {
   }
   await page.locator('.step.active button:has-text("Next")').first().click();
   await page.waitForSelector('.step[data-step="6"].active');
-  await page.evaluate(() => { const b = document.getElementById('startExportBtn'); if (b && window.exportMetrics) window.exportMetrics(b); });
+  await page.locator('#startExportBtn').click();
 }
 
 test.describe('Export regressions', () => {
-  test('components with a single job send their job (ESUPP-1043)', async ({ page }) => {
+  test('components with a single job send their job', async ({ page }) => {
     await mockBackend(page);
     let payload;
     await page.route('**/api/export/start', r => { payload = r.request().postDataJSON(); r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'stop' }) }); });
@@ -48,7 +48,7 @@ test.describe('Export regressions', () => {
     expect([...payload.jobs].sort()).toEqual(['victoria_metrics', 'victoria_metrics_2', 'victoria_metrics_agent_container', 'vmalert'].sort());
   });
 
-  test('only a single-job component selected still sends its job (ESUPP-950)', async ({ page }) => {
+  test('only a single-job component selected still sends its job', async ({ page }) => {
     await mockBackend(page);
     let payload;
     await page.route('**/api/export/start', r => { payload = r.request().postDataJSON(); r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'stop' }) }); });
@@ -59,7 +59,7 @@ test.describe('Export regressions', () => {
     expect(payload.jobs).toEqual(['victoria_metrics_agent_container']);
   });
 
-  test('failed export can be resumed (ESUPP-1398)', async ({ page }) => {
+  test('failed export can be resumed', async ({ page }) => {
     await mockBackend(page);
     let resumed = false;
     await page.route('**/api/export/start', r => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ job_id: 'job-failed', total_batches: 10, batch_window_seconds: 3600, staging_path: '/tmp/vmgather-e2e/job-failed.partial.jsonl' }) }));
@@ -96,7 +96,7 @@ test.describe('Export regressions', () => {
 
     // The main button is not in resume mode: it starts a new export with the current selection.
     await expect(page.locator('#startExportBtn')).not.toHaveText(/Resume/);
-    await page.evaluate(() => { const b = document.getElementById('startExportBtn'); window.exportMetrics(b); });
+    await page.locator('#startExportBtn').click();
     await expect.poll(() => starts.length).toBe(2);
 
     // Resume continues the failed job by id.
@@ -115,8 +115,35 @@ test.describe('Export regressions', () => {
     await page.locator('.job-item input[data-job="victoria_metrics_2"]').uncheck();
     await page.locator('.step.active button:has-text("Next")').first().click();
     await page.waitForSelector('.step[data-step="6"].active');
-    await page.evaluate(() => { const b = document.getElementById('startExportBtn'); window.exportMetrics(b); });
+    await page.locator('#startExportBtn').click();
     await expect.poll(() => payload).toBeTruthy();
     expect(payload.jobs).toEqual(['victoria_metrics']);
+  });
+
+  // Errors come from the target or a proxy, job names and label values from scraped data: all of them are text.
+  test('server errors and job names are shown as text, not HTML', async ({ page }) => {
+    const probe = '<img src=x id=xss-probe onerror="window.__xss=1">';
+    await page.route('**/api/validate', r => r.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ success: false, error: `bad gateway ${probe}` }) }));
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.evaluate(() => window.nextStep && window.nextStep());
+    await page.waitForSelector('.step[data-step="2"].active');
+    await page.locator('.step.active button:has-text("Next")').first().click();
+    await page.locator('#vmUrl').fill('http://localhost:8428');
+    await page.locator('#testConnectionBtn').click();
+    await expect(page.locator('#validationSteps')).toContainText('bad gateway <img src=x id=xss-probe');
+    await expect(page.locator('#xss-probe')).toHaveCount(0);
+
+    await page.unroute('**/api/validate');
+    await mockBackend(page);
+    await page.route('**/api/discover', r => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ components: [
+      { component: 'vmagent', jobs: ['<b id=xss-job>agent</b>', 'agent_2'], instance_count: 2, metrics_count_estimate: 10, job_metrics: {} },
+    ] }) }));
+    await page.locator('#testConnectionBtn').click();
+    await page.waitForSelector('#step3Next:enabled');
+    await page.locator('#step3Next').click();
+    await expect(page.locator('.component-item')).toContainText('<b id=xss-job>agent</b>');
+    await expect(page.locator('#xss-job')).toHaveCount(0);
+    expect(await page.evaluate(() => window.__xss)).toBeUndefined();
   });
 });

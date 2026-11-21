@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -22,7 +23,7 @@ func mustTime(t *testing.T, s string) time.Time {
 func TestPlanWindows(t *testing.T) {
 	f := func(lastEnd, start, end string, period time.Duration, maxCatchUp int, want ...string) {
 		t.Helper()
-		got := planWindows(mustTime(t, lastEnd), mustTime(t, start), mustTime(t, end), period, maxCatchUp)
+		got := slices.Collect(planWindows(mustTime(t, lastEnd), mustTime(t, start), mustTime(t, end), period, maxCatchUp))
 		if len(got) != len(want)/2 {
 			t.Fatalf("got %d windows %v; want %d", len(got), got, len(want)/2)
 		}
