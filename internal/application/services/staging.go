@@ -3,6 +3,7 @@ package services
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 )
 
@@ -14,9 +15,15 @@ type stagingFile struct {
 	w *bufio.Writer
 }
 
+// openStagingFile opens the file for writing at its end. It does not use O_APPEND: on Windows Go opens
+// such a file with append-only access, and Truncate in rollback then fails with "Access is denied".
 func openStagingFile(path string) (*stagingFile, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o640)
 	if err != nil {
+		return nil, fmt.Errorf("failed to open staging file: %w", err)
+	}
+	if _, err := f.Seek(0, io.SeekEnd); err != nil {
+		_ = f.Close()
 		return nil, fmt.Errorf("failed to open staging file: %w", err)
 	}
 	return &stagingFile{f: f, w: bufio.NewWriterSize(f, writeBufferSize)}, nil
@@ -42,6 +49,9 @@ func (s *stagingFile) mark() (int64, error) {
 func (s *stagingFile) rollback(size int64) error {
 	s.w.Reset(s.f)
 	if err := s.f.Truncate(size); err != nil {
+		return fmt.Errorf("failed to roll back staging file: %w", err)
+	}
+	if _, err := s.f.Seek(size, io.SeekStart); err != nil {
 		return fmt.Errorf("failed to roll back staging file: %w", err)
 	}
 	return nil
