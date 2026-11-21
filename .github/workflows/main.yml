@@ -78,7 +78,8 @@ jobs:
 
   e2e-smoke:
     name: Playwright Smoke
-    runs-on: ubuntu-latest
+    # ubuntu-latest is Ubuntu 26.04 now, which Playwright 1.56 (package-lock) does not support.
+    runs-on: ubuntu-24.04
     needs: test
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1

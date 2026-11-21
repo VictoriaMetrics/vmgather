@@ -161,6 +161,14 @@ func TestExport_QueryRangeFractionalBorderPointIsExportedOnce(t *testing.T) {
 			t.Fatalf("timestamp %d exported %d times", int64(ts), n)
 		}
 	}
+	// [start+0.5s, start+2h) with a 60s step: 120 points, the one at the chunk border included.
+	if want := 2 * 60; len(seen) != want {
+		t.Fatalf("want %d distinct points, got %d", want, len(seen))
+	}
+	border := float64(cfg.TimeRange.Start.Add(time.Hour).UnixMilli())
+	if seen[border] != 1 {
+		t.Fatalf("the point at the chunk border %d is missing", int64(border))
+	}
 }
 
 // After a timeout split in query_range mode the halves must stay on the step grid and must not evaluate the

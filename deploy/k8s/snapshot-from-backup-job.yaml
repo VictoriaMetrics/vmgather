@@ -11,9 +11,15 @@
 # after v1.156.0, restore only recent monthly partitions). For a cluster backup, restore every vmstorage
 # backup into vmstorage and read it through vmselect (-storageNode=127.0.0.1:8401) instead of vmsingle.
 #
-# Prerequisite: the vmgather-snapshot ServiceAccount and Secret from snapshot-cronjob.yaml (apply that file
-# first, or create both by hand). The Secret holds the S3 keys for vmrestore and vmgather; with IRSA or
-# workload identity the ServiceAccount gives access to both buckets and the keys can be removed.
+# Prerequisite: the vmgather-snapshot ServiceAccount and Secret. Create only these two; applying all of
+# snapshot-cronjob.yaml would also start the hourly CronJob against the live VictoriaMetrics:
+#
+#   kubectl -n monitoring create serviceaccount vmgather-snapshot
+#   kubectl -n monitoring create secret generic vmgather-snapshot \
+#     --from-literal=AWS_ACCESS_KEY_ID=<key> --from-literal=AWS_SECRET_ACCESS_KEY=<secret>
+#
+# The Secret holds the S3 keys for vmrestore and vmgather. With IRSA or workload identity, annotate the
+# ServiceAccount, give it access to both buckets and create the Secret without keys (envFrom needs it).
 #
 #   kubectl -n monitoring apply -f snapshot-from-backup-job.yaml
 ---
