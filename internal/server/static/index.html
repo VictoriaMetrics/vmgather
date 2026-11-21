@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:,">
     <title>vmgather - VictoriaMetrics Metrics Export</title>
     <style>
         :root {
@@ -1167,13 +1168,11 @@
                 <h2 class="step-title">Welcome to vmgather</h2>
                 <div class="step-content">
                     <div class="info-box" id="welcomePurpose">
-                        <strong>Purpose:</strong> Export VictoriaMetrics internal metrics for VictoriaMetrics team
-                        analysis
+                        Export the internal metrics of your VictoriaMetrics so the VictoriaMetrics team can analyze them.
                     </div>
 
                     <p id="welcomeIntro" style="margin-bottom: 20px; color: var(--text-muted); line-height: 1.6;">
-                        This wizard will guide you through exporting metrics from your VictoriaMetrics installation.
-                        You'll be able to:
+                        In a few steps you will:
                     </p>
 
                     <ul id="welcomeSteps"
@@ -1186,8 +1185,8 @@
                     </ul>
 
                     <div class="warning-box">
-                        <strong>Privacy:</strong> Your credentials are never stored. Obfuscation uses obviously fake IPs
-                        (777.777.x.x) for clarity.
+                        <strong>Privacy:</strong> Your credentials are never stored. Obfuscation replaces label values
+                        with their SHA-256 digests, the same as vmagent <code>-remoteWrite.obfuscateLabels</code>.
                     </div>
                 </div>
 
@@ -1217,7 +1216,7 @@
                             <option value="Australia/Sydney">Australia/Sydney (AEDT/AEST)</option>
                         </select>
                         <small style="color: #888; margin-top: 5px; display: block;">
-                            [INFO] Times will be converted to this timezone
+                            Times are shown in this timezone.
                         </small>
                     </div>
 
@@ -1250,8 +1249,7 @@
                     </div>
 
                     <div class="info-box">
-                        <strong>[TIP]</strong> Shorter time ranges export faster. Recommended: 1-24 hours for most
-                        cases.
+                        <strong>Tip:</strong> 1 to 24 hours is enough in most cases; shorter ranges export faster.
                     </div>
                 </div>
 
@@ -1267,14 +1265,14 @@
                 <div class="step-content">
                     <div class="info-box"
                         style="background-color: #e8f5e9; border-left: 4px solid #4caf50; margin-bottom: 20px;">
-                        <strong>[OK] Flexible URL Parser:</strong> Paste a URL in any format — paths, tenant ID, or a
-                        Grafana datasource.
+                        Paste any VictoriaMetrics URL, including one from a Grafana datasource. The tenant and
+                        path are found automatically.
                     </div>
 
                     <details class="help-section">
-                        <summary>[INFO] Accepted URL formats (click to expand)</summary>
+                        <summary>URL examples</summary>
                         <div class="help-content">
-                            <h4 style="margin-top: 10px; color: #1976d2;">[OK] Format 1: Base URL (simple)</h4>
+                            <h4 style="margin-top: 10px; color: #1976d2;">Format 1: base URL</h4>
                             <div class="url-example-grid">
                                 <div class="url-example">http://vmselect:8481/select/0/prometheus</div>
                                 <div class="url-example">http://vmsingle:18428</div>
@@ -1282,7 +1280,7 @@
                                 <div class="url-example">https://victoria-metrics.example.com</div>
                             </div>
 
-                            <h4 style="margin-top: 20px; color: var(--primary);">Format 2: With Tenant ID in path</h4>
+                            <h4 style="margin-top: 20px; color: var(--primary);">Format 2: tenant ID in the path</h4>
                             <div class="url-example-grid">
                                 <div class="url-example">https://vm.example.com/1011</div>
                                 <div class="url-example">http://vmselect:8481/select/123/prometheus</div>
@@ -1291,7 +1289,7 @@
                                     https://vm.example.com/1011/ui/prometheus/api/v1/query?query=sum(1)</div>
                             </div>
 
-                            <h4 style="margin-top: 20px; color: var(--primary);">Format 3: Multitenant endpoints</h4>
+                            <h4 style="margin-top: 20px; color: var(--primary);">Format 3: multitenant endpoints</h4>
                             <div class="url-example-grid">
                                 <div class="url-example">http://vmselect:8481/select/multitenant</div>
                                 <div class="url-example">http://vmselect:8481/select/multitenant/prometheus</div>
@@ -1446,14 +1444,14 @@
                         <div class="form-group">
                             <label>
                                 <input type="checkbox" class="obf-label-checkbox" data-label="instance" checked>
-                                Obfuscate instance IPs (777.777.x.x pool)
+                                Obfuscate instance (SHA-256 digest)
                             </label>
                         </div>
 
                         <div class="form-group">
                             <label>
                                 <input type="checkbox" class="obf-label-checkbox" data-label="job" checked>
-                                Obfuscate job names (vm_component_X_N format)
+                                Obfuscate job names (SHA-256 digest)
                             </label>
                         </div>
 
@@ -1512,11 +1510,12 @@
                     </div>
 
                     <div class="warning-box">
-                        <strong>Note:</strong> Obfuscation mappings will be included in metadata.json for reference.
+                        <strong>Note:</strong> Obfuscated values are SHA-256 digests without salt, the same in every export
+                        and in vmagent MDX streams. Short values such as IP:port can be recovered by brute force.
                     </div>
 
                     <div class="form-group">
-                        <label for="stagingDir">Staging directory for partial export</label>
+                        <label for="stagingDir">Folder for temporary export files</label>
                         <div class="dir-input-row">
                             <input type="text" id="stagingDir" placeholder="/tmp/vmgather">
                             <button type="button" class="btn-inline" id="stagingDirBrowse"
@@ -1526,16 +1525,16 @@
                             <button type="button" class="btn-inline" id="createStagingDirBtn"
                                 onclick="createStagingDir()" style="display: none;">Create</button>
                         </div>
-                        <span class="input-hint" id="stagingDirHint">vmgather streams batched data into this directory
-                            so partial files survive interruptions.</span>
+                        <span class="input-hint" id="stagingDirHint">Data is written here during the export, so an
+                            interrupted export can be resumed.</span>
                     </div>
 
                     <div class="autopilot-panel">
                         <div class="autopilot-copy">
                             <div class="autopilot-eyebrow">Export mode</div>
-                            <div class="autopilot-title">Adaptive export autopilot</div>
+                            <div class="autopilot-title">Automatic retries and splitting</div>
                             <div class="autopilot-description">
-                                Starts at full precision and only relaxes sampling up to 5 minutes when VictoriaMetrics rejects a heavy request.
+                                Heavy requests are split into smaller time windows and failed ones are retried. Raw samples are kept; only MetricsQL exports may use a coarser step, up to 5 minutes.
                             </div>
                         </div>
                         <div class="autopilot-switch">
@@ -1570,8 +1569,8 @@
                                 </select>
                                 <input type="number" id="customBatchWindowInput" placeholder="Seconds"
                                     min="30" step="1" style="display: none; margin-top: 8px;">
-                                <span class="input-hint" id="batchWindowHint">Max duration per batch. Auto adapts to the
-                                    time range.</span>
+                                <span class="input-hint" id="batchWindowHint">Max duration per batch. Auto uses 1-hour
+                                    batches.</span>
                             </div>
                         </div>
                     </div>
@@ -1649,7 +1648,7 @@
 
                         <button class="btn-success" onclick="downloadArchive()" id="downloadBtn"
                             style="width: 100%; margin: 20px 0; padding: 15px; font-size: 16px;">
-                            Generate ZIP package
+                            Download ZIP
                         </button>
 
                         <button class="btn-secondary" onclick="location.reload()" style="width: 100%;">

@@ -67,6 +67,8 @@ type exportJob struct {
 	config        domain.ExportConfig
 	resumeFrom    int
 	baseMetrics   int
+	// resume keeps the obfuscator, metric count and staging size between runs of this job.
+	resume *services.ResumeState
 }
 
 type ExportJobManager struct {
@@ -114,7 +116,7 @@ func (m *ExportJobManager) StartJob(ctx context.Context, jobID string, config do
 	// Export execution is already governed by per-request/per-batch timeouts inside the export service.
 	// Do not apply a fixed hard deadline here, since large exports can legitimately take hours.
 	jobCtx, cancel := context.WithCancel(context.Background())
-	job := &exportJob{status: status, cancel: cancel, config: config}
+	job := &exportJob{status: status, cancel: cancel, config: config, resume: &services.ResumeState{}}
 
 	m.mu.Lock()
 	m.cleanupLocked(time.Now())
@@ -196,6 +198,7 @@ func (m *ExportJobManager) runJob(ctx context.Context, jobID string, config doma
 	if ok {
 		baseBatches = job.resumeFrom
 		baseMetrics = job.baseMetrics
+		ctx = services.WithResumeState(ctx, job.resume)
 	}
 	if baseBatches > 0 {
 		config.ResumeFromBatch = baseBatches

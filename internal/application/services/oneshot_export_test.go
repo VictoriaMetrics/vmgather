@@ -55,6 +55,7 @@ func TestOneshotExport_Positive_ClusterExport(t *testing.T) {
 	defer srv.Close()
 
 	cfg := baseOneshotConfig(srv.URL)
+	cfg.Jobs = []string{"test1"}
 	out, count, err := runExportToWriter(t, cfg)
 	if err != nil {
 		t.Fatalf("export failed: %v", err)

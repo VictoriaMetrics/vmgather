@@ -1,136 +1,75 @@
+// Package obfuscation hides sensitive label values the same way as vmagent -remoteWrite.obfuscateLabels.
+//
+// A value is replaced with the hex SHA-256 digest of the value, without salt. See
+// https://docs.victoriametrics.com/victoriametrics/vmagent/#obfuscating-label-values and
+// app/vmagent/remotewrite/obfuscate.go in VictoriaMetrics. So one value gives the same result in every
+// vmgather bundle, in every run and in MDX streams from vmagent, and support can match them.
+// Values from a small space (IP:port, short host names) can be recovered by brute force.
 package obfuscation
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
-	"net"
-	"sync"
 )
 
-// Obfuscator handles data obfuscation for sensitive labels
-type Obfuscator struct {
-	instanceMap  map[string]string            // original -> obfuscated
-	jobMap       map[string]string            // original -> obfuscated
-	customLabels map[string]map[string]string // label -> (original -> obfuscated)
-	mu           sync.RWMutex
-
-	instanceCounter int            // counter for generating IPs
-	jobCounter      map[string]int // counter per component
-	customCounters  map[string]int // counter per custom label type
+// Value returns the obfuscated form of v: its hex SHA-256 digest.
+func Value(v string) string {
+	digest := sha256.Sum256([]byte(v))
+	return hex.EncodeToString(digest[:])
 }
 
-// NewObfuscator creates a new obfuscator
-func NewObfuscator() *Obfuscator {
-	return &Obfuscator{
-		instanceMap:    make(map[string]string),
-		jobMap:         make(map[string]string),
-		customLabels:   make(map[string]map[string]string),
-		jobCounter:     make(map[string]int),
-		customCounters: make(map[string]int),
+// maxCachedValues bounds the digest cache of one Labels instance.
+const maxCachedValues = 100_000
+
+// Labels obfuscates the values of a fixed list of label names and caches digests of repeated values,
+// like vmagent does per batch. It is not safe for concurrent use.
+type Labels struct {
+	names []string
+	cache map[string]string
+}
+
+// NewLabels returns an obfuscator for the given label names, or nil when names is empty.
+func NewLabels(names []string) *Labels {
+	if len(names) == 0 {
+		return nil
+	}
+	return &Labels{
+		names: names,
+		cache: make(map[string]string),
 	}
 }
 
-// ObfuscateInstance obfuscates instance label (IP:PORT)
-// Uses obviously fake IP pool (777.777.x.x) to make obfuscation clear
-func (o *Obfuscator) ObfuscateInstance(instance string) string {
-	o.mu.Lock()
-	defer o.mu.Unlock()
+// Names returns the label names whose values are obfuscated.
+func (l *Labels) Names() []string {
+	return l.names
+}
 
-	// Check cache
-	if obf, exists := o.instanceMap[instance]; exists {
-		return obf
-	}
-
-	// Parse host and port
-	_, port, err := net.SplitHostPort(instance)
-	if err != nil {
-		// If cannot parse, use simple hash
-		obfuscated := o.hashString(instance)
-		o.instanceMap[instance] = obfuscated
+// Value returns the obfuscated form of v.
+func (l *Labels) Value(v string) string {
+	if obfuscated, ok := l.cache[v]; ok {
 		return obfuscated
 	}
-
-	// Generate obfuscated IP from 777.777.x.x pool (obviously fake)
-	o.instanceCounter++
-	// Use modulo to cycle through 777.777.1.1-777.777.255.255
-	thirdOctet := ((o.instanceCounter - 1) / 255) + 1
-	fourthOctet := ((o.instanceCounter - 1) % 255) + 1
-	newIP := fmt.Sprintf("777.777.%d.%d", thirdOctet, fourthOctet)
-
-	// Reconstruct with original port
-	obfuscated := net.JoinHostPort(newIP, port)
-	o.instanceMap[instance] = obfuscated
-
+	if len(l.cache) >= maxCachedValues {
+		clear(l.cache)
+	}
+	obfuscated := Value(v)
+	l.cache[v] = obfuscated
 	return obfuscated
 }
 
-// ObfuscateJob obfuscates job name
-// Format: original job -> vm_component_<component>_<N>
-func (o *Obfuscator) ObfuscateJob(job string, component string) string {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-
-	// Check cache
-	if obf, exists := o.jobMap[job]; exists {
-		return obf
+// ValueBytes is Value for a label value read from a parsed line; a cache hit does not allocate.
+func (l *Labels) ValueBytes(v []byte) string {
+	if obfuscated, ok := l.cache[string(v)]; ok {
+		return obfuscated
 	}
-
-	// Increment counter for this component
-	o.jobCounter[component]++
-	obfuscated := fmt.Sprintf("vm_component_%s_%d", component, o.jobCounter[component])
-
-	o.jobMap[job] = obfuscated
-	return obfuscated
+	return l.Value(string(v))
 }
 
-// ObfuscateCustomLabel obfuscates custom labels (pod, namespace, etc.)
-// Format: <label-type>-<N> (e.g., "pod-1", "namespace-1")
-func (o *Obfuscator) ObfuscateCustomLabel(labelName, value string) string {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-
-	// Initialize map for this label type if needed
-	if o.customLabels[labelName] == nil {
-		o.customLabels[labelName] = make(map[string]string)
+// Apply obfuscates the listed labels of a label map in place.
+func (l *Labels) Apply(labels map[string]string) {
+	for _, name := range l.names {
+		if v, ok := labels[name]; ok {
+			labels[name] = l.Value(v)
+		}
 	}
-
-	// Check cache
-	if obf, exists := o.customLabels[labelName][value]; exists {
-		return obf
-	}
-
-	// Increment counter for this label type
-	o.customCounters[labelName]++
-	obfuscated := fmt.Sprintf("%s-%d", labelName, o.customCounters[labelName])
-
-	o.customLabels[labelName][value] = obfuscated
-	return obfuscated
-}
-
-// GetMappings returns copies of obfuscation mappings
-// Returns instanceMap (original->obfuscated) and jobMap (original->obfuscated)
-func (o *Obfuscator) GetMappings() (instanceMap, jobMap map[string]string) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-
-	// Create copies to prevent external modification
-	instanceMap = make(map[string]string, len(o.instanceMap))
-	for k, v := range o.instanceMap {
-		instanceMap[k] = v
-	}
-
-	jobMap = make(map[string]string, len(o.jobMap))
-	for k, v := range o.jobMap {
-		jobMap[k] = v
-	}
-
-	return instanceMap, jobMap
-}
-
-// hashString creates a deterministic hash of a string
-// Used as fallback when standard obfuscation cannot be applied
-func (o *Obfuscator) hashString(s string) string {
-	h := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(h[:8]) // Use first 8 bytes (16 hex chars)
 }

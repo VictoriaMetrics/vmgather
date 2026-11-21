@@ -16,17 +16,21 @@ import (
 // with the decode-and-marshal pipeline used before the export optimizations.
 // Output goes to io.Discard, so this does not measure disk or network throughput.
 // Single-line cases expose parser setup costs; streams exercise parser reuse.
+// The mdx mode runs lib/mdx on every line, as snapshot mode does; it has no baseline.
 func BenchmarkProcessMetricsIntoWriter(b *testing.B) {
 	modes := []struct {
 		name   string
-		config domain.ObfuscationConfig
+		config domain.ExportConfig
 	}{
 		{name: "passthrough"},
-		{name: "drop", config: domain.ObfuscationConfig{DropLabels: []string{"namespace"}}},
-		{name: "obfuscate", config: domain.ObfuscationConfig{
+		{name: "drop", config: domain.ExportConfig{Obfuscation: domain.ObfuscationConfig{DropLabels: []string{"namespace"}}}},
+		{name: "obfuscate", config: domain.ExportConfig{Obfuscation: domain.ObfuscationConfig{
 			Enabled: true, ObfuscateInstance: true, ObfuscateJob: true,
 			CustomLabels: []string{"namespace", "pod"},
-		}},
+		}}},
+		{name: "mdx+obfuscate", config: domain.ExportConfig{MDXFilter: true, Obfuscation: domain.ObfuscationConfig{
+			Enabled: true, ObfuscateInstance: true,
+		}}},
 	}
 	for _, samples := range []int{1, 100, 10000} {
 		metric := vm.ExportedMetric{
@@ -50,14 +54,17 @@ func BenchmarkProcessMetricsIntoWriter(b *testing.B) {
 			data := bytes.Repeat(line, lines)
 			for _, mode := range modes {
 				for _, baseline := range []bool{true, false} {
+					if baseline && mode.config.MDXFilter {
+						continue
+					}
 					implementation := "optimized"
 					if baseline {
 						implementation = "baseline"
 					}
 					name := fmt.Sprintf("samples=%d/lines=%d/%s/%s", samples, lines, mode.name, implementation)
 					b.Run(name, func(b *testing.B) {
-						service := &exportServiceImpl{}
-						obfuscator := obfuscation.NewObfuscator()
+						proc := newLineProcessor(mode.config)
+						defer proc.close()
 						b.SetBytes(int64(len(data)))
 						b.ReportAllocs()
 						b.ResetTimer()
@@ -66,9 +73,9 @@ func BenchmarkProcessMetricsIntoWriter(b *testing.B) {
 							var count int
 							var err error
 							if baseline {
-								count, err = benchmarkDecodeAndMarshal(service, reader, mode.config, obfuscator)
+								count, err = benchmarkDecodeAndMarshal(reader, mode.config.Obfuscation)
 							} else {
-								count, err = service.processMetricsIntoWriter(reader, mode.config, obfuscator, io.Discard)
+								count, err = proc.process(reader, io.Discard)
 							}
 							if err != nil || count != lines {
 								b.Fatalf("count=%d, want=%d, err=%v", count, lines, err)
@@ -81,8 +88,9 @@ func BenchmarkProcessMetricsIntoWriter(b *testing.B) {
 	}
 }
 
-func benchmarkDecodeAndMarshal(service *exportServiceImpl, reader io.Reader, config domain.ObfuscationConfig, obfuscator *obfuscation.Obfuscator) (int, error) {
+func benchmarkDecodeAndMarshal(reader io.Reader, config domain.ObfuscationConfig) (int, error) {
 	decoder := vm.NewExportDecoder(reader)
+	obfuscator := obfuscation.NewLabels(config.LabelNames())
 	count := 0
 	for {
 		metric, err := decoder.Decode()
@@ -95,8 +103,8 @@ func benchmarkDecodeAndMarshal(service *exportServiceImpl, reader io.Reader, con
 		for _, label := range config.DropLabels {
 			delete(metric.Metric, label)
 		}
-		if config.Enabled {
-			service.applyObfuscation(metric, obfuscator, config)
+		if obfuscator != nil {
+			obfuscator.Apply(metric.Metric)
 		}
 		data, err := json.Marshal(metric)
 		if err != nil {

@@ -9,4 +9,3 @@ func TestVersionIsVariable(t *testing.T) {
 	version = "test"
 	version = old
 }
-

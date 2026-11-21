@@ -17,6 +17,7 @@ import (
 
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
 	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/archive"
+	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/obfuscation"
 	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/vm"
 )
 
@@ -79,11 +80,6 @@ func TestExportService_BuildSelector(t *testing.T) {
 		jobs     []string
 		expected string
 	}{
-		{
-			name:     "empty jobs",
-			jobs:     []string{},
-			expected: `{__name__!=""}`,
-		},
 		{
 			name:     "single job",
 			jobs:     []string{"vmstorage-prod"},
@@ -249,6 +245,7 @@ func TestExportToWriter_DropsLabels(t *testing.T) {
 
 	config := domain.ExportConfig{
 		Connection: domain.VMConnection{URL: srv.URL},
+		Jobs:       []string{"test1"},
 		TimeRange: domain.TimeRange{
 			Start: time.Now().Add(-time.Minute),
 			End:   time.Now(),
@@ -284,98 +281,6 @@ func TestExportToWriter_DropsLabels(t *testing.T) {
 	}
 	if !strings.Contains(output, "\"instance\"") {
 		t.Fatalf("expected instance label to remain in output")
-	}
-}
-
-// TestExportService_GuessComponent tests component guessing logic
-func TestExportService_GuessComponent(t *testing.T) {
-	service := &exportServiceImpl{}
-
-	tests := []struct {
-		name     string
-		labels   map[string]string
-		expected string
-	}{
-		{
-			name: "vm_component label present",
-			labels: map[string]string{
-				"vm_component": "vmstorage",
-				"__name__":     "vm_app_version",
-			},
-			expected: "vmstorage",
-		},
-		{
-			name: "vmstorage metric",
-			labels: map[string]string{
-				"__name__": "vmstorage_merge_duration_seconds",
-			},
-			expected: "vmstorage",
-		},
-		{
-			name: "vmselect metric",
-			labels: map[string]string{
-				"__name__": "vmselect_concurrent_queries",
-			},
-			expected: "vmselect",
-		},
-		{
-			name: "vminsert metric",
-			labels: map[string]string{
-				"__name__": "vminsert_rows_inserted_total",
-			},
-			expected: "vminsert",
-		},
-		{
-			name: "vmagent metric",
-			labels: map[string]string{
-				"__name__": "vmagent_remotewrite_retries_count_total",
-			},
-			expected: "vmagent",
-		},
-		{
-			name: "vmalert metric",
-			labels: map[string]string{
-				"__name__": "vmalert_alerting_rules_total",
-			},
-			expected: "vmalert",
-		},
-		{
-			name: "generic vm metric with job",
-			labels: map[string]string{
-				"__name__": "vm_app_version",
-				"job":      "vmauth-single",
-			},
-			expected: "vmauth-single",
-		},
-		{
-			name: "go metric with job",
-			labels: map[string]string{
-				"__name__": "go_goroutines",
-				"job":      "vmstorage-prod",
-			},
-			expected: "vmstorage-prod",
-		},
-		{
-			name: "unknown metric",
-			labels: map[string]string{
-				"__name__": "unknown_metric",
-			},
-			expected: "unknown",
-		},
-		{
-			name:     "empty labels",
-			labels:   map[string]string{},
-			expected: "unknown",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := service.guessComponent(tt.labels)
-			if result != tt.expected {
-				t.Errorf("guessComponent() = %v, want %v", result, tt.expected)
-			}
-		})
 	}
 }
 
@@ -420,16 +325,7 @@ func TestExportService_BuildArchiveMetadata(t *testing.T) {
 		},
 	}
 
-	obfuscationMaps := map[string]map[string]string{
-		"instance": {
-			"10.0.1.5:8482": "192.0.2.1:8482",
-		},
-		"job": {
-			"vmstorage-prod": "vm_component_vmstorage_1",
-		},
-	}
-
-	metadata := service.buildArchiveMetadata("test-export", config, 1500, obfuscationMaps, nil)
+	metadata := service.buildArchiveMetadata("test-export", config, 1500, nil)
 
 	// Verify fields
 	if metadata.ExportID != "test-export" {
@@ -465,14 +361,6 @@ func TestExportService_BuildArchiveMetadata(t *testing.T) {
 	if metadata.ExportDate.Location() != time.UTC {
 		t.Errorf("ExportDate location = %v, want UTC", metadata.ExportDate.Location())
 	}
-
-	if len(metadata.InstanceMap) != 1 {
-		t.Errorf("InstanceMap length = %d, want 1", len(metadata.InstanceMap))
-	}
-
-	if len(metadata.JobMap) != 1 {
-		t.Errorf("JobMap length = %d, want 1", len(metadata.JobMap))
-	}
 }
 
 func TestDetermineQueryRangeStep(t *testing.T) {
@@ -506,7 +394,7 @@ func TestExportService_ProcessMetrics_NoObfuscation(t *testing.T) {
 		Enabled: false,
 	}
 
-	processedReader, count, obfMaps, err := service.processMetrics(reader, obfConfig)
+	processedReader, count, err := service.processMetrics(reader, obfConfig)
 	if err != nil {
 		t.Fatalf("processMetrics failed: %v", err)
 	}
@@ -514,11 +402,6 @@ func TestExportService_ProcessMetrics_NoObfuscation(t *testing.T) {
 	// Verify count
 	if count != 2 {
 		t.Errorf("metrics count = %d, want 2", count)
-	}
-
-	// Verify no obfuscation maps
-	if len(obfMaps) != 0 {
-		t.Errorf("expected no obfuscation maps, got %d", len(obfMaps))
 	}
 
 	// Verify output is valid JSONL
@@ -543,7 +426,7 @@ func TestExportService_ProcessMetrics_WithObfuscation(t *testing.T) {
 		ObfuscateJob:      true,
 	}
 
-	processedReader, count, obfMaps, err := service.processMetrics(reader, obfConfig)
+	processedReader, count, err := service.processMetrics(reader, obfConfig)
 	if err != nil {
 		t.Fatalf("processMetrics failed: %v", err)
 	}
@@ -553,27 +436,17 @@ func TestExportService_ProcessMetrics_WithObfuscation(t *testing.T) {
 		t.Errorf("metrics count = %d, want 2", count)
 	}
 
-	// Verify obfuscation maps exist
-	if len(obfMaps) == 0 {
-		t.Error("expected obfuscation maps")
+	out, err := io.ReadAll(processedReader)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	// Verify instance map
-	if instanceMap, exists := obfMaps["instance"]; exists {
-		if _, ok := instanceMap["10.0.1.5:8482"]; !ok {
-			t.Error("instance not in obfuscation map")
+	for _, want := range []string{obfuscation.Value("10.0.1.5:8482"), obfuscation.Value("vmstorage-prod")} {
+		if strings.Count(string(out), want) != 2 {
+			t.Errorf("want %q on both lines, got %s", want, out)
 		}
-	} else {
-		t.Error("instance map not found")
 	}
-
-	// Verify job map
-	if jobMap, exists := obfMaps["job"]; exists {
-		if _, ok := jobMap["vmstorage-prod"]; !ok {
-			t.Error("job not in obfuscation map")
-		}
-	} else {
-		t.Error("job map not found")
+	if strings.Contains(string(out), "10.0.1.5") || strings.Contains(string(out), "vmstorage-prod") {
+		t.Errorf("real values left in output: %s", out)
 	}
 
 	// Verify output is valid JSONL
@@ -582,48 +455,40 @@ func TestExportService_ProcessMetrics_WithObfuscation(t *testing.T) {
 	}
 }
 
-// TestAppendFile verifies appendFile correctly appends source content onto an
-// existing destination file using the explicit large-buffer copy, both for a
-// small case and a case spanning multiple appendCopyBufferSize-sized chunks.
-func TestAppendFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	dest := filepath.Join(tmpDir, "dest.jsonl")
-
-	if err := os.WriteFile(dest, []byte("line1\n"), 0o640); err != nil {
-		t.Fatalf("failed to seed destination: %v", err)
-	}
-
-	src1 := filepath.Join(tmpDir, "src1.jsonl")
-	if err := os.WriteFile(src1, []byte("line2\n"), 0o640); err != nil {
-		t.Fatalf("failed to write source: %v", err)
-	}
-	if err := appendFile(dest, src1); err != nil {
-		t.Fatalf("appendFile failed: %v", err)
-	}
-
-	// Second source larger than appendCopyBufferSize to exercise multiple
-	// internal CopyBuffer iterations, not just a single chunk.
-	large := bytes.Repeat([]byte("x"), appendCopyBufferSize*2+123)
-	src2 := filepath.Join(tmpDir, "src2.bin")
-	if err := os.WriteFile(src2, large, 0o640); err != nil {
-		t.Fatalf("failed to write large source: %v", err)
-	}
-	if err := appendFile(dest, src2); err != nil {
-		t.Fatalf("appendFile failed on large source: %v", err)
-	}
-
-	got, err := os.ReadFile(dest)
+// TestStagingFileRollback verifies that a failed attempt is cut off the staging file and later
+// output is appended after the last good attempt.
+func TestStagingFileRollback(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "staging.jsonl")
+	staging, err := openStagingFile(path)
 	if err != nil {
-		t.Fatalf("failed to read destination: %v", err)
+		t.Fatal(err)
 	}
-	want := append([]byte("line1\nline2\n"), large...)
-	if !bytes.Equal(got, want) {
-		t.Fatalf("destination content mismatch: got %d bytes, want %d bytes", len(got), len(want))
+	_, _ = staging.Write([]byte("good-1\n"))
+	mark, err := staging.mark()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = staging.Write(bytes.Repeat([]byte("x"), writeBufferSize*2+123)) // partly flushed, partly buffered
+	if err := staging.rollback(mark); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = staging.Write([]byte("good-2\n"))
+	if err := staging.close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := staging.close(); err != nil { // idempotent
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "good-1\ngood-2\n" {
+		t.Fatalf("got %q", got)
 	}
 }
 
 func TestProcessMetricsIntoWriterFile(t *testing.T) {
-	service := &exportServiceImpl{}
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "partial.jsonl")
 	handle, err := os.Create(file)
@@ -632,7 +497,7 @@ func TestProcessMetricsIntoWriterFile(t *testing.T) {
 	}
 
 	metricsData := `{"metric":{"__name__":"up","instance":"a","job":"j"},"values":[1],"timestamps":[1000]}`
-	count, err := service.processMetricsIntoWriter(strings.NewReader(metricsData), domain.ObfuscationConfig{}, nil, handle)
+	count, err := processLines(strings.NewReader(metricsData), domain.ObfuscationConfig{}, handle)
 	if err != nil {
 		t.Fatalf("processMetricsIntoWriter failed: %v", err)
 	}
@@ -655,14 +520,13 @@ func TestProcessMetricsIntoWriterFile(t *testing.T) {
 // obfuscation and no drop-labels configured, output is byte-for-byte identical
 // to input (proves the CopyLines fast path is taken instead of decode+re-marshal).
 func TestProcessMetricsIntoWriterPassthroughIsByteIdentical(t *testing.T) {
-	service := &exportServiceImpl{}
 
 	metricsData := `{"metric":{"__name__":"vm_app_version","instance":"10.0.1.5:8482","job":"vmstorage-prod"},"values":[1],"timestamps":[1699728000000]}
 {"metric":{"__name__":"go_goroutines","instance":"10.0.1.5:8482","job":"vmstorage-prod"},"values":[42],"timestamps":[1699728000000]}
 `
 
 	var out bytes.Buffer
-	count, err := service.processMetricsIntoWriter(strings.NewReader(metricsData), domain.ObfuscationConfig{}, nil, &out)
+	count, err := processLines(strings.NewReader(metricsData), domain.ObfuscationConfig{}, &out)
 	if err != nil {
 		t.Fatalf("processMetricsIntoWriter failed: %v", err)
 	}
@@ -677,10 +541,9 @@ func TestProcessMetricsIntoWriterPassthroughIsByteIdentical(t *testing.T) {
 // TestProcessMetricsIntoWriterPassthroughRejectsMalformedLines verifies the
 // fast path rejects input that does not have the shape of a JSON object.
 func TestProcessMetricsIntoWriterPassthroughRejectsMalformedLines(t *testing.T) {
-	service := &exportServiceImpl{}
 
 	var out bytes.Buffer
-	_, err := service.processMetricsIntoWriter(strings.NewReader("this is not json at all"), domain.ObfuscationConfig{}, nil, &out)
+	_, err := processLines(strings.NewReader("this is not json at all"), domain.ObfuscationConfig{}, &out)
 	if err == nil {
 		t.Fatal("expected error on malformed JSONL in passthrough fast path")
 	}
@@ -690,12 +553,11 @@ func TestProcessMetricsIntoWriterPassthroughRejectsMalformedLines(t *testing.T) 
 // the fastjson-based transform path (drop-labels/obfuscation) leaves "values"
 // and "timestamps" byte-identical, since only the "metric" object is mutated.
 func TestProcessMetricsIntoWriterTransformPreservesValuesAndTimestamps(t *testing.T) {
-	service := &exportServiceImpl{}
 
 	metricsData := `{"metric":{"__name__":"up","instance":"a","job":"j","env":"prod"},"values":[1.10,0.30000000000000004,-2],"timestamps":[1699728000000,1699728030000]}` + "\n"
 
 	var out bytes.Buffer
-	count, err := service.processMetricsIntoWriter(strings.NewReader(metricsData), domain.ObfuscationConfig{DropLabels: []string{"env"}}, nil, &out)
+	count, err := processLines(strings.NewReader(metricsData), domain.ObfuscationConfig{DropLabels: []string{"env"}}, &out)
 	if err != nil {
 		t.Fatalf("processMetricsIntoWriter failed: %v", err)
 	}
@@ -717,7 +579,6 @@ func TestProcessMetricsIntoWriterTransformPreservesValuesAndTimestamps(t *testin
 // line lacking a "metric" object doesn't panic when drop-labels/obfuscation
 // are configured (metricObj is nil in that case).
 func TestProcessMetricsIntoWriterTransformHandlesMissingMetricObject(t *testing.T) {
-	service := &exportServiceImpl{}
 
 	metricsData := `{"values":[1],"timestamps":[1]}` + "\n"
 	obfConfig := domain.ObfuscationConfig{
@@ -727,7 +588,7 @@ func TestProcessMetricsIntoWriterTransformHandlesMissingMetricObject(t *testing.
 	}
 
 	var out bytes.Buffer
-	count, err := service.processMetricsIntoWriter(strings.NewReader(metricsData), obfConfig, nil, &out)
+	count, err := processLines(strings.NewReader(metricsData), obfConfig, &out)
 	if err != nil {
 		t.Fatalf("processMetricsIntoWriter failed: %v", err)
 	}
@@ -737,13 +598,12 @@ func TestProcessMetricsIntoWriterTransformHandlesMissingMetricObject(t *testing.
 }
 
 func TestProcessMetricsIntoWriterRejectsNonStringLabels(t *testing.T) {
-	service := &exportServiceImpl{}
 	config := domain.ObfuscationConfig{Enabled: true, ObfuscateInstance: true}
 	for _, value := range []string{"42", "true", "[]", "{}", "null"} {
 		t.Run(value, func(t *testing.T) {
 			data := `{"metric":{"__name__":"up","instance":` + value + `},"values":[1],"timestamps":[1]}` + "\n"
 			var out bytes.Buffer
-			_, err := service.processMetricsIntoWriter(strings.NewReader(data), config, nil, &out)
+			_, err := processLines(strings.NewReader(data), config, &out)
 			if err == nil {
 				t.Fatal("expected a decode error for a non-string label")
 			}
@@ -764,7 +624,7 @@ func TestExportService_ProcessMetrics_EmptyStream(t *testing.T) {
 		Enabled: false,
 	}
 
-	_, count, _, err := service.processMetrics(reader, obfConfig)
+	_, count, err := service.processMetrics(reader, obfConfig)
 	if err != nil {
 		t.Fatalf("processMetrics failed on empty stream: %v", err)
 	}
@@ -773,72 +633,6 @@ func TestExportService_ProcessMetrics_EmptyStream(t *testing.T) {
 	if count != 0 {
 		t.Errorf("metrics count = %d, want 0", count)
 	}
-}
-
-// TestExportService_ApplyObfuscation tests obfuscation application
-func TestExportService_ApplyObfuscation(t *testing.T) {
-	service := &exportServiceImpl{}
-
-	// Create metric
-	metric := &vm.ExportedMetric{
-		Metric: map[string]string{
-			"__name__": "vm_app_version",
-			"instance": "10.0.1.5:8482",
-			"job":      "vmstorage-prod",
-		},
-		Values:     []interface{}{1.0},
-		Timestamps: []int64{1699728000000},
-	}
-
-	// Create obfuscator
-	obf := &mockObfuscator{
-		instanceFunc: func(instance string) string {
-			return "192.0.2.1:8482"
-		},
-		jobFunc: func(job, component string) string {
-			return "vm_component_" + component + "_1"
-		},
-	}
-
-	config := domain.ObfuscationConfig{
-		Enabled:           true,
-		ObfuscateInstance: true,
-		ObfuscateJob:      true,
-	}
-
-	// Apply obfuscation - manually for test
-	if config.ObfuscateInstance {
-		if instance, exists := metric.Metric["instance"]; exists {
-			metric.Metric["instance"] = obf.instanceFunc(instance)
-		}
-	}
-
-	if config.ObfuscateJob {
-		if job, exists := metric.Metric["job"]; exists {
-			component := service.guessComponent(metric.Metric)
-			metric.Metric["job"] = obf.jobFunc(job, component)
-		}
-	}
-
-	// Verify obfuscation applied
-	if metric.Metric["instance"] != "192.0.2.1:8482" {
-		t.Errorf("instance not obfuscated: %s", metric.Metric["instance"])
-	}
-
-	if !strings.HasPrefix(metric.Metric["job"], "vm_component_") {
-		t.Errorf("job not obfuscated: %s", metric.Metric["job"])
-	}
-
-	// Metric name should not be changed
-	if metric.Metric["__name__"] != "vm_app_version" {
-		t.Error("metric name should not be obfuscated")
-	}
-}
-
-// mockObfuscator is a simple mock for testing
-type mockObfuscator struct {
-	instanceFunc func(string) string
-	jobFunc      func(string, string) string
 }
 
 // TestExportService_ProcessMetrics_ValidJSONL tests JSONL output format
@@ -850,7 +644,7 @@ func TestExportService_ProcessMetrics_ValidJSONL(t *testing.T) {
 
 	obfConfig := domain.ObfuscationConfig{Enabled: false}
 
-	processedReader, _, _, err := service.processMetrics(reader, obfConfig)
+	processedReader, _, err := service.processMetrics(reader, obfConfig)
 	if err != nil {
 		t.Fatalf("processMetrics failed: %v", err)
 	}

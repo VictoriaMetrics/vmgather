@@ -109,7 +109,7 @@ test.describe('Custom mode flows', () => {
 
     await page.goto('/');
 
-    await page.locator('.mode-slider').click();
+    await page.locator('#modeToggleWrapper .mode-slider').click();
     await expect(page.locator('body')).toHaveClass(/mode-custom/);
     await page.locator('.step.active button:has-text("Next")').click();
     await page.locator('.step.active button:has-text("Next")').click();
@@ -123,7 +123,7 @@ test.describe('Custom mode flows', () => {
 
     await page.locator('#customQueryInput').fill('{job=~"job-.*"}');
     await page.evaluate(() => { if (window.validateCustomQuery) window.validateCustomQuery(); });
-    await expect(page.locator('#customQueryStatus')).toContainText('[OK]');
+    await expect(page.locator('#customQueryStatus')).toContainText('Validated');
     await page.locator('.step.active button:has-text("Next")').click();
     await page.waitForSelector('.step.active[data-step="5"]');
 
@@ -218,7 +218,7 @@ test.describe('Custom mode flows', () => {
     });
 
     await page.goto('/');
-    await page.locator('.mode-slider').click();
+    await page.locator('#modeToggleWrapper .mode-slider').click();
     await expect(page.locator('body')).toHaveClass(/mode-custom/);
     await page.locator('.step.active button:has-text("Next")').click();
     await page.locator('.step.active button:has-text("Next")').click();
@@ -232,7 +232,7 @@ test.describe('Custom mode flows', () => {
 
     await page.locator('#customQueryInput').fill('rate(vm_rows_inserted_total[5m])');
     await page.evaluate(() => { if (window.validateCustomQuery) window.validateCustomQuery(); });
-    await expect(page.locator('#customQueryStatus')).toContainText('[OK]');
+    await expect(page.locator('#customQueryStatus')).toContainText('Validated');
     await page.locator('.step.active button:has-text("Next")').click();
     await page.waitForSelector('.step.active[data-step="6"]');
 

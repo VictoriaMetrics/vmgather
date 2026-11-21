@@ -61,9 +61,15 @@ func selectBatchInterval(tr domain.TimeRange, settings domain.BatchSettings) tim
 		return custom
 	}
 
-	return recommendedIntervalForDuration(tr.End.Sub(tr.Start))
+	return defaultBatchWindow
 }
 
+// defaultBatchWindow is the auto batch size. /api/v1/export repeats every label set once per
+// request window, so small windows multiply the payload: 6h of data measured on a live vmsingle
+// was 497 MB in 60s windows and 48 MB in 1h windows (360 requests vs 6).
+const defaultBatchWindow = time.Hour
+
+// recommendedIntervalForDuration returns the default query_range step for a time range.
 func recommendedIntervalForDuration(duration time.Duration) time.Duration {
 	switch {
 	case duration <= 15*time.Minute:

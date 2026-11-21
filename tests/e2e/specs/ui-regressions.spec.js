@@ -1,4 +1,8 @@
 const { test, expect } = require('@playwright/test');
+const { createHash } = require('crypto');
+
+// sha256 mirrors vmgather obfuscation: the hex SHA-256 digest of the value, as in vmagent -remoteWrite.obfuscateLabels.
+const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const http = require('http');
 
 async function navigateToStep3(page) {
@@ -46,7 +50,7 @@ test.describe('UI regressions', () => {
   test('Bug #4: invalid URL disables Test Connection button', async ({ page }) => {
     const step3 = await navigateToStep3(page);
     await step3.locator('#vmUrl').fill('https://this-aint-no\\\\invalid-url');
-    await expect(step3.locator('#vmUrlHint')).toHaveText(/[FAIL]/);
+    await expect(step3.locator('#vmUrlHint')).toHaveClass(/error/);
     await expect(step3.locator('#testConnectionBtn')).toBeDisabled();
   });
 
@@ -95,7 +99,7 @@ test.describe('UI regressions', () => {
       await step3.locator('#testConnectionBtn').click();
 
       // The host check is best-effort, but it must not hang the UI.
-      await expect(step3.locator('#validationSteps')).toContainText('Host check complete', { timeout: 4500 });
+      await expect(step3.locator('#validationSteps')).toContainText('Host is reachable', { timeout: 4500 });
       await page.waitForSelector('#step3Next:enabled');
     } finally {
       await new Promise(resolve => server.close(resolve));
@@ -145,7 +149,7 @@ test.describe('UI regressions', () => {
   test('Bug #4: Kubernetes service URL is accepted', async ({ page }) => {
     const step3 = await navigateToStep3(page);
     await step3.locator('#vmUrl').fill('vmselect.monitoring.svc.cluster.local:8481');
-    await expect(step3.locator('#vmUrlHint')).toHaveText(/[OK]/);
+    await expect(step3.locator('#vmUrlHint')).toHaveClass(/success/);
     await expect(step3.locator('#testConnectionBtn')).toBeEnabled();
   });
 
@@ -191,8 +195,8 @@ test.describe('UI regressions', () => {
             {
               name: 'go_mem',
               labels: {
-                instance: '777.777.1.1:8080',
-                job: 'vm_component_vmselect_1',
+                instance: sha256('10.0.0.1:8080'),
+                job: sha256('vmselect'),
               },
             },
           ],
@@ -244,8 +248,8 @@ test.describe('UI regressions', () => {
             {
               name: 'go_mem',
               labels: {
-                instance: '777.777.1.1:8080',
-                job: 'vm_component_vmselect_1',
+                instance: sha256('10.0.0.1:8080'),
+                job: sha256('vmselect'),
               },
             },
           ],
@@ -271,13 +275,19 @@ test.describe('UI regressions', () => {
 
     const step5 = page.locator('.step[data-step="6"]');
     await expect(step5.locator('#selectionSummary')).toContainText('42 series');
-    await expect(step5.locator('#samplePreview')).toContainText('777.777.1.1');
+    await expect(step5.locator('#samplePreview')).toContainText(sha256('10.0.0.1:8080'));
     await step5.locator('#stagingDir').fill('/tmp/ui-regression');
+    // #metricStep is a manual-tuning control: hidden while the adaptive autopilot is on (default).
+    await page.evaluate(() => {
+        const input = document.getElementById('adaptiveExportMode');
+        input.checked = false;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
     await step5.locator('#metricStep').selectOption('60');
 
     await step5.locator('#startExportBtn').click();
     await page.evaluate(() => window.exportMetrics && window.exportMetrics(document.getElementById('startExportBtn')));
     await page.waitForSelector('.step[data-step="7"].active');
-    await expect(page.locator('#exportSpoilers')).toContainText('777.777.1.1:8080');
+    await expect(page.locator('#exportSpoilers')).toContainText(sha256('10.0.0.1:8080'));
   });
 });

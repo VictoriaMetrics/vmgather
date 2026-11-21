@@ -30,14 +30,13 @@ func ApplyExportDefaults(config *domain.ExportConfig) {
 	if safety.Mode == "" {
 		safety.Mode = domain.ExportAdaptivityAutopilot
 	}
-	if safety.Mode != domain.ExportAdaptivityOff && !safety.AutoSplit && !safety.SplitByJob && !safety.SplitByMetricName && safety.MinWindowSeconds <= 0 && safety.MaxSplitDepth <= 0 {
+	if safety.Mode != domain.ExportAdaptivityOff && !safety.AutoSplit && !safety.SplitByJob && safety.MinWindowSeconds <= 0 && safety.MaxSplitDepth <= 0 {
 		safety.AutoSplit = true
 		safety.SplitByJob = true
 	}
 	if safety.Mode == domain.ExportAdaptivityOff {
 		safety.AutoSplit = false
 		safety.SplitByJob = false
-		safety.SplitByMetricName = false
 	}
 	if safety.MinWindowSeconds <= 0 {
 		safety.MinWindowSeconds = 5

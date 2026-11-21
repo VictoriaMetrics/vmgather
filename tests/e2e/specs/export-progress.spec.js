@@ -1,4 +1,8 @@
 const { test, expect } = require('@playwright/test');
+const { createHash } = require('crypto');
+
+// sha256 mirrors vmgather obfuscation: the hex SHA-256 digest of the value, as in vmagent -remoteWrite.obfuscateLabels.
+const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -126,8 +130,8 @@ test.beforeEach(async ({ page }) => {
           {
             name: 'go_mem',
             labels: {
-              instance: '777.777.1.1:8428',
-              job: 'vm_component_vmjob_1',
+              instance: sha256('10.0.0.1:8428'),
+              job: sha256('vmjob'),
             },
           },
         ],
@@ -238,8 +242,8 @@ test.describe('Export progress UI', () => {
             {
               name: 'go_mem',
               labels: {
-                instance: '777.777.1.1:8428',
-                job: 'vm_component_vmjob_1',
+                instance: sha256('10.0.0.1:8428'),
+                job: sha256('vmjob'),
               },
             },
           ],
@@ -271,7 +275,7 @@ test.describe('Export progress UI', () => {
 
     await page.waitForSelector('.step[data-step="7"]');
     await expect(page.locator('#exportProgressPercent')).toContainText('100%');
-    await expect(page.locator('#exportSpoilers')).toContainText('777.777.1.1:8428');
+    await expect(page.locator('#exportSpoilers')).toContainText(sha256('10.0.0.1:8428'));
   });
 
   test('autopilot hides manual tuning until disabled', async ({ page }) => {

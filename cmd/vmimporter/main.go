@@ -16,6 +16,7 @@ import (
 
 	"go.uber.org/automaxprocs/maxprocs"
 
+	"github.com/VictoriaMetrics/vmgather/internal/httpguard"
 	importer "github.com/VictoriaMetrics/vmgather/internal/importer/server"
 )
 
@@ -29,6 +30,7 @@ func main() {
 
 	addr := flag.String("addr", "0.0.0.0:8081", "HTTP server address")
 	noBrowser := flag.Bool("no-browser", false, "Do not open browser on start")
+	allowedHosts := flag.String("allowed-hosts", "", "Comma-separated extra Host names accepted from local clients, for a reverse proxy on the same machine (localhost and IP addresses are always accepted)")
 	flag.Parse()
 
 	finalAddr, err := ensureAvailablePort(*addr)
@@ -40,6 +42,7 @@ func main() {
 	}
 
 	srv := importer.NewServer(version)
+	srv.SetAllowedHosts(httpguard.ParseHostList(*allowedHosts))
 	httpServer := &http.Server{
 		Addr:              finalAddr,
 		Handler:           srv.Router(),
@@ -69,6 +72,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpServer.Shutdown(ctx)
+	srv.Close()
 }
 
 func openBrowser(url string) {

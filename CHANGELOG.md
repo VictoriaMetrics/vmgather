@@ -2,6 +2,68 @@
 
 All notable changes to vmgather are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and versions adhere to semantic versioning.
 
+## [Unreleased]
+
+### Added
+- **Experimental** snapshot mode (server mode) for teams that cannot send MDX: `-snapshot.dst=s3://bucket/prefix` exports the MDX metrics of VictoriaMetrics components in fixed, aligned windows (`-snapshot.period`, default 1h) and uploads every window to S3, GCS, Azure Blob or a local path. It runs once for a Kubernetes CronJob or in a loop with `-snapshot.interval`. The state is kept in the bucket and moves only after a complete upload, so a failed or interrupted window is exported again; `-snapshot.start`/`-snapshot.end` backfill a fixed range without touching the state. Components are discovered on every run unless jobs are set. See README, "Snapshot mode (experimental)".
+- **Experimental** snapshot mode reuses VictoriaMetrics code: the vmagent `-remoteWrite.mdx.enable` filter (`lib/mdx`) decides which series are exported, and the vmbackup storage layer (`lib/backup`) uploads them, with the same destinations, credentials and flags (`-customS3Endpoint`, `-credsFilePath`, ...). A snapshot uses the vmbackup layout and can be downloaded with vmrestore.
+- **Experimental** `-snapshot.retention` (default `30d`) deletes old snapshots, including incomplete uploads, after every scheduled run; the local work directory is emptied before and after every run, so failed runs do not fill the disk.
+- **Experimental** `mdx_filter` export option (cluster mode, used by snapshot mode) and `mdx_filtered` in `metadata.json`.
+- `-version` prints the vmgather version.
+- `VMGATHER_VM_PASSWORD`, `VMGATHER_VM_BEARER_TOKEN` and `VMGATHER_VM_HEADER_VALUE` override the auth fields of the oneshot and snapshot config, for Kubernetes Secrets (oneshot and snapshot mode are experimental).
+- **Experimental** Kubernetes manifests in `deploy/k8s/`: a snapshot CronJob and a one-time Job that exports MDX metrics from a vmbackup backup (vmrestore into a temporary vmsingle, then a backfill).
+- `-allowed-hosts host1,host2` flag in vmgather and vmimporter: extra Host names accepted from clients on the same machine, for a local reverse proxy.
+- A failed export can be resumed from the UI (before, only a canceled one). Completed batches are kept; the main button still starts a new export with the current selection.
+- vmimporter removes finished jobs 1 hour after they end, together with the upload kept for resuming a failed job, and removes kept uploads on shutdown. The status of a job is not available after it is removed.
+
+### Changed
+- Shorter, plainer texts in the vmgather and vmimporter UI: no status tags such as `[OK]` or `[INFO]`, a short check and import summary in vmimporter (retention as "100 years", label limit as "14 of 40"), and technical details under "Details".
+- Obfuscation is the vmagent `-remoteWrite.obfuscateLabels` algorithm: a value becomes its hex SHA-256 digest, the same in every export, resumed export, snapshot and MDX stream. It replaces the `777.777.x.y` addresses, `vm_component_<name>_<n>` jobs and `<label>-<n>` values, which were different in every export. Ports and component names are no longer visible in obfuscated labels, and there is no salt: values with a small space such as `IP:port` can be recovered by brute force (drop such labels if they must not leave your network).
+- Auto batch window is 1 hour (was 30s/1m/5m). `/api/v1/export` repeats every label set once per window, so the old windows multiplied the payload. On a small lab (2 jobs, 6 hours) the export took 0.6-0.9s and 1.7-1.9 MB instead of 9.5-14.4s and 15.8-16.5 MB, with identical samples.
+- `/api/v1/export` requests have no total deadline any more. A request is canceled when no data arrives for 2 minutes; a stream that stalls after some data is split by time, a target that never answers fails after one idle period.
+- Export writes batches straight to the staging file and rolls back a failed attempt with truncate, so data is no longer copied twice (1 GB export: 4.6-6.8s to 2.0s in a local test).
+- vmimporter passes sample values through as JSON without a float round trip (about 1.6x faster in benchmarks).
+- vmimporter streams uploads to a temp file instead of keeping up to 512 MB in memory (peak RSS 1076 MB to 19 MB for a 419 MB bundle) and reads zip bundles in place instead of extracting them (a 9 MB zip used 1 GB of temp space).
+- Discovery finds the components that had `vm_app_version` at any time in the selected range (`last_over_time` over the range), not only at its end, so a component that stopped before the end is no longer left out. Instant queries send `deny_partial_response=1`, so a cluster with an unavailable vmstorage fails discovery instead of returning part of the jobs.
+- Discovery names components by their full name (`victoria-metrics`, `victoria-logs`, `config-reloader`) instead of merging VictoriaMetrics and VictoriaLogs into `victoria`.
+- Cluster exports without jobs and custom exports without a query are rejected with HTTP 400 (also in CLI oneshot) instead of exporting everything.
+- The metric sampling step applies only to MetricsQL (query_range) exports; the UI says so. Selector and cluster exports always keep raw samples.
+- Build, release binaries, Docker images and CI use Go 1.27.4; building from source needs Go 1.27.3 or newer, which the VictoriaMetrics module v1.156.0 requires. Docker images run on distroless `static-debian12` (static binaries, no OpenSSL). `make security-check` runs govulncheck v1.8.0 on the same Go version as CI; lint uses golangci-lint v2.14.0.
+- The vmgather binary grows from 8.5 MB to 54 MB (linux/amd64, stripped), because `lib/backup` brings the AWS, GCS and Azure SDKs. vmimporter does not change (7.9 MB).
+
+### Fixed
+- Cluster mode: components with a single job were left out of the export, and selecting only such components exported the whole database (`{__name__!=""}`): up to the 10M series limit on large installs, all tenant metrics on small ones.
+- 502/503 and broken connections failed the whole export. They are retried up to 3 times (after 2s, 8s, 30s). A 504 from a proxy (nginx, vmauth) splits the window by time.
+- Resume with obfuscation gave different real instances the same obfuscated value, and `metrics_count` counted only batches after resume. Resume also skips straight to the archive when all batches are done and cuts a partly written batch from the staging file.
+- A sample exactly on a batch window border was exported twice (up to 50% duplicates for aligned data such as vmalert recording rules). Windows end 1ms before the next one starts, requests use millisecond precision, and query_range splits stay on the step grid.
+- The query_range fallback wrote one line per sample and failed on NaN or Inf. It writes one line per series per chunk, NaN as `null` and Inf as `"Infinity"`, like `/api/v1/export`.
+- Export lines longer than 1 MB failed with `token too long`. VictoriaMetrics writes up to 8192 rows per line and prints large values in full (2.6 MB lines with 1-hour windows); the limit is now 16 MB.
+- vmimporter applied the time shift after retention trimming, so "Shift to now" imported 0 points, and ignored `drop_old=false` on import.
+- vmimporter dropped a whole series line when one value was `null`, `"Infinity"` or `"NaN"`.
+- vmimporter resume offsets were wrong for CRLF files, so some lines were sent twice.
+- vmimporter verification cut the `/api/v1/series` answer at 64 KB, did not escape quotes and backslashes in label values, used the unshifted time range after a shift, and gave up before new series became searchable (3-11s on VictoriaMetrics v1.155.0). It now waits up to 30s, retries only an empty answer, 5xx and network errors, and reports a 4xx answer at once.
+- vmimporter left the upload and the extracted file of a failed import in the temp dir forever.
+- 9 e2e specs were broken since the autopilot UI (v1.10.0).
+- `make test-env-up` and `make manual-env-up` ran `docker system prune -af` and `docker builder prune -af` when Docker reported "no space left on device", which deleted the images, build cache and stopped containers of every project on the machine. They now stop only their own compose project and fail with a message.
+- `metadata.json` listed the real job names when the job label was obfuscated. They are obfuscated the same way now.
+- The UI said that obfuscation mappings are included in `metadata.json`; they never were, and with digests there is no mapping.
+- vmimporter marked every clean bundle with "Preflight: issues detected", because the default sampled check counted as a warning.
+- vmimporter showed "Retention unknown" for a target with a very long retention (for example `-retentionPeriod=100y`, a cutoff before 1970).
+- Both UIs requested a missing `/favicon.ico`, so every page load logged a browser console error.
+- Two e2e checks used `/[FAIL]/` and `/[OK]/` regular expressions, which match any text with one of those letters; they now check the hint state.
+
+### Removed
+- The unused `split_by_metric_name` safety option.
+- The vmimporter "Metric sampling step" selector: it was only saved in the profile and had no effect on the import.
+- The fake obfuscation formats (`777.777.x.y`, `vm_component_<name>_<n>`, `<label>-<n>`) and the internal `instance_map`/`job_map` metadata fields, which were never written to archives.
+
+### Security
+- Go 1.27.4: govulncheck finds no vulnerabilities. Go 1.26.9, used for v1.12.0, has GO-2026-6859 (net/http) and GO-2026-6809 (crypto/x509). Docker images were built with Go 1.26.9 by digest although the Makefile said 1.25.11.
+- `golang.org/x/crypto` v0.59.0 removes GO-2026-5932 (unmaintained `openpgp`, found at module level; vmgather does not call it).
+- The distroless `static-debian12` runtime removes CVE-2026-84782 (HIGH, libssl3) reported for the previous `base-debian12` image.
+- vmgather and vmimporter reject cross-origin state-changing requests (CSRF): another local page or a local HTML file could start exports, create directories or push data into a VictoriaMetrics reachable from the browser.
+- Clients on the same machine must use `localhost`, a `*.localhost` name, an IP address or a name from `-allowed-hosts`, which blocks DNS rebinding (a page could read directory listings). It does not cover Docker port mapping or a rebinding to a LAN address of a server listening on `0.0.0.0`; the cross-origin check still applies there.
+
 ## [v1.12.0] - 2026-10-09
 
 ### Changed
@@ -168,7 +230,6 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 
 ## [v1.6.0] - 2026-01-23
 
-
 ### Added
 - Validation attempts and final endpoint details are now returned to the UI for connection checks.
 - VMSelect auto-enrichment tests in Playwright coverage for base URLs and error cases.
@@ -226,7 +287,6 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - **Docker**: Updated official images to use `linux/amd64`, `linux/arm64`, and `linux/arm` (v7) platforms.
 - **Build**: Default Go version set to `1.22` for consistency using `alpine` base images.
 
-
 ## [v1.4.0] - 2025-12-03
 
 ### Added
@@ -255,7 +315,6 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - `./local-test-env/testconfig healthcheck` validates `vm_app_version` availability on single and cluster endpoints.
 - `INTEGRATION_TEST=1 go test -tags "integration realdiscovery" ./tests/integration/...` (uses LIVE_VM_URL=http://localhost:18428).
 - `npm test` Playwright suite (92 specs; live discovery executed when `LIVE_VM_URL` is set).
-
 
 ## [v1.2.0] - 2025-11-27
 

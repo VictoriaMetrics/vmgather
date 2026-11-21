@@ -215,8 +215,6 @@ func TestWriter_CreateArchive_MetadataContent(t *testing.T) {
 		Jobs:            []string{"vmstorage-prod", "vmselect-prod"},
 		MetricsCount:    100,
 		Obfuscated:      true,
-		InstanceMap:     map[string]string{"10.0.1.5:8482": "192.0.2.1:8482"},
-		JobMap:          map[string]string{"vmstorage-prod": "vm_component_vmstorage_1"},
 		VMGatherVersion: "1.0.0",
 	}
 
@@ -269,16 +267,6 @@ func TestWriter_CreateArchive_MetadataContent(t *testing.T) {
 	if !parsedMetadata.Obfuscated {
 		t.Error("Obfuscated flag not set")
 	}
-
-	// Per issue #10: mapping should not be included in archive
-	// Verify that InstanceMap and JobMap are NOT in the archive metadata
-	if len(parsedMetadata.InstanceMap) != 0 {
-		t.Errorf("InstanceMap should not be in archive, but found %d entries", len(parsedMetadata.InstanceMap))
-	}
-
-	if len(parsedMetadata.JobMap) != 0 {
-		t.Errorf("JobMap should not be in archive, but found %d entries", len(parsedMetadata.JobMap))
-	}
 }
 
 // TestWriter_CreateArchive_MappingExcluded tests that obfuscation maps are excluded from archive
@@ -301,8 +289,6 @@ func TestWriter_CreateArchive_MappingExcluded(t *testing.T) {
 		Jobs:            []string{"vmstorage-prod"},
 		MetricsCount:    1,
 		Obfuscated:      true,
-		InstanceMap:     map[string]string{"10.0.1.5:8482": "777.777.1.1:8482", "10.0.1.6:8482": "777.777.1.2:8482"},
-		JobMap:          map[string]string{"vmstorage-prod": "vm_component_vmstorage_1", "vmselect-prod": "vm_component_vmselect_1"},
 		VMGatherVersion: "1.0.0",
 	}
 

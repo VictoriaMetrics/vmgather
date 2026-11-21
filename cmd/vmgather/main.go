@@ -17,11 +17,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/flagutil"
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/logger"
 	"go.uber.org/automaxprocs/maxprocs"
 
 	"github.com/VictoriaMetrics/vmgather/internal/application/services"
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
+	"github.com/VictoriaMetrics/vmgather/internal/httpguard"
 	"github.com/VictoriaMetrics/vmgather/internal/server"
+	"github.com/VictoriaMetrics/vmgather/internal/snapshot"
 )
 
 // Overridable at build time via: -ldflags "-X main.version=<value>"
@@ -40,7 +44,15 @@ func main() {
 	oneshot := flag.Bool("oneshot", false, "Run a single export and exit (experimental)")
 	oneshotConfig := flag.String("oneshot-config", "", "Path to export config JSON for oneshot (use '-' for stdin)")
 	exportStdout := flag.Bool("export-stdout", false, "Stream exported metrics to stdout (oneshot only)")
+	allowedHosts := flag.String("allowed-hosts", "", "Comma-separated extra Host names accepted from local clients, for a reverse proxy on the same machine (localhost and IP addresses are always accepted)")
+	snapshotFlags := registerSnapshotFlags()
 	flag.Parse()
+
+	// lib/buildinfo from VictoriaMetrics registers -version; answer it with the vmgather version.
+	if f := flag.Lookup("version"); f != nil && f.Value.String() == "true" {
+		fmt.Println(version)
+		return
+	}
 
 	log.Printf("vmgather v%s starting...", version)
 
@@ -53,6 +65,13 @@ func main() {
 		log.Fatal("export-stdout is only supported with -oneshot")
 	}
 
+	if *snapshotFlags.dst != "" {
+		if *oneshot {
+			log.Fatal("-snapshot.dst and -oneshot cannot be used together")
+		}
+		os.Exit(runSnapshot(snapshotFlags, outputDir))
+	}
+
 	if *oneshot {
 		if *oneshotConfig == "" {
 			log.Fatal("oneshot requires -oneshot-config")
@@ -61,6 +80,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("failed to load export config: %v", err)
 		}
+		applySecretEnv(&cfg)
 		services.ApplyExportDefaults(&cfg)
 
 		ctx := context.Background()
@@ -93,6 +113,7 @@ func main() {
 
 	// Create HTTP server
 	srv := server.NewServer(outputDir, version, *debug)
+	srv.SetAllowedHosts(httpguard.ParseHostList(*allowedHosts))
 	httpServer := &http.Server{
 		Addr:              finalAddr,
 		Handler:           srv.Router(),
@@ -132,6 +153,104 @@ func main() {
 	}
 
 	log.Println("Server stopped")
+}
+
+type snapshotFlagSet struct {
+	dst, config, start, end *string
+	period, lag, interval   *time.Duration
+	maxCatchUp              *int
+	retention               *flagutil.RetentionDuration
+}
+
+func registerSnapshotFlags() snapshotFlagSet {
+	return snapshotFlagSet{
+		dst: flag.String("snapshot.dst", "", "Run in snapshot mode (experimental): export MDX metrics of VictoriaMetrics components in fixed windows and upload them here. "+
+			"Example: s3://bucket/prefix, gs://bucket/prefix, azblob://container/prefix, fs:///abs/path. Uses the vmbackup storage flags such as -customS3Endpoint and -credsFilePath"),
+		config: flag.String("snapshot.config", "", "Path to the export config JSON for snapshot mode, the same format as -oneshot-config. "+
+			"Empty jobs means discover VictoriaMetrics components on every run. Secrets can come from VMGATHER_VM_PASSWORD, VMGATHER_VM_BEARER_TOKEN and VMGATHER_VM_HEADER_VALUE"),
+		period:     flag.Duration("snapshot.period", time.Hour, "Length of one snapshot window. Windows are aligned to it"),
+		lag:        flag.Duration("snapshot.lag", 5*time.Minute, "How far behind now a window must end, so late samples are included"),
+		maxCatchUp: flag.Int("snapshot.maxCatchUp", 24, "Maximum number of windows one scheduled run uploads after downtime; the next run continues"),
+		start:      flag.String("snapshot.start", "", "RFC3339 start of the first window when the destination has no state yet. Required with -snapshot.end"),
+		end:        flag.String("snapshot.end", "", "RFC3339 end for a one-time backfill of [-snapshot.start, -snapshot.end). A backfill does not read or write the state of scheduled runs"),
+		interval:   flag.Duration("snapshot.interval", 0, "Run snapshots every interval in one long-running process. 0 runs once and exits, for a Kubernetes CronJob"),
+		retention:  flagutil.NewRetentionDuration("snapshot.retention", "30d", "Scheduled runs delete snapshots whose window ended longer ago than this, including incomplete ones; 0 keeps them forever"),
+	}
+}
+
+// runSnapshot runs snapshot mode and returns the process exit code.
+func runSnapshot(f snapshotFlagSet, outputDir string) int {
+	logger.InitNoLogFlags() // lib/backup logs through the VictoriaMetrics logger
+	if *f.config == "" {
+		log.Printf("[ERROR] snapshot mode requires -snapshot.config")
+		return 2
+	}
+	exportCfg, err := loadExportConfig(*f.config)
+	if err != nil {
+		log.Printf("[ERROR] failed to load export config: %v", err)
+		return 2
+	}
+	applySecretEnv(&exportCfg)
+	start, err := parseOptionalTime(*f.start)
+	if err != nil {
+		log.Printf("[ERROR] invalid -snapshot.start: %v", err)
+		return 2
+	}
+	end, err := parseOptionalTime(*f.end)
+	if err != nil {
+		log.Printf("[ERROR] invalid -snapshot.end: %v", err)
+		return 2
+	}
+	runner, err := snapshot.NewRunner(snapshot.Config{
+		Export:     exportCfg,
+		Dst:        *f.dst,
+		Period:     *f.period,
+		Lag:        *f.lag,
+		MaxCatchUp: *f.maxCatchUp,
+		Retention:  f.retention.Duration(),
+		Start:      start,
+		End:        end,
+		WorkDir:    filepath.Join(outputDir, "snapshots"),
+		Version:    version,
+	})
+	if err != nil {
+		log.Printf("[ERROR] %v", err)
+		return 2
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if *f.interval > 0 {
+		log.Printf("[SNAPSHOT] running every %s, destination %s", *f.interval, *f.dst)
+		runner.Loop(ctx, *f.interval)
+		return 0
+	}
+	if err := runner.RunOnce(ctx); err != nil {
+		log.Printf("[ERROR] snapshot failed: %v", err)
+		return 1
+	}
+	return 0
+}
+
+func parseOptionalTime(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.RFC3339, s)
+}
+
+// applySecretEnv fills credentials from the environment, so a Kubernetes Secret does not have to be part
+// of the config file.
+func applySecretEnv(cfg *domain.ExportConfig) {
+	if v := os.Getenv("VMGATHER_VM_PASSWORD"); v != "" {
+		cfg.Connection.Auth.Password = v
+	}
+	if v := os.Getenv("VMGATHER_VM_BEARER_TOKEN"); v != "" {
+		cfg.Connection.Auth.Token = v
+	}
+	if v := os.Getenv("VMGATHER_VM_HEADER_VALUE"); v != "" {
+		cfg.Connection.Auth.HeaderValue = v
+	}
 }
 
 func defaultOutputDir() string {

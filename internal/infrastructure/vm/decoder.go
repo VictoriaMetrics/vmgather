@@ -12,10 +12,16 @@ type ExportDecoder struct {
 	scanner *bufio.Scanner
 }
 
+// MaxLineBytes is the longest JSONL line accepted. /api/v1/export writes up to 8192 rows per line with
+// reduce_mem_usage=1 and prints floats in full, so a series with very large values gives lines of several MB
+// (2.6 MB measured on VictoriaMetrics v1.155.0). vmimporter accepts the same 16 MB.
+const MaxLineBytes = 16 * 1024 * 1024
+
 // NewLineScanner builds a bufio.Scanner sized for JSONL metric lines with many labels.
+// The buffer starts at 64KB and grows only for long lines.
 func NewLineScanner(r io.Reader) *bufio.Scanner {
 	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 64KB initial, 1MB max
+	scanner.Buffer(make([]byte, 64*1024), MaxLineBytes)
 	return scanner
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -63,40 +64,19 @@ func TestObfuscation_RealExport(t *testing.T) {
 		metrics := extractMetricsFromArchive(t, result.ArchivePath)
 		require.NotEmpty(t, metrics, "Should have metrics in archive")
 
-		// Check that instance values are obfuscated (should be 777.777.777.777:port)
-		foundObfuscatedInstance := false
-		foundRealIP := false
-
+		// Obfuscated values are hex SHA-256 digests, the same as vmagent -remoteWrite.obfuscateLabels.
+		isDigest := regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString
+		foundInstance := false
 		for _, metric := range metrics {
 			if instance, ok := metric.Metric["instance"]; ok {
-				t.Logf("Instance value: %s", instance)
-
-				// Check if obfuscated (777.777.X.X:port format)
-				if strings.HasPrefix(instance, "777.777.") {
-					foundObfuscatedInstance = true
-				}
-
-				// Check for real IP patterns (should NOT exist)
-				if strings.Contains(instance, "10.") ||
-					strings.Contains(instance, "192.168.") ||
-					strings.Contains(instance, "172.") {
-					foundRealIP = true
-					t.Errorf("Found real IP in obfuscated data: %s", instance)
-				}
+				foundInstance = true
+				assert.True(t, isDigest(instance), "instance is not a SHA-256 digest: %s", instance)
 			}
-
 			if job, ok := metric.Metric["job"]; ok {
-				t.Logf("Job value: %s", job)
-
-				// Job should be obfuscated (e.g., "vm_component_vmagent_1", "vm_component_vmauth_1")
-				if !strings.HasPrefix(job, "vm_component_") {
-					t.Errorf("Job not properly obfuscated: %s (expected vm_component_* format)", job)
-				}
+				assert.True(t, isDigest(job), "job is not a SHA-256 digest: %s", job)
 			}
 		}
-
-		assert.True(t, foundObfuscatedInstance, "Should find obfuscated instance (777.777.X.X)")
-		assert.False(t, foundRealIP, "Should NOT find real IP addresses")
+		assert.True(t, foundInstance, "Should find obfuscated instance labels")
 
 		// Clean up
 		os.Remove(result.ArchivePath)
@@ -143,8 +123,8 @@ func TestObfuscation_NoObfuscation(t *testing.T) {
 
 	for _, metric := range metrics {
 		if instance, ok := metric.Metric["instance"]; ok {
-			// Should NOT have 777.777.777.X pattern
-			if strings.HasPrefix(instance, "777.777.777.") {
+			// Must not be a SHA-256 digest
+			if regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(instance) {
 				foundObfuscatedInstance = true
 				t.Errorf("Found obfuscated instance when obfuscation disabled: %s", instance)
 			}
@@ -201,20 +181,20 @@ func TestObfuscation_OnlyInstance(t *testing.T) {
 
 	for _, metric := range metrics {
 		if instance, ok := metric.Metric["instance"]; ok {
-			if strings.HasPrefix(instance, "777.777.") {
+			if regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(instance) {
 				foundObfuscatedInstance = true
 			}
 		}
 
 		if job, ok := metric.Metric["job"]; ok {
-			// Job should be original (not obfuscated with vm_component_ prefix)
-			if !strings.HasPrefix(job, "vm_component_") {
+			// Job should be original (not a SHA-256 digest)
+			if job == "vmagent" {
 				foundOriginalJob = true
 			}
 		}
 	}
 
-	assert.True(t, foundObfuscatedInstance, "Instance should be obfuscated (777.777.X.X)")
+	assert.True(t, foundObfuscatedInstance, "Instance should be obfuscated (SHA-256 digest)")
 	assert.True(t, foundOriginalJob, "Job should NOT be obfuscated")
 
 	// Clean up

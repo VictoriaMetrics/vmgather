@@ -103,22 +103,18 @@ func TestRecentProfilesRoundTripAndSecretStripping(t *testing.T) {
 		CustomHeaderName:  "X-API-Key",
 		CustomHeaderValue: "must-not-be-stored",
 		SkipTLSVerify:     true,
-		MetricStepSeconds: 300,
-		BatchWindowSecs:   300,
 		DropOld:           true,
 		TimeShiftMs:       120000,
 		MaxLabelsOverride: 45,
 		DropLabels:        []string{"cluster", "job", "cluster"},
 	})
 	srv.saveRecentProfile(uploadConfig{
-		Endpoint:          "https://vm.example.com/metrics/insert/prometheus",
-		TenantID:          "1042",
-		AuthType:          "bearer",
-		Password:          "bearer-secret",
-		SkipTLSVerify:     false,
-		MetricStepSeconds: 60,
-		BatchWindowSecs:   60,
-		DropOld:           true,
+		Endpoint:      "https://vm.example.com/metrics/insert/prometheus",
+		TenantID:      "1042",
+		AuthType:      "bearer",
+		Password:      "bearer-secret",
+		SkipTLSVerify: false,
+		DropOld:       true,
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/profiles/recent", nil)
@@ -184,21 +180,17 @@ func TestRecentProfilesDeduplicateAndMoveToTop(t *testing.T) {
 
 	srv := newServer("test", filepath.Join(t.TempDir(), "profiles.json"))
 	first := uploadConfig{
-		Endpoint:          "https://vm-a.example.com/metrics/insert/prometheus",
-		TenantID:          "100",
-		AuthType:          "basic",
-		Username:          "first",
-		MetricStepSeconds: 60,
-		BatchWindowSecs:   60,
-		DropOld:           true,
+		Endpoint: "https://vm-a.example.com/metrics/insert/prometheus",
+		TenantID: "100",
+		AuthType: "basic",
+		Username: "first",
+		DropOld:  true,
 	}
 	second := uploadConfig{
-		Endpoint:          "https://vm-b.example.com/metrics/insert/prometheus",
-		TenantID:          "200",
-		AuthType:          "none",
-		MetricStepSeconds: 300,
-		BatchWindowSecs:   300,
-		DropOld:           true,
+		Endpoint: "https://vm-b.example.com/metrics/insert/prometheus",
+		TenantID: "200",
+		AuthType: "none",
+		DropOld:  true,
 	}
 
 	srv.saveRecentProfile(first)
@@ -232,14 +224,14 @@ func TestHandleUploadSuccess(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"test_metric"}]}`))
-			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"1y"}}`))
-			case strings.HasSuffix(r.URL.Path, "/metrics"):
-				w.WriteHeader(http.StatusNotFound)
-			default:
-				t.Fatalf("unexpected path %s", r.URL.Path)
-			}
+		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"1y"}}`))
+		case strings.HasSuffix(r.URL.Path, "/metrics"):
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
 	}))
 	defer downstream.Close()
 
@@ -315,6 +307,7 @@ func TestHandleUploadFailedImportStillSavesRecentProfile(t *testing.T) {
 	defer downstream.Close()
 
 	srv := newServer("test", filepath.Join(t.TempDir(), "profiles.json"))
+	t.Cleanup(srv.Close) // the failed job keeps its upload for resume
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
@@ -375,14 +368,14 @@ func TestHandleUploadZipChunking(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"demo"}]}`))
-			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"30d"}}`))
-			case strings.HasSuffix(r.URL.Path, "/metrics"):
-				w.WriteHeader(http.StatusNotFound)
-			default:
-				t.Fatalf("unexpected path %s", r.URL.Path)
-			}
+		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"30d"}}`))
+		case strings.HasSuffix(r.URL.Path, "/metrics"):
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
 	}))
 	defer downstream.Close()
 
@@ -518,18 +511,20 @@ func TestPrepareZipBundleAllowsCustomJsonl(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected bundle, got error: %v", err)
 	}
-	if bundle.MetricsPath == "" {
-		t.Fatalf("expected metrics path to be set")
+	if bundle.ZipEntry == "" {
+		t.Fatalf("expected the metrics entry inside the zip to be set")
 	}
-	data, err := os.ReadFile(bundle.MetricsPath)
+	rc, err := bundle.open(0) // read in place, nothing is extracted to disk
 	if err != nil {
-		t.Fatalf("read extracted metrics failed: %v", err)
+		t.Fatalf("open metrics stream failed: %v", err)
+	}
+	data, err := io.ReadAll(rc)
+	_ = rc.Close()
+	if err != nil {
+		t.Fatalf("read metrics failed: %v", err)
 	}
 	if !bytes.Contains(data, []byte(`"demo"`)) {
 		t.Fatalf("unexpected metrics content: %s", data)
-	}
-	if bundle.Cleanup != nil {
-		bundle.Cleanup()
 	}
 }
 
@@ -659,14 +654,14 @@ func TestNormalizeStringValuesDuringImport(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"flag"}]}`))
-			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"90d"}}`))
-			case strings.HasSuffix(r.URL.Path, "/metrics"):
-				w.WriteHeader(http.StatusNotFound)
-			default:
-				t.Fatalf("unexpected path %s", r.URL.Path)
-			}
+		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"90d"}}`))
+		case strings.HasSuffix(r.URL.Path, "/metrics"):
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
 	}))
 	defer downstream.Close()
 
@@ -734,14 +729,14 @@ func TestResumeImportAfterFailure(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"demo"}]}`))
-			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"30d"}}`))
-			case strings.HasSuffix(r.URL.Path, "/metrics"):
-				w.WriteHeader(http.StatusNotFound)
-			default:
-				t.Fatalf("unexpected path %s", r.URL.Path)
-			}
+		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"30d"}}`))
+		case strings.HasSuffix(r.URL.Path, "/metrics"):
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
 	}))
 	defer downstream.Close()
 
@@ -811,14 +806,14 @@ func TestTenantIsolationHeaders(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"demo"}]}`))
-			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"400d"}}`))
-			case strings.HasSuffix(r.URL.Path, "/metrics"):
-				w.WriteHeader(http.StatusNotFound)
-			default:
-				t.Fatalf("unexpected path %s", r.URL.Path)
-			}
+		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"400d"}}`))
+		case strings.HasSuffix(r.URL.Path, "/metrics"):
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
 	}))
 	defer downstream.Close()
 
@@ -873,15 +868,15 @@ func TestRetentionDropsOldPoints(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"demo"}]}`))
-			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-				w.Header().Set("Content-Type", "application/json")
-				// 1 hour retention ensures oldTs is dropped, newTs kept
-				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"1h"}}`))
-			case strings.HasSuffix(r.URL.Path, "/metrics"):
-				w.WriteHeader(http.StatusNotFound)
-			default:
-				t.Fatalf("unexpected path %s", r.URL.Path)
-			}
+		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+			w.Header().Set("Content-Type", "application/json")
+			// 1 hour retention ensures oldTs is dropped, newTs kept
+			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"1h"}}`))
+		case strings.HasSuffix(r.URL.Path, "/metrics"):
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
 	}))
 	defer downstream.Close()
 
@@ -891,7 +886,7 @@ func TestRetentionDropsOldPoints(t *testing.T) {
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	cfg := uploadConfig{Endpoint: downstream.URL}
+	cfg := uploadConfig{Endpoint: downstream.URL, DropOld: true} // the UI always sends drop_old=true
 	cfgBytes, _ := json.Marshal(cfg)
 	writer.WriteField("config", string(cfgBytes))
 	fw, _ := writer.CreateFormFile("bundle", "retention.jsonl")
@@ -936,14 +931,14 @@ func TestSkipsNonNumericValues(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/api/v1/series"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"success","data":[{"__name__":"demo"}]}`))
-			case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"365d"}}`))
-			case strings.HasSuffix(r.URL.Path, "/metrics"):
-				w.WriteHeader(http.StatusNotFound)
-			default:
-				t.Fatalf("unexpected path %s", r.URL.Path)
-			}
+		case strings.HasSuffix(r.URL.Path, "/api/v1/status/tsdb"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"success","data":{"retentionTime":"365d"}}`))
+		case strings.HasSuffix(r.URL.Path, "/metrics"):
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
 	}))
 	defer downstream.Close()
 
@@ -1031,7 +1026,7 @@ func TestAnalyzeBundleWarnsOnTargetLabelLimit(t *testing.T) {
 	warnings := buildAnalysisWarnings(summary, 0, 2)
 	found := false
 	for _, w := range warnings {
-		if strings.Contains(w, "maxLabelsPerTimeseries=2") {
+		if strings.Contains(w, "than the target allows (2)") {
 			found = true
 			break
 		}
@@ -1368,7 +1363,7 @@ func TestHandleAnalyzeIncludesLabelLimitWarning(t *testing.T) {
 	}
 	found := false
 	for _, w := range resp.Warnings {
-		if strings.Contains(w, "maxLabelsPerTimeseries=2") {
+		if strings.Contains(w, "than the target allows (2)") {
 			found = true
 			break
 		}
@@ -1440,7 +1435,7 @@ func TestHandleAnalyzeWarnsWhenMaxLabelsUnknownAndHighSeen(t *testing.T) {
 	}
 	found := false
 	for _, warning := range resp.Warnings {
-		if strings.Contains(warning, "could not be read") {
+		if strings.Contains(warning, "target label limit is unknown") {
 			found = true
 			break
 		}
@@ -1507,15 +1502,10 @@ func TestHandleAnalyzeDefaultsToSampleModeWith2000Lines(t *testing.T) {
 	if resp.Summary.SampleLimit != defaultAnalyzeSampleLines {
 		t.Fatalf("expected sample_limit=%d, got %d", defaultAnalyzeSampleLines, resp.Summary.SampleLimit)
 	}
-	found := false
-	for _, warning := range resp.Warnings {
-		if strings.Contains(warning, "Use Full collection") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected sampling warning in %v", resp.Warnings)
+	// Sampling is the default mode and is reported through sample_cut/sample_limit; as a warning it made
+	// the UI say "Preflight: issues detected" for every clean bundle.
+	if len(resp.Warnings) != 0 {
+		t.Fatalf("a clean sampled bundle must not produce warnings, got %v", resp.Warnings)
 	}
 }
 
@@ -1648,7 +1638,7 @@ func TestHandleAnalyzeUsesManualMaxLabelsOverride(t *testing.T) {
 	}
 	found := false
 	for _, warning := range resp.Warnings {
-		if strings.Contains(warning, "maxLabelsPerTimeseries=20") {
+		if strings.Contains(warning, "than the target allows (20)") {
 			found = true
 			break
 		}
@@ -1886,7 +1876,7 @@ func TestBuildAnalysisWarningsSpanExceedsWindow(t *testing.T) {
 	}
 	foundSpan := false
 	for _, msg := range w {
-		if strings.Contains(msg, "exceeds current retention window") {
+		if strings.Contains(msg, "more than the target retention") {
 			foundSpan = true
 		}
 	}

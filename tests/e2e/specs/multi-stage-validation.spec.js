@@ -219,8 +219,8 @@ test.describe('Multi-Stage Connection Validation - Real Environment', () => {
     const stepsContainer = page.locator('#validationSteps');
     await expect(stepsContainer).toBeVisible();
 
-    // Should show VictoriaMetrics detected
-    const vmDetected = stepsContainer.locator('text=/VictoriaMetrics detected/');
+    // Should show that VictoriaMetrics was found
+    const vmDetected = stepsContainer.locator('text=/VictoriaMetrics found/');
     await expect(vmDetected).toBeVisible({ timeout: 10000 });
 
     // Should show success

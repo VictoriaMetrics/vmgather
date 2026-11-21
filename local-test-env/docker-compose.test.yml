@@ -34,7 +34,7 @@ services:
       - vmtest
 
   vmauth-single:
-    image: victoriametrics/vmauth:latest
+    image: victoriametrics/vmauth:v1.156.0
     ports:
       - "${VM_AUTH_SINGLE_PORT:-8427}:8427"
     volumes:
@@ -51,7 +51,7 @@ services:
   # Scenario 3: VM Cluster without auth (multitenant capable)
   # ============================================================================
   vmstorage-1:
-    image: victoriametrics/vmstorage:latest
+    image: victoriametrics/vmstorage:v1.156.0-cluster
     ports:
       - "${VM_STORAGE1_HTTP_PORT:-8482}:8482"
       - "${VM_STORAGE1_INSERT_PORT:-8400}:8400"
@@ -67,7 +67,7 @@ services:
       - vmtest
 
   vmstorage-2:
-    image: victoriametrics/vmstorage:latest
+    image: victoriametrics/vmstorage:v1.156.0-cluster
     ports:
       - "${VM_STORAGE2_HTTP_PORT:-8483}:8482"
       - "${VM_STORAGE2_INSERT_PORT:-8402}:8400"
@@ -83,7 +83,7 @@ services:
       - vmtest
 
   vminsert:
-    image: victoriametrics/vminsert:latest
+    image: victoriametrics/vminsert:v1.156.0-cluster
     ports:
       - "${VM_INSERT_PORT:-8480}:8480"
     command:
@@ -96,7 +96,7 @@ services:
       - vmtest
 
   vmselect:
-    image: victoriametrics/vmselect:latest
+    image: victoriametrics/vmselect:v1.156.0-cluster
     ports:
       - "${VM_SELECT_PORT:-8481}:8481"
     command:
@@ -112,7 +112,7 @@ services:
   # Scenario 3b: Standalone vmselect (single storage node)
   # ============================================================================
   vmselect-standalone:
-    image: victoriametrics/vmselect:latest
+    image: victoriametrics/vmselect:v1.156.0-cluster
     ports:
       - "${VMSELECT_STANDALONE_PORT:-8491}:8481"
     command:
@@ -127,7 +127,7 @@ services:
   # Scenario 4: VM Cluster with auth via vmauth (multitenant)
   # ============================================================================
   vmauth-cluster:
-    image: victoriametrics/vmauth:latest
+    image: victoriametrics/vmauth:v1.156.0
     ports:
       - "${VM_AUTH_CLUSTER_PORT:-8426}:8426"
     volumes:
@@ -148,7 +148,7 @@ services:
   # - Tenant 1011: NO export API (legacy paths) → forces fallback to query_range
   # - Tenant 2022: WITH export API (modern paths) → uses direct export
   vmauth-export-test:
-    image: victoriametrics/vmauth:latest
+    image: victoriametrics/vmauth:v1.156.0
     ports:
       - "${VM_AUTH_EXPORT_PORT:-8425}:8425"
     volumes:
@@ -166,7 +166,7 @@ services:
   # Scenario 6: vmagent for generating test metrics
   # ============================================================================
   vmagent:
-    image: victoriametrics/vmagent:latest
+    image: victoriametrics/vmagent:v1.156.0
     ports:
       - "${VM_AGENT_PORT:-8430}:8430"
     command:
@@ -189,7 +189,7 @@ services:
   # Test data generator - pushes metrics to all instances
   # ============================================================================
   test-data-generator:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.16.0
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"
     command:
@@ -200,7 +200,8 @@ services:
     volumes:
       - ./test-configs/prometheus.yml:/etc/prometheus/prometheus.yml
     tmpfs:
-      - /prometheus
+      # Prometheus runs as nobody; a default tmpfs is owned by root and it fails to start.
+      - /prometheus:mode=1777
     networks:
       - vmtest
 
@@ -208,7 +209,7 @@ services:
   # Nginx reverse proxy (for testing with domain names, not localhost)
   # ============================================================================
   nginx-proxy:
-    image: nginx:alpine
+    image: nginx:1.31.9-alpine
     ports:
       - "${NGINX_PORT:-8888}:80"
     volumes:

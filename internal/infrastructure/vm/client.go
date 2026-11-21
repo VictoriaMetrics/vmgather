@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -132,6 +133,9 @@ func (c *Client) Query(ctx context.Context, query string, ts time.Time) (*QueryR
 	params := url.Values{}
 	params.Set("query", query)
 	params.Set("time", fmt.Sprintf("%d", ts.Unix()))
+	// A cluster with an unavailable vmstorage must fail the query instead of answering with part of the
+	// data, so discovery never drops jobs silently. Single-node VictoriaMetrics ignores the parameter.
+	params.Set("deny_partial_response", "1")
 
 	// Build request
 	req, err := c.buildRequest(ctx, http.MethodGet, "/api/v1/query", params)
@@ -209,13 +213,32 @@ func (c *Client) QueryRange(ctx context.Context, query string, start, end time.T
 }
 
 // Export executes metrics export via /api/v1/export endpoint
-// Returns a reader for streaming JSONL data
+// Returns a reader for streaming JSONL data.
+//
+// The request has no total deadline: a big but healthy stream may take long. Instead it is
+// canceled when no bytes arrive for ExportIdleTimeout (see idleWatchdog).
 func (c *Client) Export(ctx context.Context, selector string, start, end time.Time) (io.ReadCloser, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	watchdog := newIdleWatchdog(ExportIdleTimeout, cancel)
+	body, err := c.startExport(ctx, selector, start, end)
+	if err != nil {
+		watchdog.stop()
+		cancel()
+		if watchdog.fired.Load() {
+			return nil, watchdog.err()
+		}
+		return nil, err
+	}
+	return &watchedBody{body: body, watchdog: watchdog, cancel: cancel}, nil
+}
+
+func (c *Client) startExport(ctx context.Context, selector string, start, end time.Time) (io.ReadCloser, error) {
 	// Build query parameters
 	params := url.Values{}
 	params.Set("match[]", selector)
-	params.Set("start", start.Format(time.RFC3339))
-	params.Set("end", end.Format(time.RFC3339))
+	// Millisecond precision: windows end 1ms before the next one starts (see services.borderSafeWindow).
+	params.Set("start", formatVMTime(start))
+	params.Set("end", formatVMTime(end))
 	params.Set("reduce_mem_usage", "1")
 	params.Set("max_rows_per_line", "10000")
 
@@ -243,6 +266,12 @@ func (c *Client) Export(ctx context.Context, selector string, start, end time.Ti
 
 	// Return response body for streaming
 	return resp.Body, nil
+}
+
+// formatVMTime formats t as unix seconds with millisecond precision, for example "1794927600.000".
+// VictoriaMetrics parses it exactly; RFC3339 without fractions would drop the milliseconds.
+func formatVMTime(t time.Time) string {
+	return strconv.FormatFloat(float64(t.UnixMilli())/1000, 'f', 3, 64)
 }
 
 // buildRequest builds an HTTP request with authentication
@@ -327,11 +356,26 @@ func classifyResponseError(statusCode int, body string) error {
 			Err:        ErrMissingTenantPath,
 		}
 	}
+	kind := classifyBody(trimmed)
+	if kind == ErrorKindUnknown {
+		switch {
+		case statusCode == http.StatusGatewayTimeout:
+			// A proxy gave up waiting for vmselect on this window: a smaller window can fit, a retry cannot.
+			kind = ErrorKindQueryTimeout
+		case isTransientStatus(statusCode):
+			kind = ErrorKindTransient
+		}
+	}
 	return &APIError{
 		StatusCode: statusCode,
 		Body:       trimmed,
-		Kind:       classifyBody(trimmed),
+		Kind:       kind,
 	}
+}
+
+// isTransientStatus reports errors that a proxy or vmauth returns while vmselect restarts.
+func isTransientStatus(statusCode int) bool {
+	return statusCode == http.StatusBadGateway || statusCode == http.StatusServiceUnavailable
 }
 
 func connectionTargetForLog(conn domain.VMConnection) string {

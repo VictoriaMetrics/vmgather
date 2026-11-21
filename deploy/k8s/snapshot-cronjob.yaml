@@ -1,0 +1,117 @@
+# vmgather snapshot mode (experimental) as a Kubernetes CronJob.
+#
+# Every hour it exports the MDX metrics of the VictoriaMetrics components for the previous complete hour
+# and uploads them to <bucket>/<prefix>/<start>_<end>/. See README.md, "Snapshot mode (experimental)".
+#
+# Before applying:
+#   - set the bucket in -snapshot.dst and the VictoriaMetrics URL in the ConfigMap;
+#   - put credentials into the Secret, or remove the AWS keys and use IRSA / workload identity
+#     through the ServiceAccount annotation;
+#   - snapshot mode first ships in vmgather v1.13.0; keep the image tag pinned.
+#
+#   kubectl -n monitoring apply -f snapshot-cronjob.yaml
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vmgather-snapshot
+  # annotations:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::<account>:role/vmgather-snapshot
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vmgather-snapshot
+type: Opaque
+stringData:
+  # Credentials for VictoriaMetrics; remove the ones you do not use.
+  VMGATHER_VM_PASSWORD: ""
+  # S3 credentials; remove both when the ServiceAccount uses IRSA.
+  # The user needs s3:GetObject, s3:PutObject, s3:DeleteObject and s3:ListBucket on the prefix.
+  AWS_ACCESS_KEY_ID: ""
+  AWS_SECRET_ACCESS_KEY: ""
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vmgather-snapshot
+data:
+  # The oneshot config format. Empty "jobs" means discover VictoriaMetrics components on every run.
+  # For a cluster use the vmselect URL with the tenant, for example http://vmselect:8481/select/0/prometheus.
+  snapshot.json: |
+    {
+      "connection": {
+        "url": "http://vmsingle:8428",
+        "auth": { "type": "none" }
+      },
+      "obfuscation": { "enabled": true, "obfuscate_instance": true }
+    }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vmgather-snapshot
+spec:
+  # Minute 10: with -snapshot.lag=5m the previous hour is complete by then.
+  schedule: "10 * * * *"
+  # One writer per destination.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 1800
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3000
+      template:
+        spec:
+          serviceAccountName: vmgather-snapshot
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: vmgather
+              image: victoriametrics/vmgather:v1.13.0
+              args:
+                - -snapshot.dst=s3://my-bucket/vmgather
+                - -snapshot.config=/etc/vmgather/snapshot.json
+                - -snapshot.period=1h
+                # Delete snapshots older than 30 days (the default); 0 keeps them forever.
+                - -snapshot.retention=30d
+                - -output=/work
+                # S3-compatible storage such as MinIO:
+                # - -customS3Endpoint=http://minio.minio.svc:9000
+              envFrom:
+                - secretRef:
+                    name: vmgather-snapshot
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: config
+                  mountPath: /etc/vmgather
+                  readOnly: true
+                - name: work
+                  mountPath: /work
+          volumes:
+            - name: config
+              configMap:
+                name: vmgather-snapshot
+            # One window as raw JSONL plus its zip. Kubernetes evicts the pod when a window needs more,
+            # and every run fails on that window: raise the limit or shorten -snapshot.period.
+            - name: work
+              emptyDir:
+                sizeLimit: 2Gi

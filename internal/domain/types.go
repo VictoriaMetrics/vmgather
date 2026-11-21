@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // TimeRange represents a time interval for metrics export
 type TimeRange struct {
@@ -99,7 +102,6 @@ type ExportSafetyConfig struct {
 	Mode              ExportAdaptivityMode `json:"mode,omitempty"`
 	AutoSplit         bool                 `json:"auto_split"`
 	SplitByJob        bool                 `json:"split_by_job"`
-	SplitByMetricName bool                 `json:"split_by_metric_name,omitempty"`
 	MinWindowSeconds  int                  `json:"min_window_seconds,omitempty"`
 	MaxSplitDepth     int                  `json:"max_split_depth,omitempty"`
 	MaxStepSeconds    int                  `json:"max_step_seconds,omitempty"`
@@ -122,6 +124,28 @@ type ObfuscationConfig struct {
 	PreserveStructure bool     `json:"preserve_structure"`
 	CustomLabels      []string `json:"custom_labels,omitempty"` // Additional labels to obfuscate (pod, namespace, etc.)
 	DropLabels        []string `json:"drop_labels,omitempty"`   // Labels removed from export
+}
+
+// LabelNames returns the names of the labels whose values are obfuscated, without duplicates.
+// It returns nil when obfuscation is disabled.
+func (c ObfuscationConfig) LabelNames() []string {
+	if !c.Enabled {
+		return nil
+	}
+	var candidates []string
+	if c.ObfuscateInstance {
+		candidates = append(candidates, "instance")
+	}
+	if c.ObfuscateJob {
+		candidates = append(candidates, "job")
+	}
+	var names []string
+	for _, name := range append(candidates, c.CustomLabels...) {
+		if name != "" && !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // OutputSettings defines export output configuration
@@ -148,6 +172,8 @@ type ExportConfig struct {
 	ResumeFromBatch   int                `json:"resume_from_batch,omitempty"`
 	MetricStepSeconds int                `json:"metric_step_seconds,omitempty"`
 	OutputSettings    OutputSettings     `json:"output_settings"`
+	// MDXFilter keeps only the series that vmagent -remoteWrite.mdx.enable would send (cluster mode only).
+	MDXFilter bool `json:"mdx_filter,omitempty"`
 }
 
 // ExportResult represents the result of an export operation

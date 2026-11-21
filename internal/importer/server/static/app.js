@@ -38,7 +38,6 @@ document.addEventListener('DOMContentLoaded', () => {
     toggleAuthFields();
     toggleTenantInput();
     initializeUrlValidation();
-    initializeMetricStepSelector();
     initializeMaxLabelsOverrideInput();
     ensureDefaultMaxLabelsOverride();
     initDropZone();
@@ -69,7 +68,6 @@ function initDropZone() {
             bundleInput.files = files;
             dropZone.querySelector('strong').textContent = files[0].name;
             updateFileHint(files[0]);
-            applyRecommendedMetricStep(false);
             analyzeBundle();
         }
     });
@@ -78,7 +76,6 @@ function initDropZone() {
         const file = bundleInput.files[0];
         dropZone.querySelector('strong').textContent = file ? file.name : 'Drop file here';
         updateFileHint(file);
-        applyRecommendedMetricStep(false);
         analyzeBundle();
     });
 }
@@ -139,7 +136,6 @@ function updateMaxLabelsRisk(summary = lastAnalysisSummary, maxLabelsLimit = las
     const overLimit = impact ? impact.overSeries : fallbackOverLimit;
     const pointsAtRisk = impact ? impact.overPoints : Number(summary.over_limit_points || 0);
     const maxAfterDrop = impact ? impact.maxAfterDrop : maxSeen;
-    const simulationInfo = impact ? ` (sample series analyzed: ${impact.seriesCount}${impact.capped ? ', capped' : ''})` : '';
     if (maxSeen <= 0) {
         clearMaxLabelsRisk();
         return;
@@ -147,23 +143,23 @@ function updateMaxLabelsRisk(summary = lastAnalysisSummary, maxLabelsLimit = las
     if (source === 'unknown') {
         risk.className = 'status error';
         risk.style.display = 'block';
-        risk.textContent = `Target maxLabelsPerTimeseries is unknown. Preflight observed up to ${maxSeen} labels per series (projected max after current drop selection: ${maxAfterDrop}). Set optional override and rerun preflight (or Full collection) for precise drop diagnostics before import.${simulationInfo}`;
+        risk.textContent = `The target label limit is unknown. Series here have up to ${maxAfterDrop} labels. Enter the limit above to check them.`;
         return;
     }
     if (maxLabelsLimit > 0 && overLimit > 0) {
         const extra = impact ? impact.minAdditionalDrops : 0;
         const suggestion = impact && impact.candidateLabels.length
-            ? ` Candidate labels to drop first: ${impact.candidateLabels.join(', ')}.`
+            ? ` Good candidates: ${impact.candidateLabels.join(', ')}.`
             : '';
         risk.className = 'status error';
         risk.style.display = 'block';
-        risk.textContent = `Potential drops detected: projected max labels ${maxAfterDrop} exceeds limit ${maxLabelsLimit}. Over-limit series in sample: ${overLimit}; estimated sampled points at risk: ${pointsAtRisk}.${extra > 0 ? ` Need at least ${extra} more label drop(s) on worst affected series.` : ''}${suggestion}${simulationInfo}`;
+        risk.textContent = `${overLimit} series have more labels than the target allows (${maxAfterDrop} of ${maxLabelsLimit}), about ${formatCount(pointsAtRisk)} samples would be lost.${extra > 0 ? ` Drop ${extra} more label(s) below.` : ''}${suggestion}`;
         return;
     }
     if (maxLabelsLimit > 0) {
         risk.className = 'status success';
         risk.style.display = 'block';
-        risk.textContent = `Current drop-label selection keeps sampled series within maxLabelsPerTimeseries=${maxLabelsLimit}. Projected max labels after drop: ${maxAfterDrop}.${simulationInfo}`;
+        risk.textContent = `All series fit the target label limit (${maxAfterDrop} of ${maxLabelsLimit} labels).`;
         return;
     }
     clearMaxLabelsRisk();
@@ -382,19 +378,13 @@ function renderLabelManager(labelStats = [], totalLabels = 0) {
     if (!normalizedStats.length) {
         details.open = false;
         summary.textContent = selectedCount > 0
-            ? `Label management (drop selected: ${selectedCount}${detectedLabels > 0 ? `; total labels: ${detectedLabels}` : ''})`
-            : 'Label management (optional)';
+            ? `Drop labels (${selectedCount} selected)`
+            : 'Drop labels (optional)';
         const selectedLabelsEscaped = selectedLabels.map(label => `<code>${escapeHtml(label)}</code>`).join(', ');
         rows.innerHTML = selectedCount > 0
-            ? `<div class="input-hint">Selected drop labels: ${selectedLabelsEscaped}.</div><div class="input-hint">Run preflight to preview all detected labels and tune selection.</div>`
-            : '<div class="input-hint">Run preflight to see all detected labels and choose what to drop before import.</div>';
-        let hintText = protectedDropLabels.length
-            ? `Protected labels (always kept): ${protectedDropLabels.join(', ')}.`
-            : 'Protected labels are always kept.';
-        if (detectedLabels > 0) {
-            hintText += ` Detected labels in sample: ${detectedLabels}.`;
-        }
-        hint.textContent = hintText;
+            ? `<div class="input-hint">Selected: ${selectedLabelsEscaped}.</div>`
+            : '<div class="input-hint">Select a bundle to see its labels.</div>';
+        hint.textContent = `${protectedDropLabels.join(', ') || 'Required labels'} are always kept.`;
         return;
     }
 
@@ -404,8 +394,8 @@ function renderLabelManager(labelStats = [], totalLabels = 0) {
     const visibleSelected = normalizedStats.filter(item => selectedDropLabels.has(String(item.name || '').trim())).length;
     const hiddenSelected = Math.max(0, selectedNowCount - visibleSelected);
     summary.textContent = selectedNowCount > 0
-        ? `Label management (drop selected: ${selectedNowCount}; total labels: ${detectedLabels})`
-        : `Label management (total labels: ${detectedLabels})`;
+        ? `Drop labels (${detectedLabels} found, ${selectedNowCount} selected)`
+        : `Drop labels (${detectedLabels} found)`;
 
     rows.innerHTML = normalizedStats.map(item => {
         const label = String(item.name || '');
@@ -417,7 +407,7 @@ function renderLabelManager(labelStats = [], totalLabels = 0) {
             <label style="display:flex; align-items:center; gap:8px; margin-bottom:6px; opacity:${isProtected ? 0.7 : 1};">
                 <input type="checkbox" data-drop-label="${safeLabel}" ${checked ? 'checked' : ''} ${isProtected ? 'disabled' : ''} style="width:auto;">
                 <code>${safeLabel}</code>
-                <span class="input-hint">seen in ${count} sample series${isProtected ? ' · protected' : ''}</span>
+                <span class="input-hint">in ${count} series${isProtected ? ', always kept' : ''}</span>
             </label>
         `;
     }).join('');
@@ -436,14 +426,10 @@ function renderLabelManager(labelStats = [], totalLabels = 0) {
         });
     });
 
-    const protectedHint = protectedDropLabels.length
-        ? `Protected labels (always kept): ${protectedDropLabels.join(', ')}.`
-        : 'Protected labels are always kept.';
-    const totalHint = detectedLabels > shownLabels
-        ? ` Showing ${shownLabels} labels out of ${detectedLabels} detected labels in sample.`
-        : ` Showing all ${shownLabels} detected labels in sample.`;
+    const protectedHint = `${protectedDropLabels.join(', ') || 'Required labels'} are always kept.`;
+    const totalHint = detectedLabels > shownLabels ? ` Showing ${shownLabels} of ${detectedLabels} labels.` : '';
     hint.textContent = hiddenSelected > 0
-        ? `${protectedHint} ${hiddenSelected} selected label(s) are not in the current preflight list but will still be dropped.${totalHint}`
+        ? `${protectedHint} ${hiddenSelected} selected label(s) are not in this list but will still be dropped.${totalHint}`
         : `${protectedHint}${totalHint}`;
 }
 
@@ -544,11 +530,11 @@ function initializeUrlValidation() {
     const applyState = () => {
         const assessment = analyzeVmUrl(input.value);
         if (assessment.valid) {
-            hint.textContent = `[OK] ${assessment.message || 'URL looks good'}`;
+            hint.textContent = assessment.message || 'URL looks good';
             hint.classList.remove('error');
             hint.classList.add('success');
         } else {
-            hint.textContent = `[FAIL] ${assessment.message || 'Invalid URL'}`;
+            hint.textContent = assessment.message || 'Invalid URL';
             hint.classList.remove('success');
             hint.classList.add('error');
             connectionValid = false;
@@ -705,14 +691,6 @@ function applySelectedRecentProfile() {
         skipTls.checked = Boolean(profile.skip_tls_verify);
     }
 
-    const metricStep = document.getElementById('metricStep');
-    if (metricStep) {
-        const targetStep = String(profile.metric_step_seconds || '');
-        const hasOption = Array.from(metricStep.options).some(option => option.value === targetStep);
-        metricStep.value = hasOption ? targetStep : 'auto';
-        applyRecommendedMetricStep(false);
-    }
-
     const shiftInput = document.getElementById('timeShiftMinutes');
     if (shiftInput) {
         shiftInput.value = String(Math.round((profile.time_shift_ms || 0) / (60 * 1000)));
@@ -793,7 +771,6 @@ async function testConnection() {
 
 function serializeConfig() {
     const connection = getConnectionConfig();
-    const metricStep = getSelectedMetricStepSeconds();
     return {
         endpoint: connection.url,
         tenant_id: connection.tenantId,
@@ -803,19 +780,11 @@ function serializeConfig() {
         custom_header_name: connection.authType === 'header' ? connection.headerName : '',
         custom_header_value: connection.authType === 'header' ? connection.headerValue : '',
         skip_tls_verify: connection.skipTls,
-        metric_step_seconds: metricStep,
-        batch_window_seconds: getBatchWindowSeconds(metricStep),
         drop_old: true,
         time_shift_ms: (Number(document.getElementById('timeShiftMinutes')?.value || 0) || 0) * 60 * 1000,
         max_labels_override: getManualMaxLabelsOverride(),
         drop_labels: getSelectedDropLabels(),
     };
-}
-
-function getBatchWindowSeconds(metricStep) {
-    if (!metricStep || metricStep <= 30) return 30;
-    if (metricStep <= 60) return 60;
-    return 300;
 }
 
 function startImport() {
@@ -962,47 +931,22 @@ function renderAnalysisResult(data) {
     }
     const maxLabelsLimit = lastMaxLabelsLimit;
     const rows = [];
-    if (summary.start) {
-        rows.push(`<div><strong>Time range:</strong> ${formatRFC(summary.start)} → ${formatRFC(summary.end || summary.start)}</div>`);
-    }
-    rows.push(`<div><strong>Points:</strong> ${summary.points || 0}, skipped: ${summary.skipped_lines || 0}, dropped old: ${summary.dropped_old || 0}</div>`);
     const scannedLines = Number(summary.scanned_lines || 0);
-    const sampleLimit = Number(summary.sample_limit || 0);
-    const sampleCut = Boolean(summary.sample_cut);
-    if (lastAnalysisMode === 'full') {
-        rows.push(`<div><strong>Preflight mode:</strong> full collection (${scannedLines} lines scanned).</div>`);
-    } else {
-        rows.push(`<div><strong>Preflight mode:</strong> sample (${scannedLines} lines scanned${sampleLimit > 0 ? `, limit=${sampleLimit}` : ''}${sampleCut ? ', truncated' : ''}).</div>`);
-    }
-
-    if (maxLabelsLimit > 0) {
-        rows.push(`<div><strong>Label limit:</strong> target maxLabelsPerTimeseries=${maxLabelsLimit}${lastMaxLabelsSource === 'manual' ? ' (manual override)' : ''}; analyzed lines=${summary.analyzed_lines || 0}; over limit=${summary.over_label_limit || 0}; max seen=${summary.max_labels_seen || 0}</div>`);
-    } else {
-        rows.push(`<div><strong>Label limit:</strong> target maxLabelsPerTimeseries=unknown; analyzed lines=${summary.analyzed_lines || 0}; max seen=${summary.max_labels_seen || 0}</div>`);
-    }
-    const impact = evaluateDropImpact(lastLabelSimulation, getSelectedDropLabels(), maxLabelsLimit);
-    if (impact && maxLabelsLimit > 0) {
-        const mode = impact.overSeries > 0 ? 'risk' : 'ok';
-        rows.push(`<div><strong>Drop impact (${mode}):</strong> over-limit sample series=${impact.overSeries}/${impact.seriesCount}; projected max labels=${impact.maxAfterDrop}; estimated sampled points at risk=${impact.overPoints}${impact.minAdditionalDrops > 0 ? `; at least ${impact.minAdditionalDrops} more label drop(s) needed on worst affected series` : ''}${impact.capped ? '; sample set capped' : ''}.</div>`);
-    }
-    if ((summary.over_label_limit || 0) > 0 || (impact && impact.overSeries > 0)) {
-        const selectedDropCount = getSelectedDropLabels().length;
-        rows.push(`<div><strong>Action:</strong> ${selectedDropCount > 0 ? `drop_labels currently selected: ${selectedDropCount}.` : 'select labels in “Label management” below to reduce label count before import.'}</div>`);
-    }
-    if ((summary.total_labels || 0) > 0) {
-        const shownLabels = Array.isArray(summary.label_stats) ? summary.label_stats.length : 0;
-        rows.push(`<div><strong>Labels:</strong> detected in sample=${summary.total_labels}; shown in manager=${shownLabels}</div>`);
-    }
-    if (summary.examples && summary.examples.length) {
-        rows.push(`<div><strong>Example:</strong> <code>${formatSeriesExample(summary.examples[0])}</code></div>`);
+    const scope = lastAnalysisMode === 'full' ? `All ${scannedLines} lines` : `First ${scannedLines} lines`;
+    rows.push(summary.start
+        ? `<div><strong>${scope}:</strong> ${formatRFC(summary.start)} to ${formatRFC(summary.end || summary.start)}, ${formatCount(summary.points)} samples.</div>`
+        : `<div><strong>${scope}:</strong> no samples found.</div>`);
+    const maxSeen = Number(summary.max_labels_seen || 0);
+    if (maxSeen > 0) {
+        rows.push(maxLabelsLimit > 0
+            ? `<div><strong>Labels:</strong> up to ${maxSeen} per series; the target allows ${maxLabelsLimit}.</div>`
+            : `<div><strong>Labels:</strong> up to ${maxSeen} per series; the target limit is unknown.</div>`);
     }
     if (warnings.length) {
-        analysisResult.classList.add('error');
-        rows.push(`<div><strong>Warnings:</strong> ${warnings.join(' ')}</div>`);
-    } else {
-        analysisResult.classList.remove('error');
+        rows.push(`<div><strong>Notes:</strong> ${warnings.map(escapeHtml).join(' ')}</div>`);
     }
-    analysisResult.textContent = warnings.length ? 'Preflight: issues detected.' : 'Preflight complete.';
+    analysisResult.classList.toggle('error', warnings.length > 0);
+    analysisResult.textContent = warnings.length ? 'Bundle checked: see the notes below.' : 'Bundle checked.';
     analysisDetails.innerHTML = rows.join('');
     analysisDetails.style.display = 'block';
     renderLabelManager(summary.label_stats || [], summary.total_labels || 0);
@@ -1012,14 +956,10 @@ function renderAnalysisResult(data) {
         labelManager.open = true;
     }
     if (retentionInfo) {
-        if (typeof data.retention_cutoff === 'number' && data.retention_cutoff > 0) {
-            const cutoffDate = new Date(data.retention_cutoff);
-            const approxWindowHours = Math.max(1, Math.round((Date.now() - data.retention_cutoff) / 3600000));
-            const days = (approxWindowHours / 24).toFixed(1);
-            retentionInfo.textContent = `Retention (from target): ~${days} days; cutoff ≈ ${cutoffDate.toISOString()} (UTC).${maxLabelsLimit > 0 ? ` maxLabelsPerTimeseries=${maxLabelsLimit}.` : ''}`;
-        } else {
-            retentionInfo.textContent = `Retention unknown (target did not return tsdb status).${maxLabelsLimit > 0 ? ` maxLabelsPerTimeseries=${maxLabelsLimit}.` : ''}`;
-        }
+        // A cutoff before 1970 (for example -retentionPeriod=100y) is negative but still known.
+        retentionInfo.textContent = typeof data.retention_cutoff === 'number' && data.retention_cutoff !== 0
+            ? `The target keeps data for ${formatSpan(Date.now() - data.retention_cutoff)}; older samples are not imported.`
+            : 'Old samples are not filtered: the target retention is unknown, or the filter is off.';
     }
     if (shiftBtn) {
         const suggested = data.suggested_shift_ms || 0;
@@ -1035,7 +975,7 @@ function renderAnalysisResult(data) {
     if (rangeInfo) {
         if (summary.start) {
             rangeInfo.style.display = 'block';
-            rangeInfo.textContent = `Detected: ${formatRFC(summary.start)} → ${formatRFC(summary.end || summary.start)}`;
+            rangeInfo.textContent = `Data in the bundle: ${formatRFC(summary.start)} to ${formatRFC(summary.end || summary.start)}.`;
         } else {
             rangeInfo.style.display = 'none';
             rangeInfo.textContent = '';
@@ -1052,7 +992,7 @@ function renderAnalysisResult(data) {
         if (shiftNow) shiftNow.style.display = 'inline-flex';
         if (shiftHint) {
             shiftHint.style.color = 'var(--text-muted)';
-            shiftHint.textContent = 'Adjust start to align bundle; end will not exceed now.';
+            shiftHint.textContent = 'The end of the data never goes past now.';
         }
         setShiftMinutes(0);
     }
@@ -1076,7 +1016,7 @@ async function analyzeBundle(fullCollection = false) {
     setAnalysisLoader(true);
     if (fullBtn) {
         fullBtn.disabled = true;
-        fullBtn.textContent = fullCollection ? 'Running full collection…' : 'Full collection';
+        fullBtn.textContent = fullCollection ? 'Checking all lines…' : 'Check all lines';
     }
     const details = document.getElementById('analysisDetails');
     if (details) {
@@ -1133,7 +1073,9 @@ function updateShiftSummary() {
     const shiftMs = shiftMin * 60000;
     const shiftedStart = new Date(start.getTime() + shiftMs);
     const shiftedEnd = new Date(end.getTime() + shiftMs);
-    summaryEl.textContent = `Shift: ${shiftMin} min → ${formatRFC(shiftedStart)} to ${formatRFC(shiftedEnd)} (UTC)`;
+    summaryEl.textContent = shiftMin === 0
+        ? 'No time shift.'
+        : `Shift by ${shiftMin} min: ${formatRFC(shiftedStart)} to ${formatRFC(shiftedEnd)}.`;
 }
 
 function setAnalysisReady(ready) {
@@ -1165,7 +1107,7 @@ function refreshPreflightControls() {
     if (!fullBtn) return;
     const hasFile = bundleInput && bundleInput.files && bundleInput.files.length > 0;
     fullBtn.disabled = !hasFile || uploadingBundle;
-    fullBtn.textContent = 'Full collection';
+    fullBtn.textContent = 'Check all lines';
 }
 
 function applySuggestedShift() {
@@ -1235,26 +1177,29 @@ function renderImportResult(payload) {
     const verification = payload.verification || null;
     if (!statusPanel) return;
 
-    let html = `<div><strong>Import complete:</strong> ${formatBytes(payload.bytes_sent || summary.bytes || 0)} sent to ${payload.remote_path || summary.remote_path || 'target endpoint'}.</div>`;
-    html += `<div>${formatVolumeText(summary.source_bytes, summary.inflated_bytes, summary.chunks)}</div>`;
-
+    const target = payload.remote_path || summary.remote_path || 'the target';
+    const volume = formatVolumeText(summary.source_bytes, summary.inflated_bytes, summary.chunks) || formatBytes(payload.bytes_sent || summary.bytes || 0);
+    let html = `<div><strong>Import complete:</strong> ${volume} sent to ${escapeHtml(target)}.</div>`;
     if (summary.start) {
-        html += `<div><strong>Time range:</strong> ${formatRFC(summary.start)} → ${formatRFC(summary.end || summary.start)}</div>`;
+        html += `<div>Data: ${formatRFC(summary.start)} to ${formatRFC(summary.end || summary.start)}.</div>`;
     }
-
-    if (Array.isArray(summary.examples) && summary.examples.length) {
-        const items = summary.examples.slice(0, 5).map(ex => `<li><code>${formatSeriesExample(ex)}</code></li>`).join('');
-        html += `<div><strong>Example series:</strong><ul>${items}</ul></div>`;
-    }
-
     if (verification) {
-        html += `<div><strong>Verification:</strong> ${verification.message || 'Query executed.'}</div>`;
-        if (verification.query) {
-            html += `<pre>${verification.query}</pre>`;
-        }
+        html += verification.verified
+            ? '<div>Check passed: the data is searchable in VictoriaMetrics.</div>'
+            : `<div><strong>Check:</strong> ${escapeHtml(verification.message || 'no answer')}</div>`;
     }
     if ((summary.over_label_limit || 0) > 0 && (summary.max_labels_limit || 0) > 0) {
-        html += `<div><strong>Warning:</strong> ${summary.over_label_limit} series were sent with labels above maxLabelsPerTimeseries=${summary.max_labels_limit} (max seen=${summary.max_labels_seen || 'n/a'}). Target may drop them.</div>`;
+        html += `<div><strong>Warning:</strong> ${summary.over_label_limit} series have more labels than the target allows (${summary.max_labels_limit}); the target may drop them.</div>`;
+    }
+    const details = [];
+    if (verification && verification.query) {
+        details.push(`<div>Check query:</div><pre>${escapeHtml(verification.query)}</pre>`);
+    }
+    if (Array.isArray(summary.examples) && summary.examples.length) {
+        details.push(`<div>Example series:</div><ul>${summary.examples.slice(0, 3).map(ex => `<li><code>${escapeHtml(formatSeriesExample(ex))}</code></li>`).join('')}</ul>`);
+    }
+    if (details.length) {
+        html += `<details><summary>Details</summary>${details.join('')}</details>`;
     }
 
     showStatus(html, false, true, true);
@@ -1335,11 +1280,21 @@ function formatDateTimeLocal(date) {
 
 function formatRFC(value) {
     if (!value) return 'n/a';
-    try {
-        return new Date(value).toISOString();
-    } catch {
-        return value;
-    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return `${date.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '')} UTC`;
+}
+
+function formatCount(value) {
+    return Number(value || 0).toLocaleString('en-US');
+}
+
+// formatSpan turns a duration in ms into a short human text such as "100 years" or "31 days".
+function formatSpan(ms) {
+    const days = ms / 86400000;
+    if (days >= 730) return `${Math.round(days / 365)} years`;
+    if (days >= 2) return `${Math.round(days)} days`;
+    return `${Math.max(1, Math.round(ms / 3600000))} hours`;
 }
 
 function showStatus(text, isError = false, success = false, asHTML = false) {
@@ -1386,57 +1341,14 @@ function formatBytes(bytes) {
 }
 
 // Metric step reuse from vmgather
-function initializeMetricStepSelector() {
-    const select = document.getElementById('metricStep');
-    if (select) {
-        select.addEventListener('change', () => applyRecommendedMetricStep(false));
-    }
-    applyRecommendedMetricStep(true);
-}
-
-function applyRecommendedMetricStep(forceApply) {
-    const select = document.getElementById('metricStep');
-    const hint = document.getElementById('metricStepHint');
-    if (!select) return;
-
-    let recommended = 60;
-    const file = bundleInput?.files?.[0];
-    if (file) {
-        const sizeMB = file.size / (1024 * 1024);
-        if (sizeMB < 50) {
-            recommended = 30;
-        } else if (sizeMB < 200) {
-            recommended = 60;
-        } else {
-            recommended = 300;
-        }
-    }
-
-    const selectedSeconds = Number(select.value || 0);
-    if (hint) {
-        if (selectedSeconds > 0) {
-            const recommendation = formatStepLabel(recommended);
-            const current = formatStepLabel(selectedSeconds);
-            hint.textContent = `Current step: ${current}. Recommended: ${recommendation} based on bundle size.`;
-        } else {
-            hint.textContent = `Current bundle suggests ${formatStepLabel(recommended)} batches.`;
-        }
-    }
-
-    if (forceApply && (!select.value || select.value === 'auto')) {
-        select.value = String(recommended);
-    }
-}
-
 function formatVolumeText(compressed, inflated, chunks) {
     if (!compressed && !inflated) {
         return '';
     }
     if (!inflated) {
-        return `Volume: ${formatBytes(compressed)} bundle`;
+        return `${formatBytes(compressed)} bundle`;
     }
-    const chunkInfo = chunks ? ` via ${chunks} chunk(s)` : '';
-    return `Volume: ${formatBytes(compressed)} compressed → ${formatBytes(inflated)} JSONL${chunkInfo}`;
+    return `${formatBytes(compressed)} bundle (${formatBytes(inflated)} of samples${chunks ? `, ${chunks} chunks` : ''})`;
 }
 
 function formatSeriesExample(example = {}) {
@@ -1588,8 +1500,8 @@ function updateJobProgressUI(job) {
 
 function formatStage(stage) {
     switch ((stage || '').toLowerCase()) {
-        case 'extracting':
-            return 'Extracting bundle…';
+        case 'preparing':
+            return 'Reading bundle…';
         case 'importing':
             return 'Streaming JSONL chunks…';
         case 'verifying':
@@ -1709,20 +1621,3 @@ async function resumeImport(jobId) {
     }
 }
 
-function getSelectedMetricStepSeconds() {
-    const select = document.getElementById('metricStep');
-    if (!select) return 60;
-    const value = select.value;
-    if (!value || value === 'auto') {
-        return 60;
-    }
-    const parsed = parseInt(value, 10);
-    return Number.isNaN(parsed) ? 60 : parsed;
-}
-
-function formatStepLabel(seconds) {
-    if (!seconds || seconds < 60) return `${seconds}s`;
-    const minutes = seconds / 60;
-    if (Number.isInteger(minutes)) return `${minutes} min`;
-    return `${seconds}s`;
-}
