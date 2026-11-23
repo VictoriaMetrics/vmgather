@@ -547,7 +547,8 @@ func TestRunnerFailedRunLeavesNoLocalFiles(t *testing.T) {
 }
 
 // Snapshot mode uses the obfuscation of the config. The MDX filter decides on the original labels, so
-// obfuscation does not change which series are kept; the bundle and its metadata hold only digests.
+// obfuscation does not change which series are kept. Instance and job are digests in the metric labels and
+// in metadata.json; component types (vmstorage, vmselect) are not obfuscated and are not checked here.
 func TestRunnerObfuscatesLabels(t *testing.T) {
 	e := newTestEnv(t)
 	cfg := e.cfg

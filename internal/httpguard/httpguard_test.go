@@ -57,13 +57,16 @@ func TestSameOrigin(t *testing.T) {
 // -allowed-hosts trusts that Origin; a browser verdict in Sec-Fetch-Site still wins.
 func TestSameOrigin_TrustedHosts(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
-	h := SameOrigin(next, "vmgather.corp:8443")
+	h := SameOrigin(next, "vmgather.corp", "Proxy.Corp:8443")
 	cases := []struct {
 		name, origin, fetch string
 		rejected            bool
 	}{
 		{name: "trusted origin through a proxy", origin: "http://vmgather.corp"},
-		{name: "trusted origin with a port", origin: "http://vmgather.corp:9000"},
+		{name: "trusted origin with its port", origin: "http://proxy.corp:8443"},
+		// Another service on the same host is another origin.
+		{name: "trusted name on another port", origin: "http://vmgather.corp:9000", rejected: true},
+		{name: "trusted name without the configured port", origin: "http://proxy.corp", rejected: true},
 		{name: "other origin", origin: "http://evil.example", rejected: true},
 		{name: "trusted name as a subdomain of another site", origin: "http://vmgather.corp.evil.example", rejected: true},
 		{name: "browser says cross-site", origin: "http://vmgather.corp", fetch: "cross-site", rejected: true},

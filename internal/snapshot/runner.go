@@ -131,7 +131,8 @@ func (r *Runner) RunOnce(ctx context.Context) (err error) {
 	end := r.now().Add(-r.cfg.Lag)
 	var windows iter.Seq[domain.TimeRange]
 	// firstRun is a scheduled run with no state and no -snapshot.start: its one window is the newest
-	// complete period, which has data on any working setup.
+	// complete period. It has data unless the setup is wrong or the components run for less than about
+	// one period plus the lag; in both cases the state must not move past it.
 	firstRun := false
 	if backfill {
 		if r.cfg.End.After(end) {
@@ -171,9 +172,9 @@ func (r *Runner) RunOnce(ctx context.Context) (err error) {
 			return fmt.Errorf("snapshot %s: %w", name, err)
 		}
 		if metrics == 0 && firstRun {
-			// Most likely a wrong URL, tenant or job list: fail loudly instead of moving the state past
-			// windows that will never be exported.
-			return fmt.Errorf("snapshot %s: no MDX series in the newest complete window; check the URL, the tenant and the jobs (the state is not saved)", name)
+			// A wrong URL, tenant or job list, or a very young deployment: fail loudly instead of moving
+			// the state past windows that will never be exported.
+			return fmt.Errorf("snapshot %s: no MDX series in the newest complete window; check the URL, the tenant and the jobs, or wait until the components have run for one period (the state is not saved)", name)
 		}
 		if !backfill {
 			st := state{LastEnd: w.End, LastSnapshot: name, UpdatedAt: r.now().UTC()}

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -507,10 +508,38 @@ func TestExportJobManagerCleanupRemovesStagingOfExpiredJobs(t *testing.T) {
 	manager.cleanupLocked(time.Now())
 	manager.mu.Unlock()
 
-	if _, err := os.Stat(filepath.Join(dir, "job-old.partial.jsonl")); !os.IsNotExist(err) {
-		t.Fatalf("staging file of the expired job is still there: %v", err)
-	}
+	waitRemoved(t, filepath.Join(dir, "job-old.partial.jsonl"), 2*time.Second)
 	if _, err := os.Stat(filepath.Join(dir, "job-recent.partial.jsonl")); err != nil {
 		t.Fatalf("staging file of a recent failed job is gone: %v", err)
+	}
+}
+
+// A server that gets no more requests still removes the staging file when the retention of a failed job
+// ends: cleanup is scheduled when the job finishes.
+func TestExportJobManagerRemovesStagingOfIdleServer(t *testing.T) {
+	manager := NewExportJobManager(&fakeExportService{err: errors.New("boom")})
+	manager.retention = 50 * time.Millisecond
+	path := filepath.Join(t.TempDir(), "job-idle.partial.jsonl")
+	if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.StartJob(context.Background(), "job-idle", domain.ExportConfig{StagingFile: path}); err != nil {
+		t.Fatal(err)
+	}
+	// retention + the 1s margin of the scheduled cleanup
+	waitRemoved(t, path, 3*time.Second)
+}
+
+func waitRemoved(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s is still there after %s", path, timeout)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

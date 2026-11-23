@@ -80,6 +80,10 @@ type ExportJobManager struct {
 	maxConcurrentJobs int
 	retention         time.Duration
 	activeJobs        int
+	// staleStaging holds staging files of expired jobs that still have to be removed; removing is true
+	// while a goroutine removes them, outside of mu.
+	staleStaging []string
+	removing     bool
 }
 
 func NewExportJobManager(service services.ExportService) *ExportJobManager {
@@ -361,6 +365,12 @@ func (m *ExportJobManager) jobFinishedLocked() {
 		m.activeJobs--
 	}
 	m.cleanupLocked(time.Now())
+	// Clean up this job when its retention ends, also on a server that gets no more requests.
+	time.AfterFunc(m.retention+time.Second, func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		m.cleanupLocked(time.Now())
+	})
 }
 
 func (m *ExportJobManager) markCanceled(jobID string, err error) {
@@ -404,20 +414,40 @@ func (m *ExportJobManager) CancelJob(jobID string) error {
 }
 
 // cleanupLocked forgets finished jobs after the retention. A failed or canceled job can no longer be
-// resumed then, so its staging file (raw JSONL of the completed batches) is deleted too.
+// resumed then, so its staging file (raw JSONL of the completed batches) is removed too, in a goroutine,
+// so that a slow delete of a large file does not hold mu. A file that cannot be removed is retried by the
+// next cleanup.
 func (m *ExportJobManager) cleanupLocked(now time.Time) {
 	for id, job := range m.jobs {
 		if job.status.State == JobCompleted || job.status.State == JobFailed || job.status.State == JobCanceled {
 			if job.status.CompletedAt != nil && now.Sub(*job.status.CompletedAt) > m.retention {
 				if job.status.State != JobCompleted && job.status.StagingPath != "" {
-					if err := os.Remove(job.status.StagingPath); err != nil && !os.IsNotExist(err) {
-						log.Printf("[WARN] cannot remove the staging file of expired job %s: %v", id, err)
-					}
+					m.staleStaging = append(m.staleStaging, job.status.StagingPath)
 				}
 				delete(m.jobs, id)
 			}
 		}
 	}
+	if len(m.staleStaging) > 0 && !m.removing {
+		paths := m.staleStaging
+		m.staleStaging = nil
+		m.removing = true
+		go m.removeStaging(paths)
+	}
+}
+
+func (m *ExportJobManager) removeStaging(paths []string) {
+	var failed []string
+	for _, path := range paths {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			log.Printf("[WARN] cannot remove the staging file of an expired export, will retry: %v", err)
+			failed = append(failed, path)
+		}
+	}
+	m.mu.Lock()
+	m.staleStaging = append(m.staleStaging, failed...)
+	m.removing = false
+	m.mu.Unlock()
 }
 
 type jobProgressReporter struct {

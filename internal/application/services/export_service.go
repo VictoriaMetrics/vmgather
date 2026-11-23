@@ -130,7 +130,11 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 	}
 	if resuming && state.StagingBytes > 0 {
 		// Truncate would extend a missing or cut file with zero bytes, and the archive would hold them.
-		if fi, err := os.Stat(config.StagingFile); err != nil || fi.Size() < state.StagingBytes {
+		fi, err := os.Stat(config.StagingFile)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("cannot resume: cannot check the staging file: %w", err)
+		}
+		if err != nil || fi.Size() < state.StagingBytes {
 			return nil, fmt.Errorf("cannot resume: the staging file %s is missing or shorter than the %d bytes of completed batches; start a new export", config.StagingFile, state.StagingBytes)
 		}
 	}

@@ -41,7 +41,8 @@ type Server struct {
 	allowedHosts []string
 }
 
-// SetAllowedHosts sets extra Host names accepted from local clients, for a reverse proxy on the same machine.
+// SetAllowedHosts sets the host names of a reverse proxy or sidecar: accepted as Host from local clients
+// and as the Origin of plain HTTP pages (see httpguard.LocalHostOnly and httpguard.SameOrigin).
 func (s *Server) SetAllowedHosts(hosts []string) {
 	s.allowedHosts = hosts
 }

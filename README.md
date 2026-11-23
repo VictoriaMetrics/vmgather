@@ -146,9 +146,9 @@ Both Dockerfiles live in `build/docker/` and follow distroless best practices (`
 
 Both `vmgather` and `vmimporter` support `-addr` (bind address) and `-no-browser` to skip auto-launching a browser during scripting or Docker-based runs. vmgather's default is `localhost:8080` with automatic fallback to a free port; VMImport defaults to `0.0.0.0:8081` to avoid clashing with vmgather. vmgather also accepts `-output` to choose the directory for generated archives (defaults to `./exports`).
 
-Both binaries accept `-allowed-hosts host1,host2` for a reverse proxy or a sidecar in front of the UI (a port in an entry is ignored: names are matched without it):
-- clients on the same machine or pod, such as a local nginx or an Istio sidecar that connects from `127.0.0.6`, may send these names in Host. `localhost`, `*.localhost` and IP addresses are always accepted; other names from local clients are rejected to block DNS rebinding;
-- a plain HTTP page on one of these names may POST even when the proxy rewrites Host (for example Apache without `ProxyPreserveHost On`). Otherwise the cross-origin check rejects such requests, because browsers send `Sec-Fetch-Site` only on HTTPS and localhost.
+Both binaries accept `-allowed-hosts host1,host2` for a reverse proxy or a sidecar in front of the UI:
+- clients on the same machine or pod, such as a local nginx or an Istio sidecar that connects from `127.0.0.6`, may send these names in Host, on any port. `localhost`, `*.localhost` and IP addresses are always accepted; other names from local clients are rejected to block DNS rebinding;
+- a plain HTTP page on one of these names may POST even when the proxy rewrites Host (for example Apache without `ProxyPreserveHost On`). Otherwise the cross-origin check rejects such requests, because browsers send `Sec-Fetch-Site` only on HTTPS and localhost. Here the port counts: `vmgather.corp:8443` trusts pages on that port only, `vmgather.corp` only the default port.
 
 vmgather also accepts `-debug` for verbose logging. On vmgather, `-debug` additionally mounts Go's [`net/http/pprof`](https://pkg.go.dev/net/http/pprof) profiling endpoints at `/debug/pprof/` — useful for diagnosing high CPU usage during large exports, but pprof is unauthenticated, so only enable it on a deployment that isn't publicly reachable.
 
@@ -282,7 +282,7 @@ How it works:
 - A cluster with an unavailable vmstorage fails the run instead of returning part of the data: exports never accept partial responses, and discovery sends `deny_partial_response=1`.
 - A window without MDX series (for example before any component existed, or during an outage of the whole monitoring) is not uploaded; the run logs a warning and the state moves on, so it never blocks later windows.
 - A state that ends after the current time (clock moved back, edited file) stops the run with an error instead of waiting silently.
-- The first scheduled run without a state and without `-snapshot.start` fails if the newest complete window has no MDX series, and saves no state: usually the URL, the tenant or the jobs are wrong. With `-snapshot.start` empty windows are skipped as described above.
+- The first scheduled run without a state and without `-snapshot.start` fails if the newest complete window has no MDX series, and saves no state: usually the URL, the tenant or the jobs are wrong, or the components run for less than one period plus the lag (then the next run succeeds). With `-snapshot.start` empty windows are skipped as described above.
 - On `fs://` the state file is replaced atomically (temp file and rename), so a killed run cannot leave a broken state.
 
 Download a snapshot with vmrestore, then import `vmgather.zip` with vmimporter:

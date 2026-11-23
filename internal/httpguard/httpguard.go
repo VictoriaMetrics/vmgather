@@ -16,11 +16,18 @@ import (
 // If Sec-Fetch-Site is present, only "same-origin" and "none" pass. Otherwise, if Origin is present, its
 // host must equal the request Host. Requests without both headers (curl, scripts) pass.
 //
-// trustedHosts (-allowed-hosts) are also accepted as the Origin host when the browser sends no
-// Sec-Fetch-Site (plain HTTP sites): a reverse proxy that rewrites Host would fail every POST otherwise.
+// trustedHosts (-allowed-hosts) are also accepted as the Origin when the browser sends no Sec-Fetch-Site
+// (plain HTTP sites): a reverse proxy that rewrites Host would fail every POST otherwise. The port must
+// match too: "vmgather.corp:8443" trusts only that port, "vmgather.corp" only the default port, so a page
+// of another service on the same host is not trusted.
 func SameOrigin(next http.Handler, trustedHosts ...string) http.Handler {
 	p := http.NewCrossOriginProtection()
-	trusted := hostSet(trustedHosts)
+	trusted := make(map[string]struct{}, len(trustedHosts))
+	for _, h := range trustedHosts {
+		if h = strings.TrimSpace(h); h != "" {
+			trusted[authority(h)] = struct{}{}
+		}
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := p.Check(r); err != nil && !isTrustedOrigin(r, trusted) {
 			w.Header().Set("Content-Type", "application/json")
@@ -42,8 +49,17 @@ func isTrustedOrigin(r *http.Request, trusted map[string]struct{}) bool {
 	if err != nil || u.Host == "" {
 		return false
 	}
-	_, ok := trusted[hostName(u.Host)]
+	_, ok := trusted[authority(u.Host)]
 	return ok
+}
+
+// authority returns "host:port" in lower case without IPv6 brackets; the port is empty when not given.
+func authority(hostport string) string {
+	host, port, err := net.SplitHostPort(hostport)
+	if err != nil {
+		host, port = hostport, ""
+	}
+	return strings.ToLower(strings.Trim(host, "[]")) + ":" + port
 }
 
 // LocalHostOnly blocks DNS rebinding. A page from an attacker's domain whose name later resolves to
