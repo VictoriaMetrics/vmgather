@@ -424,6 +424,45 @@ func TestExport_LongLinesFromVictoriaMetrics(t *testing.T) {
 	}
 }
 
+// If the staging file of the failed run is gone or cut (tmp cleaner, user), resume must fail: truncate
+// would extend it with zero bytes and the archive would start with them.
+func TestExport_ResumeRejectsMissingStagingFile(t *testing.T) {
+	var failSecond atomic.Bool
+	failSecond.Store(true)
+	srv := newIPv4Server(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if start, _ := vmWindow(t, r); start.Minute() != 0 && failSecond.Load() {
+			http.Error(w, "cannot process request", http.StatusBadRequest)
+			return
+		}
+		_, _ = fmt.Fprint(w, exportLineFor(r))
+	}))
+	defer srv.Close()
+
+	svc := NewExportService(t.TempDir(), "test")
+	cfg := regressionConfig(srv.URL, t.TempDir())
+	ctx := WithResumeState(context.Background(), &ResumeState{})
+	if _, err := svc.ExecuteExport(ctx, cfg); err == nil {
+		t.Fatal("expected failure on batch 2")
+	}
+	failSecond.Store(false)
+	cfg.ResumeFromBatch = 1
+	// Cut first, then remove: the second step needs the file.
+	for _, damage := range []struct {
+		name string
+		do   func() error
+	}{
+		{"cut", func() error { return os.Truncate(cfg.StagingFile, 3) }},
+		{"missing", func() error { return os.Remove(cfg.StagingFile) }},
+	} {
+		if err := damage.do(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.ExecuteExport(ctx, cfg); err == nil || !strings.Contains(err.Error(), "missing or shorter") {
+			t.Fatalf("%s staging file: want a resume error, got %v", damage.name, err)
+		}
+	}
+}
+
 // A resume needs the progress of the failed run; without it the count and the staging file would be wrong.
 func TestExport_ResumeWithoutRecordedProgressIsRejected(t *testing.T) {
 	srv := newIPv4Server(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = fmt.Fprint(w, exportLineFor(r)) }))

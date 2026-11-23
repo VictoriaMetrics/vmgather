@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,7 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/backup/actions"
 
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
+	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/obfuscation"
 )
 
 // fakeVM serves /api/v1/export with VictoriaMetrics semantics: start and end are inclusive.
@@ -541,5 +543,82 @@ func TestRunnerFailedRunLeavesNoLocalFiles(t *testing.T) {
 	})
 	if len(files) != 0 {
 		t.Fatalf("files left after a failed run: %v", files)
+	}
+}
+
+// Snapshot mode uses the obfuscation of the config. The MDX filter decides on the original labels, so
+// obfuscation does not change which series are kept; the bundle and its metadata hold only digests.
+func TestRunnerObfuscatesLabels(t *testing.T) {
+	e := newTestEnv(t)
+	cfg := e.cfg
+	cfg.Export.Obfuscation = domain.ObfuscationConfig{Enabled: true, ObfuscateInstance: true, ObfuscateJob: true}
+	if err := e.runner(t, cfg, "2026-11-21T10:07:00Z").RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	name := "20261121T090000Z_20261121T100000Z"
+	lines := e.bundleLines(t, name)
+	if len(lines) == 0 {
+		t.Fatal("empty bundle")
+	}
+	names := map[string]bool{}
+	for _, l := range lines {
+		m := l["metric"].(map[string]any)
+		names[m["__name__"].(string)] = true
+		if m["instance"] != obfuscation.Value("a:8482") || m["job"] != obfuscation.Value("vmstorage") {
+			t.Fatalf("labels not obfuscated: %v", m)
+		}
+	}
+	if !names["vm_rows"] || names["node_load1"] {
+		t.Fatalf("MDX filter with obfuscation kept %v; want vm_rows and no node_load1 of b:9100", names)
+	}
+	bundle := readRemoteFile(t, joinURL(e.dst, name), bundleFilename)
+	zr, err := zip.NewReader(bytes.NewReader(bundle), int64(len(bundle)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range zr.File {
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _ := io.ReadAll(rc)
+		_ = rc.Close()
+		for _, raw := range []string{"a:8482", `"vmstorage"`} {
+			if strings.Contains(string(data), raw) {
+				t.Fatalf("%s contains the real value %s", f.Name, raw)
+			}
+		}
+	}
+}
+
+// A first scheduled run without state and without -snapshot.start reads the newest complete window. If it
+// is empty, the setup is most likely wrong (URL, tenant, jobs): the run fails and the state stays empty.
+// With -snapshot.start an empty first window is normal (data starts later) and the state moves on.
+func TestRunnerFirstRunWithoutDataFails(t *testing.T) {
+	e := newTestEnv(t)
+	cfg := e.cfg
+	cfg.Export.Jobs = nil
+	r := e.runner(t, cfg, "2026-11-21T10:07:00Z")
+	r.discoverJobs = func(context.Context, domain.VMConnection, domain.TimeRange) ([]string, []string, error) {
+		return nil, nil, nil // wrong tenant: no vm_app_version at all
+	}
+	err := r.RunOnce(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no MDX series in the newest complete window") {
+		t.Fatalf("want an error for an empty first window, got %v", err)
+	}
+	if st := e.state(t); !st.LastEnd.IsZero() {
+		t.Fatalf("state was saved: %+v", st)
+	}
+
+	cfg.Start = mustTime(t, "2026-11-21T09:00:00Z")
+	r = e.runner(t, cfg, "2026-11-21T10:07:00Z")
+	r.discoverJobs = func(context.Context, domain.VMConnection, domain.TimeRange) ([]string, []string, error) {
+		return nil, nil, nil
+	}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("with -snapshot.start an empty window must not fail: %v", err)
+	}
+	if st := e.state(t); !st.LastEnd.Equal(mustTime(t, "2026-11-21T10:00:00Z")) {
+		t.Fatalf("state = %+v; want it past the empty window", st)
 	}
 }

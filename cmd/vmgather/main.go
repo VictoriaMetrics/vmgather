@@ -45,7 +45,7 @@ func main() {
 	oneshot := flag.Bool("oneshot", false, "Run a single export and exit (experimental)")
 	oneshotConfig := flag.String("oneshot-config", "", "Path to export config JSON for oneshot (use '-' for stdin)")
 	exportStdout := flag.Bool("export-stdout", false, "Stream exported metrics to stdout (oneshot only)")
-	allowedHosts := flag.String("allowed-hosts", "", "Comma-separated extra Host names accepted from local clients, for a reverse proxy on the same machine (localhost and IP addresses are always accepted)")
+	allowedHosts := flag.String("allowed-hosts", "", "Comma-separated host names of a reverse proxy or sidecar in front of the UI. They are accepted as Host from local clients (localhost and IP addresses always are) and as Origin of plain HTTP pages when the proxy rewrites Host")
 	snapshotFlags := registerSnapshotFlags()
 	flag.Parse()
 

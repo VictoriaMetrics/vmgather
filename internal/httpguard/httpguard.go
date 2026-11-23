@@ -4,6 +4,7 @@ package httpguard
 import (
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -14,14 +15,35 @@ import (
 // It is net/http.CrossOriginProtection with a JSON error for the UIs. GET, HEAD and OPTIONS always pass.
 // If Sec-Fetch-Site is present, only "same-origin" and "none" pass. Otherwise, if Origin is present, its
 // host must equal the request Host. Requests without both headers (curl, scripts) pass.
-func SameOrigin(next http.Handler) http.Handler {
+//
+// trustedHosts (-allowed-hosts) are also accepted as the Origin host when the browser sends no
+// Sec-Fetch-Site (plain HTTP sites): a reverse proxy that rewrites Host would fail every POST otherwise.
+func SameOrigin(next http.Handler, trustedHosts ...string) http.Handler {
 	p := http.NewCrossOriginProtection()
-	p.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"error":"cross-origin request rejected"}` + "\n"))
-	}))
-	return p.Handler(next)
+	trusted := hostSet(trustedHosts)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := p.Check(r); err != nil && !isTrustedOrigin(r, trusted) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":"cross-origin request rejected"}` + "\n"))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// isTrustedOrigin reports whether a request without Sec-Fetch-Site comes from a page on a trusted host.
+// A browser that sends Sec-Fetch-Site has decided itself, so its "cross-site" is never overridden.
+func isTrustedOrigin(r *http.Request, trusted map[string]struct{}) bool {
+	if len(trusted) == 0 || r.Header.Get("Sec-Fetch-Site") != "" {
+		return false
+	}
+	u, err := url.Parse(r.Header.Get("Origin"))
+	if err != nil || u.Host == "" {
+		return false
+	}
+	_, ok := trusted[hostName(u.Host)]
+	return ok
 }
 
 // LocalHostOnly blocks DNS rebinding. A page from an attacker's domain whose name later resolves to
@@ -32,13 +54,7 @@ func SameOrigin(next http.Handler) http.Handler {
 // are not checked, so it does not cover Docker port mapping or a rebinding to a LAN address of a server that
 // listens on 0.0.0.0; SameOrigin still applies there.
 func LocalHostOnly(next http.Handler, allowedHosts ...string) http.Handler {
-	allowed := make(map[string]struct{}, len(allowedHosts))
-	for _, h := range allowedHosts {
-		// Requests are matched by host name without port, so "proxy.local:8443" allows proxy.local.
-		if h = hostName(strings.TrimSpace(h)); h != "" {
-			allowed[h] = struct{}{}
-		}
-	}
+	allowed := hostSet(allowedHosts)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isLoopbackClient(r.RemoteAddr) && !isLocalHostName(r.Host) && !isAllowedHost(r.Host, allowed) {
 			w.Header().Set("Content-Type", "application/json")
@@ -48,6 +64,17 @@ func LocalHostOnly(next http.Handler, allowedHosts ...string) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// hostSet normalizes host names with hostName: "proxy.local:8443" allows proxy.local on any port.
+func hostSet(hosts []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(hosts))
+	for _, h := range hosts {
+		if h = hostName(strings.TrimSpace(h)); h != "" {
+			set[h] = struct{}{}
+		}
+	}
+	return set
 }
 
 func isLoopbackClient(remoteAddr string) bool {

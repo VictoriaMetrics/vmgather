@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/backup/actions"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/backup/common"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/backup/fslocal"
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/backup/fsremote"
 
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
 )
@@ -55,10 +58,45 @@ func (s stateStore) save(st state) error {
 	if err != nil {
 		return err
 	}
-	if err := s.fs.CreateFile(stateFilename, data); err != nil {
+	if local, ok := s.fs.(*fsremote.FS); ok {
+		// fsremote.CreateFile is a plain write: a kill in the middle would leave a broken file that
+		// stops every later run. Object storage replaces an object in one request.
+		err = writeFileAtomic(filepath.Join(local.Dir, stateFilename), data)
+	} else {
+		err = s.fs.CreateFile(stateFilename, data)
+	}
+	if err != nil {
 		return fmt.Errorf("cannot write %s at %s: %w", stateFilename, s.fs, err)
 	}
 	return nil
+}
+
+// writeFileAtomic writes data to a temp file in the same directory, syncs it and renames it over path,
+// so path holds either the old or the new content.
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.ignore")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	_, err = f.Write(data)
+	if err == nil {
+		err = f.Sync()
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+	}
+	return err
 }
 
 // joinURL appends a directory name to a storage URL such as s3://bucket/prefix.

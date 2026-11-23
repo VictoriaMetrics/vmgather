@@ -130,6 +130,9 @@ func (r *Runner) RunOnce(ctx context.Context) (err error) {
 	backfill := !r.cfg.End.IsZero()
 	end := r.now().Add(-r.cfg.Lag)
 	var windows iter.Seq[domain.TimeRange]
+	// firstRun is a scheduled run with no state and no -snapshot.start: its one window is the newest
+	// complete period, which has data on any working setup.
+	firstRun := false
 	if backfill {
 		if r.cfg.End.After(end) {
 			return fmt.Errorf("snapshot end %s is less than -snapshot.lag behind now", r.cfg.End.Format(time.RFC3339))
@@ -145,6 +148,7 @@ func (r *Runner) RunOnce(ctx context.Context) (err error) {
 				stateFilename, st.LastEnd.Format(time.RFC3339))
 		}
 		windows = planWindows(st.LastEnd, r.cfg.Start, end, r.cfg.Period, r.cfg.MaxCatchUp)
+		firstRun = st.LastEnd.IsZero() && r.cfg.Start.IsZero()
 	}
 	planned := 0
 	for w := range windows {
@@ -165,6 +169,11 @@ func (r *Runner) RunOnce(ctx context.Context) (err error) {
 		metrics, err := r.exportAndUpload(ctx, w, joinURL(r.cfg.Dst, name))
 		if err != nil {
 			return fmt.Errorf("snapshot %s: %w", name, err)
+		}
+		if metrics == 0 && firstRun {
+			// Most likely a wrong URL, tenant or job list: fail loudly instead of moving the state past
+			// windows that will never be exported.
+			return fmt.Errorf("snapshot %s: no MDX series in the newest complete window; check the URL, the tenant and the jobs (the state is not saved)", name)
 		}
 		if !backfill {
 			st := state{LastEnd: w.End, LastSnapshot: name, UpdatedAt: r.now().UTC()}

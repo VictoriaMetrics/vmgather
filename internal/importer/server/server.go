@@ -365,7 +365,8 @@ type Server struct {
 	profilesPath        string
 	profiles            []recentProfile
 	profilesMu          sync.RWMutex
-	// allowedHosts are extra Host names accepted from local clients (see httpguard.LocalHostOnly).
+	// allowedHosts are extra Host names accepted from local clients and as the Origin of a plain HTTP
+	// page behind a reverse proxy (see httpguard.LocalHostOnly and httpguard.SameOrigin).
 	allowedHosts []string
 }
 
@@ -707,7 +708,7 @@ func (s *Server) Router() http.Handler {
 			log.Printf("failed to stream UI: %v", err)
 		}
 	})
-	return httpguard.LocalHostOnly(httpguard.SameOrigin(mux), s.allowedHosts...)
+	return httpguard.LocalHostOnly(httpguard.SameOrigin(mux, s.allowedHosts...), s.allowedHosts...)
 }
 
 func (s *Server) handleRecentProfiles(w http.ResponseWriter, r *http.Request) {

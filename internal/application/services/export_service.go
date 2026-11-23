@@ -128,6 +128,12 @@ func (s *exportServiceImpl) ExecuteExport(ctx context.Context, config domain.Exp
 		// wrong and keep a partly appended batch.
 		return nil, fmt.Errorf("cannot resume from batch %d: no progress was recorded for this export", config.ResumeFromBatch)
 	}
+	if resuming && state.StagingBytes > 0 {
+		// Truncate would extend a missing or cut file with zero bytes, and the archive would hold them.
+		if fi, err := os.Stat(config.StagingFile); err != nil || fi.Size() < state.StagingBytes {
+			return nil, fmt.Errorf("cannot resume: the staging file %s is missing or shorter than the %d bytes of completed batches; start a new export", config.StagingFile, state.StagingBytes)
+		}
+	}
 	if err := initializeStagingFile(config.StagingFile, resuming); err != nil {
 		return nil, fmt.Errorf("failed to initialize staging file: %w", err)
 	}

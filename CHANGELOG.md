@@ -12,7 +12,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - `-version` prints the vmgather version.
 - `VMGATHER_VM_PASSWORD`, `VMGATHER_VM_BEARER_TOKEN` and `VMGATHER_VM_HEADER_VALUE` override the auth fields of the oneshot and snapshot config, for Kubernetes Secrets (oneshot and snapshot mode are experimental).
 - **Experimental** Kubernetes manifests in `deploy/k8s/`: a snapshot CronJob and a one-time Job that exports MDX metrics from a vmbackup backup (vmrestore into a temporary vmsingle, then a backfill).
-- `-allowed-hosts host1,host2` flag in vmgather and vmimporter: extra Host names accepted from clients on the same machine, for a local reverse proxy.
+- `-allowed-hosts host1,host2` flag in vmgather and vmimporter for a reverse proxy or a sidecar: these names are accepted as Host from clients on the same machine, and as Origin of a plain HTTP page when the proxy rewrites Host.
 - A failed export can be resumed from the UI (before, only a canceled one). Completed batches are kept; the main button still starts a new export with the current selection.
 - vmimporter removes finished jobs 1 hour after they end, together with the upload kept for resuming a failed job, and removes kept uploads on shutdown. The status of a job is not available after it is removed.
 
@@ -44,6 +44,7 @@ All notable changes to vmgather are documented here. The format follows [Keep a 
 - vmimporter verification cut the `/api/v1/series` answer at 64 KB, did not escape quotes and backslashes in label values, used the unshifted time range after a shift, and gave up before new series became searchable (3-11s on VictoriaMetrics v1.155.0). It now waits up to 30s, retries only an empty answer, 5xx and network errors, and reports a 4xx answer at once.
 - vmimporter left the upload and the extracted file of a failed import in the temp dir forever.
 - The staging file (raw JSONL of the whole export) stayed on disk after a resumed export, and after every export on Windows, where it was still open when vmgather tried to remove it.
+- The staging file of a failed or canceled export stayed on disk forever. It is deleted when the job expires (30 minutes after it ended, when it can no longer be resumed).
 - An export with `resume_from_batch` but without the progress of a failed run (for example in a oneshot config) counted metrics wrong and kept a partly written batch. It is rejected now.
 - The connection check said "Host is reachable" also when the browser got no answer in 3 seconds.
 - 9 e2e specs were broken since the autopilot UI (v1.10.0).

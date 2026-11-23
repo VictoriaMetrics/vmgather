@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -402,10 +403,17 @@ func (m *ExportJobManager) CancelJob(jobID string) error {
 	return nil
 }
 
+// cleanupLocked forgets finished jobs after the retention. A failed or canceled job can no longer be
+// resumed then, so its staging file (raw JSONL of the completed batches) is deleted too.
 func (m *ExportJobManager) cleanupLocked(now time.Time) {
 	for id, job := range m.jobs {
 		if job.status.State == JobCompleted || job.status.State == JobFailed || job.status.State == JobCanceled {
 			if job.status.CompletedAt != nil && now.Sub(*job.status.CompletedAt) > m.retention {
+				if job.status.State != JobCompleted && job.status.StagingPath != "" {
+					if err := os.Remove(job.status.StagingPath); err != nil && !os.IsNotExist(err) {
+						log.Printf("[WARN] cannot remove the staging file of expired job %s: %v", id, err)
+					}
+				}
 				delete(m.jobs, id)
 			}
 		}

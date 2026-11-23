@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -483,5 +485,32 @@ func TestExportJobManagerCleanupRemovesCanceledJobsAfterRetention(t *testing.T) 
 
 	if _, ok := manager.GetStatus(job.status.ID); ok {
 		t.Fatalf("expected canceled job to be removed after retention")
+	}
+}
+
+// A failed job keeps its staging file for resume during the retention; after that nothing can resume
+// it, so the file goes too. Recent failed jobs keep theirs.
+func TestExportJobManagerCleanupRemovesStagingOfExpiredJobs(t *testing.T) {
+	manager := NewExportJobManager(&fakeExportService{})
+	manager.retention = time.Second
+	dir := t.TempDir()
+	old, recent := time.Now().Add(-2*time.Second), time.Now()
+	jobs := map[string]*time.Time{"job-old": &old, "job-recent": &recent}
+	manager.mu.Lock()
+	for id, at := range jobs {
+		path := filepath.Join(dir, id+".partial.jsonl")
+		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		manager.jobs[id] = &exportJob{status: &ExportJobStatus{ID: id, State: JobFailed, CompletedAt: at, StagingPath: path}}
+	}
+	manager.cleanupLocked(time.Now())
+	manager.mu.Unlock()
+
+	if _, err := os.Stat(filepath.Join(dir, "job-old.partial.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("staging file of the expired job is still there: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "job-recent.partial.jsonl")); err != nil {
+		t.Fatalf("staging file of a recent failed job is gone: %v", err)
 	}
 }

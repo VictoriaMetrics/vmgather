@@ -36,7 +36,8 @@ type Server struct {
 	outputDir     string
 	version       string
 	debug         bool
-	// allowedHosts are extra Host names accepted from local clients (see httpguard.LocalHostOnly).
+	// allowedHosts are extra Host names accepted from local clients and as the Origin of a plain HTTP
+	// page behind a reverse proxy (see httpguard.LocalHostOnly and httpguard.SameOrigin).
 	allowedHosts []string
 }
 
@@ -205,7 +206,7 @@ func (s *Server) Router() http.Handler {
 	mux.Handle("/", staticFileServer(staticFS)) // Serve index.html at root
 
 	// Logging middleware
-	return loggingMiddleware(httpguard.LocalHostOnly(httpguard.SameOrigin(mux), s.allowedHosts...))
+	return loggingMiddleware(httpguard.LocalHostOnly(httpguard.SameOrigin(mux, s.allowedHosts...), s.allowedHosts...))
 }
 
 // handleHealth returns server health status

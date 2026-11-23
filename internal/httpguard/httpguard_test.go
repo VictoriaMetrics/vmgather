@@ -52,6 +52,49 @@ func TestSameOrigin(t *testing.T) {
 	}
 }
 
+// A plain HTTP page behind a reverse proxy that rewrites Host: the browser sends Origin
+// http://vmgather.corp but no Sec-Fetch-Site, and the request reaches vmgather with Host 127.0.0.1:8080.
+// -allowed-hosts trusts that Origin; a browser verdict in Sec-Fetch-Site still wins.
+func TestSameOrigin_TrustedHosts(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	h := SameOrigin(next, "vmgather.corp:8443")
+	cases := []struct {
+		name, origin, fetch string
+		rejected            bool
+	}{
+		{name: "trusted origin through a proxy", origin: "http://vmgather.corp"},
+		{name: "trusted origin with a port", origin: "http://vmgather.corp:9000"},
+		{name: "other origin", origin: "http://evil.example", rejected: true},
+		{name: "trusted name as a subdomain of another site", origin: "http://vmgather.corp.evil.example", rejected: true},
+		{name: "browser says cross-site", origin: "http://vmgather.corp", fetch: "cross-site", rejected: true},
+		{name: "null origin", origin: "null", rejected: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/api/export/start", nil)
+			req.Host = "127.0.0.1:8080"
+			req.Header.Set("Origin", tc.origin)
+			if tc.fetch != "" {
+				req.Header.Set("Sec-Fetch-Site", tc.fetch)
+			}
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, req)
+			if got := rr.Code == http.StatusForbidden; got != tc.rejected {
+				t.Fatalf("rejected=%v, want %v", got, tc.rejected)
+			}
+		})
+	}
+	// Without -allowed-hosts the same proxied request is rejected.
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/api/export/start", nil)
+	req.Host = "127.0.0.1:8080"
+	req.Header.Set("Origin", "http://vmgather.corp")
+	rr := httptest.NewRecorder()
+	SameOrigin(next).ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("untrusted proxied origin: want 403, got %d", rr.Code)
+	}
+}
+
 // DNS rebinding: a page from rebind.example whose name later resolves to 127.0.0.1 talks to the local UI as
 // "same origin" and can read responses (directory listings, bundles). Requests from the local machine must use
 // a local host name or an IP address.

@@ -52,6 +52,37 @@ func TestStateStoreRoundTrip(t *testing.T) {
 	}
 }
 
+// On fs:// the state is replaced atomically through a temp file, which must not stay behind.
+func TestStateStoreLocalWriteLeavesNoTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := actions.NewRemoteFS(context.Background(), "fs://"+dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fs.MustStop()
+	store := stateStore{fs: fs}
+	for h := 10; h <= 11; h++ {
+		if err := store.save(state{LastEnd: time.Date(2026, 11, 21, h, 0, 0, 0, time.UTC)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := store.load()
+	if err != nil || !got.LastEnd.Equal(time.Date(2026, 11, 21, 11, 0, 0, 0, time.UTC)) {
+		t.Fatalf("load after two saves: %+v, %v", got, err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != stateFilename {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("files in the destination: %v; want only %s", names, stateFilename)
+	}
+}
+
 // The uploaded snapshot must be readable with vmrestore's actions.Restore, which checks the
 // backup_complete.ignore marker that actions.Backup writes last.
 func TestBackupUploaderRoundTripWithRestore(t *testing.T) {

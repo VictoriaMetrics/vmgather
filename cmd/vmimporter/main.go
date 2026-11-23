@@ -30,7 +30,7 @@ func main() {
 
 	addr := flag.String("addr", "0.0.0.0:8081", "HTTP server address")
 	noBrowser := flag.Bool("no-browser", false, "Do not open browser on start")
-	allowedHosts := flag.String("allowed-hosts", "", "Comma-separated extra Host names accepted from local clients, for a reverse proxy on the same machine (localhost and IP addresses are always accepted)")
+	allowedHosts := flag.String("allowed-hosts", "", "Comma-separated host names of a reverse proxy or sidecar in front of the UI. They are accepted as Host from local clients (localhost and IP addresses always are) and as Origin of plain HTTP pages when the proxy rewrites Host")
 	flag.Parse()
 
 	finalAddr, err := ensureAvailablePort(*addr)
