@@ -20,6 +20,7 @@ import (
 
 	"github.com/VictoriaMetrics/vmgather/internal/application/services"
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
+	"github.com/VictoriaMetrics/vmgather/internal/httpguard"
 	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/obfuscation"
 	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/vm"
 )
@@ -35,6 +36,15 @@ type Server struct {
 	outputDir     string
 	version       string
 	debug         bool
+	// allowedHosts are extra Host names accepted from local clients and as the Origin of a plain HTTP
+	// page behind a reverse proxy (see httpguard.LocalHostOnly and httpguard.SameOrigin).
+	allowedHosts []string
+}
+
+// SetAllowedHosts sets the host names of a reverse proxy or sidecar: accepted as Host from local clients
+// and as the Origin of plain HTTP pages (see httpguard.LocalHostOnly and httpguard.SameOrigin).
+func (s *Server) SetAllowedHosts(hosts []string) {
+	s.allowedHosts = hosts
 }
 
 // NewServer creates a new HTTP server
@@ -197,7 +207,7 @@ func (s *Server) Router() http.Handler {
 	mux.Handle("/", staticFileServer(staticFS)) // Serve index.html at root
 
 	// Logging middleware
-	return loggingMiddleware(mux)
+	return loggingMiddleware(httpguard.LocalHostOnly(httpguard.SameOrigin(mux, s.allowedHosts...), s.allowedHosts...))
 }
 
 // handleHealth returns server health status
@@ -742,6 +752,10 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ensureBatchDefaults(&config)
+	if err := services.ValidateExportConfig(config); err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	// Propagate debug flag
 	if s.debug {
@@ -824,6 +838,10 @@ func (s *Server) handleExportStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ensureBatchDefaults(&config)
+	if err := services.ValidateExportConfig(config); err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	jobID := fmt.Sprintf("job-%d", time.Now().UnixNano())
 	stagingDir := config.StagingDir
 	if stagingDir == "" {
@@ -1400,77 +1418,21 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, absFilePath)
 }
 
-// obfuscateSamples applies obfuscation to sample metrics
+// obfuscateSamples drops and obfuscates sample labels the same way as the export does.
 func (s *Server) obfuscateSamples(samples []domain.MetricSample, config domain.ObfuscationConfig) []domain.MetricSample {
-	// Create obfuscator
-	obfuscator := obfuscation.NewObfuscator()
-
-	// Apply obfuscation to each sample
+	obfuscator := obfuscation.NewLabels(config.LabelNames())
 	for i := range samples {
 		if samples[i].Labels == nil {
 			continue
 		}
-
-		// Drop labels before obfuscation
-		if len(config.DropLabels) > 0 {
-			for _, label := range config.DropLabels {
-				delete(samples[i].Labels, label)
-			}
+		for _, label := range config.DropLabels {
+			delete(samples[i].Labels, label)
 		}
-
-		if !config.Enabled {
-			continue
-		}
-
-		// Obfuscate instance
-		if config.ObfuscateInstance {
-			if instance, exists := samples[i].Labels["instance"]; exists {
-				samples[i].Labels["instance"] = obfuscator.ObfuscateInstance(instance)
-			}
-		}
-
-		// Obfuscate job
-		if config.ObfuscateJob {
-			if job, exists := samples[i].Labels["job"]; exists {
-				// Try to determine component from metric name
-				component := "unknown"
-				if metricName, ok := samples[i].Labels["__name__"]; ok {
-					component = guessComponentFromMetric(metricName)
-				}
-				samples[i].Labels["job"] = obfuscator.ObfuscateJob(job, component)
-			}
-		}
-
-		// Obfuscate custom labels (pod, namespace, etc.)
-		for _, label := range config.CustomLabels {
-			if value, exists := samples[i].Labels[label]; exists {
-				// Use simple hash-based obfuscation for custom labels
-				samples[i].Labels[label] = obfuscator.ObfuscateCustomLabel(label, value)
-			}
+		if obfuscator != nil {
+			obfuscator.Apply(samples[i].Labels)
 		}
 	}
-
 	return samples
-}
-
-// guessComponentFromMetric tries to determine component type from metric name
-func guessComponentFromMetric(metricName string) string {
-	if len(metricName) >= 10 && metricName[0:10] == "vmstorage_" {
-		return "vmstorage"
-	}
-	if len(metricName) >= 9 && metricName[0:9] == "vmselect_" {
-		return "vmselect"
-	}
-	if len(metricName) >= 9 && metricName[0:9] == "vminsert_" {
-		return "vminsert"
-	}
-	if len(metricName) >= 8 && metricName[0:8] == "vmagent_" {
-		return "vmagent"
-	}
-	if len(metricName) >= 8 && metricName[0:8] == "vmalert_" {
-		return "vmalert"
-	}
-	return "unknown"
 }
 
 // staticFileServer serves static files with proper MIME types

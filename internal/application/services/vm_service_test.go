@@ -66,9 +66,9 @@ func TestVMService_DiscoverComponents_ClampsFutureEnd(t *testing.T) {
 		result := []map[string]interface{}{}
 		if ts <= nowUnix+60 {
 			switch {
-			case strings.Contains(query, "label_replace(vm_app_version"):
+			case strings.HasPrefix(query, "group by (job, version)"):
 				result = []map[string]interface{}{
-					{"metric": map[string]string{"job": "vmsingle-noauth", "vm_component": "victoria"}},
+					{"metric": map[string]string{"job": "vmsingle-noauth", "version": "victoria-metrics-20261023-161715-tags-v1.155.0-0-g3fec2f7241"}},
 				}
 			case strings.HasPrefix(query, "count("):
 				result = []map[string]interface{}{
@@ -116,7 +116,7 @@ func TestVMService_DiscoverComponents_ClampsFutureEnd(t *testing.T) {
 	if len(components) != 1 {
 		t.Fatalf("expected 1 component, got %d", len(components))
 	}
-	if components[0].Component != "victoria" {
+	if components[0].Component != "victoria-metrics" {
 		t.Fatalf("unexpected component %+v", components[0])
 	}
 }

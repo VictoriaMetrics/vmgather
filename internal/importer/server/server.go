@@ -16,7 +16,6 @@ import (
 	"io/fs"
 	"log"
 	"math"
-	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -26,6 +25,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/VictoriaMetrics/vmgather/internal/httpguard"
+	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/vm"
 )
 
 const importerHTTPTimeout = 5 * time.Minute
@@ -55,8 +57,6 @@ type uploadConfig struct {
 	CustomHeaderName  string   `json:"custom_header_name,omitempty"`
 	CustomHeaderValue string   `json:"custom_header_value,omitempty"`
 	SkipTLSVerify     bool     `json:"skip_tls_verify"`
-	MetricStepSeconds int      `json:"metric_step_seconds"`
-	BatchWindowSecs   int      `json:"batch_window_seconds"`
 	DropOld           bool     `json:"drop_old"`
 	TimeShiftMs       int64    `json:"time_shift_ms"`
 	MaxLabelsOverride int      `json:"max_labels_override,omitempty"`
@@ -71,8 +71,6 @@ type recentProfile struct {
 	Username          string    `json:"username,omitempty"`
 	CustomHeaderName  string    `json:"custom_header_name,omitempty"`
 	SkipTLSVerify     bool      `json:"skip_tls_verify,omitempty"`
-	MetricStepSeconds int       `json:"metric_step_seconds,omitempty"`
-	BatchWindowSecs   int       `json:"batch_window_seconds,omitempty"`
 	DropOld           bool      `json:"drop_old"`
 	TimeShiftMs       int64     `json:"time_shift_ms,omitempty"`
 	MaxLabelsOverride int       `json:"max_labels_override,omitempty"`
@@ -98,12 +96,72 @@ type verificationResult struct {
 }
 
 type bundleInfo struct {
-	MetricsPath    string
+	// MetricsPath is the uploaded file: plain JSONL, or a zip when ZipEntry is set.
+	MetricsPath string
+	// ZipEntry is the JSONL entry inside the zip. The zip is read in place and never extracted to disk:
+	// a 9 MB bundle used to take 1 GB of temp space before the import even started.
+	ZipEntry string
+	// zipIndex is the position of ZipEntry in the zip directory, so a zip with duplicate names is read
+	// from the same entry that was validated.
+	zipIndex       int
 	Metadata       *bundleMetadata
 	ContentType    string
 	OriginalBytes  int64
 	ExtractedBytes int64
-	Cleanup        func()
+}
+
+// open returns the metrics JSONL stream positioned at offset (bytes of the uncompressed stream).
+func (b *bundleInfo) open(offset int64) (io.ReadCloser, error) {
+	if b.ZipEntry == "" {
+		f, err := os.Open(b.MetricsPath)
+		if err != nil {
+			return nil, err
+		}
+		if offset > 0 {
+			if _, err := f.Seek(offset, io.SeekStart); err != nil {
+				_ = f.Close()
+				return nil, fmt.Errorf("failed to seek for resume: %w", err)
+			}
+		}
+		return f, nil
+	}
+	zr, err := zip.OpenReader(b.MetricsPath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot open zip bundle: %w", err)
+	}
+	if b.zipIndex < len(zr.File) && zr.File[b.zipIndex].Name == b.ZipEntry {
+		f := zr.File[b.zipIndex]
+		rc, err := f.Open()
+		if err != nil {
+			_ = zr.Close()
+			return nil, fmt.Errorf("failed to open %s: %w", b.ZipEntry, err)
+		}
+		if offset > 0 {
+			// A deflate stream cannot seek: skip the already imported bytes.
+			if _, err := io.CopyN(io.Discard, rc, offset); err != nil {
+				_ = rc.Close()
+				_ = zr.Close()
+				return nil, fmt.Errorf("failed to skip to resume offset: %w", err)
+			}
+		}
+		return &zipEntryReader{ReadCloser: rc, zip: zr}, nil
+	}
+	_ = zr.Close()
+	return nil, fmt.Errorf("zip entry %q not found", b.ZipEntry)
+}
+
+// zipEntryReader closes the zip file together with the entry stream.
+type zipEntryReader struct {
+	io.ReadCloser
+	zip *zip.ReadCloser
+}
+
+func (r *zipEntryReader) Close() error {
+	err := r.ReadCloser.Close()
+	if zerr := r.zip.Close(); err == nil {
+		err = zerr
+	}
+	return err
 }
 
 type bundleMetadata struct {
@@ -175,6 +233,44 @@ func (s *Server) failJob(job *importJob, err error) {
 		j.Error = err.Error()
 		j.Percent = 100
 	})
+	s.scheduleExpiry(job)
+}
+
+// jobRetention is how long a finished job stays visible. A failed job keeps its upload for resume
+// during this time; after it the upload is deleted, so failed imports do not fill the temp dir.
+var jobRetention = time.Hour
+
+// scheduleExpiry removes a finished job (and the upload kept for its resume) after jobRetention.
+func (s *Server) scheduleExpiry(job *importJob) {
+	time.AfterFunc(jobRetention, func() { s.expireJob(job.ID) })
+}
+
+// Close removes the uploads that jobs still hold. Jobs live only in memory, so after a restart such
+// uploads can never be resumed and would stay in the temp dir forever.
+func (s *Server) Close() {
+	s.jobsMu.Lock()
+	defer s.jobsMu.Unlock()
+	for _, job := range s.jobs {
+		if job.BundlePath != "" {
+			_ = os.Remove(job.BundlePath)
+		}
+	}
+}
+
+func (s *Server) expireJob(id string) {
+	s.jobsMu.Lock()
+	defer s.jobsMu.Unlock()
+	job, ok := s.jobs[id]
+	if !ok || (job.State != jobStateCompleted && job.State != jobStateFailed) {
+		return // gone, or resumed and running again
+	}
+	if time.Since(job.UpdatedAt) < jobRetention {
+		return // finished again later (resume); that run scheduled its own expiry
+	}
+	if job.ResumeReady && job.BundlePath != "" {
+		_ = os.Remove(job.BundlePath)
+	}
+	delete(s.jobs, id)
 }
 
 type importJob struct {
@@ -269,6 +365,15 @@ type Server struct {
 	profilesPath        string
 	profiles            []recentProfile
 	profilesMu          sync.RWMutex
+	// allowedHosts are extra Host names accepted from local clients and as the Origin of a plain HTTP
+	// page behind a reverse proxy (see httpguard.LocalHostOnly and httpguard.SameOrigin).
+	allowedHosts []string
+}
+
+// SetAllowedHosts sets the host names of a reverse proxy or sidecar: accepted as Host from local clients
+// and as the Origin of plain HTTP pages (see httpguard.LocalHostOnly and httpguard.SameOrigin).
+func (s *Server) SetAllowedHosts(hosts []string) {
+	s.allowedHosts = hosts
 }
 
 func NewServer(version string) *Server {
@@ -412,8 +517,6 @@ func buildRecentProfile(cfg uploadConfig) (recentProfile, bool) {
 		TenantID:          strings.TrimSpace(cfg.TenantID),
 		AuthType:          normalizeAuthType(cfg.AuthType),
 		SkipTLSVerify:     cfg.SkipTLSVerify,
-		MetricStepSeconds: cfg.MetricStepSeconds,
-		BatchWindowSecs:   cfg.BatchWindowSecs,
 		DropOld:           cfg.DropOld,
 		TimeShiftMs:       cfg.TimeShiftMs,
 		MaxLabelsOverride: sanitizeMaxLabelsOverride(cfg.MaxLabelsOverride),
@@ -435,8 +538,6 @@ func buildRecentProfile(cfg uploadConfig) (recentProfile, bool) {
 	_, _ = h.Write([]byte("|" + profile.Username))
 	_, _ = h.Write([]byte("|" + profile.CustomHeaderName))
 	_, _ = h.Write([]byte("|" + strconv.FormatBool(profile.SkipTLSVerify)))
-	_, _ = h.Write([]byte("|" + strconv.Itoa(profile.MetricStepSeconds)))
-	_, _ = h.Write([]byte("|" + strconv.Itoa(profile.BatchWindowSecs)))
 	_, _ = h.Write([]byte("|" + strconv.FormatBool(profile.DropOld)))
 	_, _ = h.Write([]byte("|" + strconv.FormatInt(profile.TimeShiftMs, 10)))
 	_, _ = h.Write([]byte("|" + strconv.Itoa(profile.MaxLabelsOverride)))
@@ -515,8 +616,6 @@ func (s *Server) loadRecentProfiles() {
 				Username:          profiles[index].Username,
 				CustomHeaderName:  profiles[index].CustomHeaderName,
 				SkipTLSVerify:     profiles[index].SkipTLSVerify,
-				MetricStepSeconds: profiles[index].MetricStepSeconds,
-				BatchWindowSecs:   profiles[index].BatchWindowSecs,
 				DropOld:           profiles[index].DropOld,
 				TimeShiftMs:       profiles[index].TimeShiftMs,
 				MaxLabelsOverride: profiles[index].MaxLabelsOverride,
@@ -610,7 +709,7 @@ func (s *Server) Router() http.Handler {
 			log.Printf("failed to stream UI: %v", err)
 		}
 	})
-	return mux
+	return httpguard.LocalHostOnly(httpguard.SameOrigin(mux, s.allowedHosts...), s.allowedHosts...)
 }
 
 func (s *Server) handleRecentProfiles(w http.ResponseWriter, r *http.Request) {
@@ -691,12 +790,19 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if err := r.ParseMultipartForm(512 << 20); err != nil {
-		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("failed to parse form: %v", err))
+	form, status, err := readUploadForm(r)
+	if err != nil {
+		respondWithError(w, status, err.Error())
 		return
 	}
+	keepUpload := false
+	defer func() {
+		if !keepUpload {
+			form.discard()
+		}
+	}()
 
-	cfgRaw := r.FormValue("config")
+	cfgRaw := form.Fields["config"]
 	if cfgRaw == "" {
 		respondWithError(w, http.StatusBadRequest, "missing config payload")
 		return
@@ -708,19 +814,11 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg.DropLabels = sanitizeDropLabels(cfg.DropLabels)
 	cfg.MaxLabelsOverride = sanitizeMaxLabelsOverride(cfg.MaxLabelsOverride)
-	file, header, err := r.FormFile("bundle")
-	if err != nil {
+	if form.Path == "" {
 		respondWithError(w, http.StatusBadRequest, "bundle file is required")
 		return
 	}
-	defer func() { _ = file.Close() }()
 	s.saveRecentProfile(cfg)
-
-	tempPath, uploadedBytes, err := persistUploadedFile(file)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("failed to persist bundle: %v", err))
-		return
-	}
 
 	importURL, queryURL, err := resolveEndpoints(cfg)
 	if err != nil {
@@ -728,12 +826,14 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job := s.newJob(uploadedBytes)
+	job := s.newJob(form.Size)
+	job.BundlePath = form.Path // owned by the job from now on, so Close removes it even before the job starts
 	s.storeJob(job)
 
 	// Snapshot the queued job before starting async execution to avoid races under -race.
 	jobSnapshot := snapshotJob(job)
-	go s.runImportJob(context.Background(), job, cfg, tempPath, header.Filename, importURL, queryURL, 0)
+	keepUpload = true // runImportJob owns the upload from here
+	go s.runImportJob(context.Background(), job, cfg, form.Path, form.FileName, importURL, queryURL, 0)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(struct {
@@ -750,11 +850,13 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if err := r.ParseMultipartForm(512 << 20); err != nil {
-		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("failed to parse form: %v", err))
+	form, status, err := readUploadForm(r)
+	if err != nil {
+		respondWithError(w, status, err.Error())
 		return
 	}
-	cfgRaw := r.FormValue("config")
+	defer form.discard()
+	cfgRaw := form.Fields["config"]
 	if cfgRaw == "" {
 		respondWithError(w, http.StatusBadRequest, "missing config payload")
 		return
@@ -768,44 +870,29 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	cfg.MaxLabelsOverride = sanitizeMaxLabelsOverride(cfg.MaxLabelsOverride)
 	s.saveRecentProfile(cfg)
 
-	fullCollection := parseBoolFormValue(r.FormValue("full_collection"))
+	fullCollection := parseBoolFormValue(form.Fields["full_collection"])
 	sampleLimit := defaultAnalyzeSampleLines
 	analysisMode := "sample"
 	if fullCollection {
 		sampleLimit = 0
 		analysisMode = "full"
 	}
-	file, header, err := r.FormFile("bundle")
-	if err != nil {
+	if form.Path == "" {
 		respondWithError(w, http.StatusBadRequest, "bundle file is required")
 		return
 	}
-	defer func() { _ = file.Close() }()
 
-	tempPath, uploadedBytes, err := persistUploadedFile(file)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, fmt.Sprintf("failed to persist bundle: %v", err))
-		return
-	}
-	defer func() { _ = os.Remove(tempPath) }()
-
-	bundle, err := prepareBundle(tempPath, header.Filename, uploadedBytes)
+	bundle, err := prepareBundle(form.Path, form.FileName, form.Size)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("failed to prepare bundle: %v", err))
 		return
-	}
-	if bundle.Cleanup != nil {
-		defer bundle.Cleanup()
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	retentionCutoff := s.retentionCutoff(ctx, cfg)
+	retentionCutoff := s.effectiveRetentionCutoff(ctx, cfg)
 	detectedMaxLabelsLimit, maxLabelsLimit, maxLabelsSource := s.resolveMaxLabelsLimit(ctx, cfg)
-	if !cfg.DropOld {
-		retentionCutoff = 0
-	}
 
 	summary, err := s.analyzeBundle(ctx, bundle, retentionCutoff, cfg.TimeShiftMs, maxLabelsLimit, cfg.DropLabels, sampleLimit)
 	if err != nil {
@@ -823,7 +910,7 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		"protected_labels":          protectedDropLabels,
 		"warnings":                  buildAnalysisWarnings(summary, retentionCutoff, maxLabelsLimit),
 		"suggested_shift_ms": func() int64 {
-			if retentionCutoff > 0 && !summary.Start.IsZero() && summary.Start.UnixMilli() < retentionCutoff {
+			if retentionCutoff != 0 && !summary.Start.IsZero() && summary.Start.UnixMilli() < retentionCutoff {
 				return retentionCutoff - summary.Start.UnixMilli() + int64(time.Hour/time.Millisecond)
 			}
 			return 0
@@ -833,7 +920,77 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-func persistUploadedFile(src multipart.File) (string, int64, error) {
+// uploadForm is a parsed upload: small text fields and the bundle stored in a temp file the caller owns.
+type uploadForm struct {
+	Fields   map[string]string
+	Path     string
+	FileName string
+	Size     int64
+}
+
+const (
+	maxUploadFieldBytes = 1 << 20
+	// maxUploadFormBytes and maxUploadFields cap all text fields together, so a form with many
+	// uniquely named fields cannot fill the memory.
+	maxUploadFormBytes = 4 << 20
+	maxUploadFields    = 64
+)
+
+// readUploadForm streams a multipart upload: the bundle part goes straight to a temp file, other fields
+// are read into memory (1 MB each, 4 MB and 64 fields in total at most). ParseMultipartForm(512 MB)
+// kept the bundle in RAM and then copied it again: 1 GB peak RSS for a 419 MB bundle.
+func readUploadForm(r *http.Request) (*uploadForm, int, error) {
+	mr, err := r.MultipartReader()
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("failed to parse form: %w", err)
+	}
+	form := &uploadForm{Fields: make(map[string]string)}
+	formBytes := 0
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			return form, 0, nil
+		}
+		if err != nil {
+			form.discard()
+			return nil, http.StatusBadRequest, fmt.Errorf("failed to parse form: %w", err)
+		}
+		if part.FormName() == "bundle" && part.FileName() != "" && form.Path == "" {
+			path, n, err := persistUploadedFile(part)
+			_ = part.Close()
+			if err != nil {
+				form.discard()
+				return nil, http.StatusInternalServerError, fmt.Errorf("failed to persist bundle: %w", err)
+			}
+			form.Path, form.FileName, form.Size = path, part.FileName(), n
+			continue
+		}
+		if len(form.Fields) >= maxUploadFields {
+			_ = part.Close()
+			form.discard()
+			return nil, http.StatusBadRequest, fmt.Errorf("too many form fields (%d at most)", maxUploadFields)
+		}
+		limit := min(maxUploadFieldBytes, maxUploadFormBytes-formBytes)
+		value, err := io.ReadAll(io.LimitReader(part, int64(limit)+1))
+		_ = part.Close()
+		if err != nil || len(value) > limit {
+			form.discard()
+			return nil, http.StatusBadRequest, fmt.Errorf("invalid form field %q: too large or the form is too large", part.FormName())
+		}
+		formBytes += len(part.FormName()) + len(value)
+		form.Fields[part.FormName()] = string(value)
+	}
+}
+
+// discard removes the uploaded bundle.
+func (f *uploadForm) discard() {
+	if f.Path != "" {
+		_ = os.Remove(f.Path)
+		f.Path = ""
+	}
+}
+
+func persistUploadedFile(src io.Reader) (string, int64, error) {
 	tmp, err := os.CreateTemp("", "vmimport-upload-*")
 	if err != nil {
 		return "", 0, err
@@ -849,37 +1006,37 @@ func persistUploadedFile(src multipart.File) (string, int64, error) {
 }
 
 func prepareBundle(path, originalName string, uploadedBytes int64) (*bundleInfo, error) {
-	ext := strings.ToLower(filepath.Ext(originalName))
-	switch ext {
-	case ".zip":
-		return prepareZipBundle(path, uploadedBytes)
-	case ".jsonl", ".json":
-		info, err := os.Stat(path)
-		if err != nil {
-			return nil, fmt.Errorf("failed to stat bundle: %w", err)
-		}
-		return &bundleInfo{
-			MetricsPath:    path,
-			ContentType:    "application/jsonl",
-			OriginalBytes:  uploadedBytes,
-			ExtractedBytes: info.Size(),
-		}, nil
-	default:
-		// fall back to extension from path
-		if strings.HasSuffix(strings.ToLower(path), ".zip") {
-			return prepareZipBundle(path, uploadedBytes)
-		}
-		info, err := os.Stat(path)
-		if err != nil {
-			return nil, fmt.Errorf("failed to stat bundle: %w", err)
-		}
-		return &bundleInfo{
-			MetricsPath:    path,
-			ContentType:    "application/jsonl",
-			OriginalBytes:  uploadedBytes,
-			ExtractedBytes: info.Size(),
-		}, nil
+	isZip, err := isZipFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read bundle: %w", err)
 	}
+	if isZip || strings.EqualFold(filepath.Ext(originalName), ".zip") {
+		return prepareZipBundle(path, uploadedBytes)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat bundle: %w", err)
+	}
+	return &bundleInfo{
+		MetricsPath:    path,
+		ContentType:    "application/jsonl",
+		OriginalBytes:  uploadedBytes,
+		ExtractedBytes: info.Size(),
+	}, nil
+}
+
+// isZipFile checks the zip signature. Uploads are stored under temp names without an extension.
+func isZipFile(path string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = f.Close() }()
+	var magic [4]byte
+	if _, err := io.ReadFull(f, magic[:]); err != nil {
+		return false, nil // shorter than a zip header: not a zip
+	}
+	return string(magic[:]) == "PK\x03\x04", nil
 }
 
 func (s *Server) analyzeBundle(ctx context.Context, bundle *bundleInfo, retentionCutoffMs int64, shiftMs int64, maxLabelsLimit int, dropLabels []string, sampleLimit int) (importSummary, error) {
@@ -901,15 +1058,13 @@ func (s *Server) analyzeBundle(ctx context.Context, bundle *bundleInfo, retentio
 		summary.InflatedBytes = bundle.ExtractedBytes
 	}
 
-	file, err := os.Open(bundle.MetricsPath)
+	file, err := bundle.open(0)
 	if err != nil {
 		return summary, fmt.Errorf("failed to open bundle: %w", err)
 	}
 	defer func() { _ = file.Close() }()
 
-	scanner := bufio.NewScanner(file)
-	buf := make([]byte, 0, 1024*1024)
-	scanner.Buffer(buf, 16*1024*1024)
+	scanner, lineBytes := newMetricsLineScanner(file)
 	linesScanned := 0
 
 	for scanner.Scan() {
@@ -919,7 +1074,7 @@ func (s *Server) analyzeBundle(ctx context.Context, bundle *bundleInfo, retentio
 		}
 		linesScanned++
 		line := scanner.Bytes()
-		summary.ProcessedBytes += int64(len(line)) + 1
+		summary.ProcessedBytes += int64(*lineBytes)
 
 		var parsed metricLine
 		if err := json.Unmarshal(line, &parsed); err != nil {
@@ -948,22 +1103,12 @@ func (s *Server) analyzeBundle(ctx context.Context, bundle *bundleInfo, retentio
 		}
 		parsedTotal := len(parsed.Timestamps)
 		summary.TotalPoints += parsedTotal
-		filteredTs, filteredVals, dropped := filterTimestampsAndValues(parsed.Timestamps, values, retentionCutoffMs)
-		if dropped > 0 {
-			summary.DroppedOld += dropped
-		}
+		filteredTs, filteredVals, dropped, scaled := prepareSeriesSamples(parsed.Timestamps, values, retentionCutoffMs, shiftMs)
+		summary.DroppedOld += dropped
+		summary.NormalizedTs = summary.NormalizedTs || scaled
 		if len(filteredTs) == 0 || len(filteredTs) != len(filteredVals) {
 			summary.SkippedLines++
 			continue
-		}
-		if tsNormalized, scaled := normalizeTimestamps(filteredTs); scaled {
-			filteredTs = tsNormalized
-			summary.NormalizedTs = true
-		}
-		if shiftMs != 0 {
-			for i := range filteredTs {
-				filteredTs[i] += shiftMs
-			}
 		}
 		if _, err := buildNormalizedLine(parsed.Metric, filteredVals, filteredTs); err != nil {
 			summary.SkippedLines++
@@ -1042,7 +1187,7 @@ func encodeSeriesLabelBitsets(seriesLabels [][]string, universe []string) []stri
 
 func buildAnalysisWarnings(summary importSummary, cutoffMs int64, maxLabelsLimit int) []string {
 	var warnings []string
-	if cutoffMs > 0 && !summary.Start.IsZero() {
+	if cutoffMs != 0 && !summary.Start.IsZero() {
 		cutoff := time.UnixMilli(cutoffMs)
 		if summary.Start.Before(cutoff) {
 			total := summary.Points + summary.DroppedOld
@@ -1051,13 +1196,13 @@ func buildAnalysisWarnings(summary importSummary, cutoffMs int64, maxLabelsLimit
 				percent = float64(summary.DroppedOld) / float64(total) * 100
 			}
 			shift := cutoff.Sub(summary.Start)
-			warnings = append(warnings, fmt.Sprintf("Data starts at %s which is before retention cutoff %s. Older samples would drop (%.1f%% of points). Consider shifting timestamps forward by %s.", summary.Start.UTC().Format(time.RFC3339), cutoff.UTC().Format(time.RFC3339), percent, shift.Round(time.Second)))
+			warnings = append(warnings, fmt.Sprintf("%.1f%% of the samples are older than the target keeps and will not be imported. Move the data forward by %s to keep them.", percent, shift.Round(time.Minute)))
 		}
 		if !summary.End.IsZero() {
 			window := time.Since(cutoff)
 			span := summary.End.Sub(summary.Start)
 			if span > window {
-				warnings = append(warnings, fmt.Sprintf("Bundle covers %s which exceeds current retention window (~%s). Tail data will be trimmed.", span.Round(time.Second), window.Round(time.Second)))
+				warnings = append(warnings, fmt.Sprintf("The bundle covers %s, more than the target retention of %s: the oldest part will not be imported.", span.Round(time.Minute), window.Round(time.Minute)))
 			}
 		}
 	}
@@ -1065,20 +1210,18 @@ func buildAnalysisWarnings(summary importSummary, cutoffMs int64, maxLabelsLimit
 		warnings = append(warnings, fmt.Sprintf("Skipped %d invalid or empty lines.", summary.SkippedLines))
 	}
 	if summary.DroppedOld > 0 {
-		warnings = append(warnings, fmt.Sprintf("Dropped %d samples outside retention window.", summary.DroppedOld))
+		warnings = append(warnings, fmt.Sprintf("%d samples are older than the target retention and will not be imported.", summary.DroppedOld))
 	}
 	if summary.NormalizedTs {
-		warnings = append(warnings, "Timestamps were auto-scaled to milliseconds (detected non-ms input).")
+		warnings = append(warnings, "Timestamps were converted to milliseconds.")
 	}
 	if maxLabelsLimit > 0 && summary.OverLabelLimit > 0 {
-		warnings = append(warnings, fmt.Sprintf("Target label limit risk: %d/%d analyzed series exceed maxLabelsPerTimeseries=%d (max seen=%d, affected points in sample=%d). These series will be dropped by VictoriaMetrics until the limit is increased.", summary.OverLabelLimit, summary.AnalyzedLines, maxLabelsLimit, summary.MaxLabelsSeen, summary.OverLimitPts))
+		warnings = append(warnings, fmt.Sprintf("%d series have more labels than the target allows (%d); VictoriaMetrics drops them.", summary.OverLabelLimit, maxLabelsLimit))
 	}
 	if maxLabelsLimit == 0 && summary.MaxLabelsSeen > 40 {
-		warnings = append(warnings, fmt.Sprintf("Detected series with high label count (max seen=%d), but target maxLabelsPerTimeseries could not be read. Run Full collection and confirm target limit before import.", summary.MaxLabelsSeen))
+		warnings = append(warnings, fmt.Sprintf("Series have up to %d labels, but the target label limit is unknown. Enter it above and check all lines.", summary.MaxLabelsSeen))
 	}
-	if summary.SampleCut && summary.SampleLimit > 0 {
-		warnings = append(warnings, fmt.Sprintf("Preflight sampled first %d lines (full bundle not scanned). Use Full collection for complete diagnostics.", summary.SampleLimit))
-	}
+	// A sampled check is the default mode, not a problem; the UI already says how many lines it read.
 	return warnings
 }
 
@@ -1117,7 +1260,9 @@ func prepareZipBundle(path string, uploadedBytes int64) (*bundleInfo, error) {
 		nameLower := strings.ToLower(f.Name)
 		switch nameLower {
 		case "metrics.jsonl":
-			metricsFile = f
+			if metricsFile == nil {
+				metricsFile = f
+			}
 		case "metadata.json":
 			meta, err := parseMetadataFile(f)
 			if err != nil {
@@ -1152,42 +1297,21 @@ func prepareZipBundle(path string, uploadedBytes int64) (*bundleInfo, error) {
 		}
 	}
 
-	tempMetrics, err := os.CreateTemp("", "vmimport-metrics-*.jsonl")
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare staging metrics file: %w", err)
+	zipIndex := 0
+	for i, f := range reader.File {
+		if f == metricsFile {
+			zipIndex = i
+			break
+		}
 	}
-
-	source, err := metricsFile.Open()
-	if err != nil {
-		_ = tempMetrics.Close()
-		_ = os.Remove(tempMetrics.Name())
-		return nil, fmt.Errorf("failed to open metrics entry: %w", err)
-	}
-
-	if _, err := io.Copy(tempMetrics, source); err != nil {
-		_ = source.Close()
-		_ = tempMetrics.Close()
-		_ = os.Remove(tempMetrics.Name())
-		return nil, fmt.Errorf("failed to extract metrics.jsonl: %w", err)
-	}
-	_ = source.Close()
-	_ = tempMetrics.Close()
-
-	info, err := os.Stat(tempMetrics.Name())
-	if err != nil {
-		_ = os.Remove(tempMetrics.Name())
-		return nil, fmt.Errorf("failed to stat extracted metrics: %w", err)
-	}
-
 	return &bundleInfo{
-		MetricsPath:    tempMetrics.Name(),
+		MetricsPath:    path,
+		ZipEntry:       metricsFile.Name,
+		zipIndex:       zipIndex,
 		Metadata:       metadata,
 		ContentType:    "application/jsonl",
 		OriginalBytes:  uploadedBytes,
-		ExtractedBytes: info.Size(),
-		Cleanup: func() {
-			_ = os.Remove(tempMetrics.Name())
-		},
+		ExtractedBytes: int64(metricsFile.UncompressedSize64),
 	}, nil
 }
 
@@ -1209,8 +1333,8 @@ func (s *Server) runImportJob(ctx context.Context, job *importJob, cfg uploadCon
 
 	s.updateJob(job, func(j *importJob) {
 		j.State = jobStateRunning
-		j.Stage = "extracting"
-		j.Message = "Extracting bundle…"
+		j.Stage = "preparing"
+		j.Message = "Reading bundle…"
 		j.Percent = 2
 		j.ImportURL = importURL
 		j.QueryURL = queryURL
@@ -1225,17 +1349,6 @@ func (s *Server) runImportJob(ctx context.Context, job *importJob, cfg uploadCon
 		s.failJob(job, err)
 		return
 	}
-	cleanupBundle := true
-	if bundle != nil && bundle.Cleanup != nil {
-		defer func() {
-			if cleanupBundle {
-				bundle.Cleanup()
-			}
-		}()
-	}
-	s.updateJob(job, func(j *importJob) {
-		j.BundlePath = bundle.MetricsPath
-	})
 
 	s.updateJob(job, func(j *importJob) {
 		j.SourceBytes = bundle.OriginalBytes
@@ -1262,7 +1375,7 @@ func (s *Server) runImportJob(ctx context.Context, job *importJob, cfg uploadCon
 		})
 	}
 
-	retentionCutoff := s.retentionCutoff(ctx, cfg)
+	retentionCutoff := s.effectiveRetentionCutoff(ctx, cfg)
 	_, maxLabelsLimit, _ := s.resolveMaxLabelsLimit(ctx, cfg)
 
 	_, summary, err := s.streamImport(ctx, cfg, bundle, importURL, startOffset, retentionCutoff, cfg.TimeShiftMs, maxLabelsLimit, progress)
@@ -1277,8 +1390,8 @@ func (s *Server) runImportJob(ctx context.Context, job *importJob, cfg uploadCon
 			j.ResumeReady = true
 			j.Summary = &summary
 		})
-		cleanupTemp = false
-		cleanupBundle = false
+		cleanupTemp = false // kept for resume; removed when the job expires
+		s.scheduleExpiry(job)
 		return
 	}
 	summary.SourceBytes = bundle.OriginalBytes
@@ -1305,6 +1418,7 @@ func (s *Server) runImportJob(ctx context.Context, job *importJob, cfg uploadCon
 		j.ResumeOffset = 0
 		j.BundlePath = ""
 	})
+	s.scheduleExpiry(job)
 }
 
 func parseMetadataFile(f *zip.File) (*bundleMetadata, error) {
@@ -1372,28 +1486,24 @@ func (s *Server) streamImport(ctx context.Context, cfg uploadConfig, bundle *bun
 		summary.InflatedBytes = bundle.ExtractedBytes
 	}
 	if bundle.Metadata != nil {
+		// The bundle's time range is pinned for verification; it must move with the time shift.
+		shift := time.Duration(shiftMs) * time.Millisecond
 		if start, err := time.Parse(time.RFC3339, bundle.Metadata.TimeRange.Start); err == nil {
-			summary.Start = start
+			summary.Start = start.Add(shift)
 		}
 		if end, err := time.Parse(time.RFC3339, bundle.Metadata.TimeRange.End); err == nil {
-			summary.End = end
+			summary.End = end.Add(shift)
 		}
 		if !summary.Start.IsZero() && !summary.End.IsZero() {
 			summary.rangePinned = true
 		}
 	}
 
-	file, err := os.Open(bundle.MetricsPath)
+	file, err := bundle.open(startOffset)
 	if err != nil {
 		return nil, summary, fmt.Errorf("failed to open metrics for import: %w", err)
 	}
 	defer func() { _ = file.Close() }()
-
-	if startOffset > 0 {
-		if _, err := file.Seek(startOffset, io.SeekStart); err != nil {
-			return nil, summary, fmt.Errorf("failed to seek for resume: %w", err)
-		}
-	}
 
 	var (
 		lastStatus      int
@@ -1410,9 +1520,7 @@ func (s *Server) streamImport(ctx context.Context, cfg uploadConfig, bundle *bun
 		chunkEndOffset int64
 	)
 
-	scanner := bufio.NewScanner(file)
-	buf := make([]byte, 0, 1024*1024)
-	scanner.Buffer(buf, 16*1024*1024)
+	scanner, lineBytes := newMetricsLineScanner(file)
 
 	commitChunk := func() error {
 		if chunk.Len() == 0 {
@@ -1475,7 +1583,7 @@ func (s *Server) streamImport(ctx context.Context, cfg uploadConfig, bundle *bun
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		currentOffset += int64(len(line)) + 1 // account for newline
+		currentOffset += int64(*lineBytes) // line plus its "\n" or "\r\n"
 
 		var parsed metricLine
 		if err := json.Unmarshal(line, &parsed); err != nil {
@@ -1493,29 +1601,17 @@ func (s *Server) streamImport(ctx context.Context, cfg uploadConfig, bundle *bun
 			summary.OverLimitPts += len(parsed.Timestamps)
 		}
 
-		parsed.Timestamps, _ = normalizeTimestamps(parsed.Timestamps)
 		values, err := normalizeValues(parsed.Values)
 		if err != nil {
 			summary.SkippedLines++
 			continue
 		}
-		filteredTs, filteredVals, dropped := filterTimestampsAndValues(parsed.Timestamps, values, retentionCutoffMs)
-		if dropped > 0 {
-			summary.DroppedOld += dropped
-		}
+		filteredTs, filteredVals, dropped, scaled := prepareSeriesSamples(parsed.Timestamps, values, retentionCutoffMs, shiftMs)
+		summary.DroppedOld += dropped
+		summary.NormalizedTs = summary.NormalizedTs || scaled
 		if len(filteredTs) == 0 || len(filteredTs) != len(filteredVals) {
 			summary.SkippedLines++
 			continue
-		}
-
-		if tsNormalized, scaled := normalizeTimestamps(filteredTs); scaled {
-			filteredTs = tsNormalized
-			summary.NormalizedTs = true
-		}
-		if shiftMs != 0 {
-			for i := range filteredTs {
-				filteredTs[i] += shiftMs
-			}
 		}
 
 		normalized, err := buildNormalizedLine(parsed.Metric, filteredVals, filteredTs)
@@ -1570,45 +1666,79 @@ func (s *Server) streamImport(ctx context.Context, cfg uploadConfig, bundle *bun
 	}, summary, nil
 }
 
-func normalizeValues(raw []json.RawMessage) ([]float64, error) {
-	values := make([]float64, 0, len(raw))
+// normalizeValues validates sample values and returns them as JSON for /api/v1/import, without a
+// float round trip for plain numbers. Numbers and null pass as-is (/api/v1/export writes NaN as null).
+// Strings are parsed as floats, so "NaN", "Inf", "+Inf" and numeric strings become values that
+// /api/v1/import accepts (see vm.AppendJSONFloat); "null" stays null. Booleans become 0/1.
+func normalizeValues(raw []json.RawMessage) ([]json.RawMessage, error) {
+	values := make([]json.RawMessage, 0, len(raw))
 	for _, v := range raw {
-		// Try to decode as number first
-		var num json.Number
-		if err := json.Unmarshal(v, &num); err == nil {
-			f, err := num.Float64()
-			if err != nil {
+		if len(v) == 0 {
+			return nil, errors.New("empty value")
+		}
+		switch v[0] {
+		case '"':
+			var s string
+			if err := json.Unmarshal(v, &s); err != nil {
 				return nil, err
 			}
-			values = append(values, f)
-			continue
-		}
-
-		// Strings that contain numbers ("1", "0.5", "NaN")
-		var s string
-		if err := json.Unmarshal(v, &s); err == nil {
+			if strings.EqualFold(s, "null") {
+				values = append(values, jsonNull)
+				continue
+			}
 			f, err := strconv.ParseFloat(s, 64)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("unsupported value %s", string(v))
 			}
-			values = append(values, f)
-			continue
+			values = append(values, vm.AppendJSONFloat(nil, f))
+		case 't':
+			values = append(values, jsonOne)
+		case 'f':
+			values = append(values, jsonZero)
+		case '{', '[':
+			return nil, fmt.Errorf("unsupported value %s", string(v))
+		default:
+			// A number or null: the line was already validated by json.Unmarshal.
+			values = append(values, v)
 		}
-
-		// Booleans as 0/1
-		var b bool
-		if err := json.Unmarshal(v, &b); err == nil {
-			if b {
-				values = append(values, 1)
-			} else {
-				values = append(values, 0)
-			}
-			continue
-		}
-
-		return nil, fmt.Errorf("unsupported value %s", string(v))
 	}
 	return values, nil
+}
+
+var (
+	jsonNull = json.RawMessage("null")
+	jsonOne  = json.RawMessage("1")
+	jsonZero = json.RawMessage("0")
+)
+
+// prepareSeriesSamples normalizes timestamp units to milliseconds, applies the time shift and only then
+// drops samples older than the retention cutoff, so "Shift to now" can move old samples into retention.
+// Analyze and import use it, so both report the same numbers.
+func prepareSeriesSamples(timestamps []int64, values []json.RawMessage, cutoffMs, shiftMs int64) ([]int64, []json.RawMessage, int, bool) {
+	ts, scaled := normalizeTimestamps(timestamps)
+	if shiftMs != 0 {
+		for i := range ts {
+			ts[i] += shiftMs
+		}
+	}
+	keptTs, keptVals, dropped := filterTimestampsAndValues(ts, values, cutoffMs)
+	return keptTs, keptVals, dropped, scaled
+}
+
+// newMetricsLineScanner returns a JSONL line scanner (lines up to 16 MB) and a pointer to the size of the
+// last line read including its terminator ("\n" or "\r\n"), so resume offsets are exact byte positions.
+func newMetricsLineScanner(r io.Reader) (*bufio.Scanner, *int) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
+	lineBytes := new(int)
+	scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
+		advance, token, err := bufio.ScanLines(data, atEOF)
+		if token != nil {
+			*lineBytes = advance
+		}
+		return advance, token, err
+	})
+	return scanner, lineBytes
 }
 
 func normalizeTimestamps(ts []int64) ([]int64, bool) {
@@ -1660,15 +1790,16 @@ func detectTimestampUnit(v int64) string {
 	}
 }
 
-func filterTimestampsAndValues(timestamps []int64, values []float64, cutoffMs int64) ([]int64, []float64, int) {
-	if cutoffMs <= 0 {
+// cutoffMs 0 means no filter. A cutoff before 1970 (-retentionPeriod=100y) is negative and still applies.
+func filterTimestampsAndValues(timestamps []int64, values []json.RawMessage, cutoffMs int64) ([]int64, []json.RawMessage, int) {
+	if cutoffMs == 0 {
 		return timestamps, values, 0
 	}
 	if len(timestamps) != len(values) {
 		return nil, nil, len(timestamps)
 	}
 	keptTs := make([]int64, 0, len(timestamps))
-	keptVals := make([]float64, 0, len(values))
+	keptVals := make([]json.RawMessage, 0, len(values))
 	dropped := 0
 	for i, ts := range timestamps {
 		if ts < cutoffMs {
@@ -1681,17 +1812,35 @@ func filterTimestampsAndValues(timestamps []int64, values []float64, cutoffMs in
 	return keptTs, keptVals, dropped
 }
 
-func buildNormalizedLine(labels map[string]string, values []float64, timestamps []int64) ([]byte, error) {
-	payload := struct {
-		Metric     map[string]string `json:"metric"`
-		Values     []float64         `json:"values"`
-		Timestamps []int64           `json:"timestamps"`
-	}{
-		Metric:     labels,
-		Values:     values,
-		Timestamps: timestamps,
+// buildNormalizedLine encodes one series in the /api/v1/import JSON line format. Values are already
+// valid JSON (see normalizeValues) and are copied as-is.
+func buildNormalizedLine(labels map[string]string, values []json.RawMessage, timestamps []int64) ([]byte, error) {
+	encodedLabels, err := json.Marshal(labels)
+	if err != nil {
+		return nil, err
 	}
-	return json.Marshal(payload)
+	size := len(encodedLabels) + 40 + 21*len(timestamps)
+	for _, v := range values {
+		size += len(v) + 1
+	}
+	line := make([]byte, 0, size)
+	line = append(line, `{"metric":`...)
+	line = append(line, encodedLabels...)
+	line = append(line, `,"values":[`...)
+	for i, v := range values {
+		if i > 0 {
+			line = append(line, ',')
+		}
+		line = append(line, v...)
+	}
+	line = append(line, `],"timestamps":[`...)
+	for i, ts := range timestamps {
+		if i > 0 {
+			line = append(line, ',')
+		}
+		line = strconv.AppendInt(line, ts, 10)
+	}
+	return append(line, "]}"...), nil
 }
 
 func (s *Server) postImportChunk(ctx context.Context, cfg uploadConfig, importURL string, body []byte) (int, string, error) {
@@ -1802,6 +1951,21 @@ func selectLabelSubset(labels map[string]string) map[string]string {
 	return result
 }
 
+// verifySeriesLimit asks /api/v1/series for a bounded answer (VictoriaMetrics supports "limit"); one
+// matching series is enough to verify. verifyMaxBodyBytes covers backends that ignore the limit: a single
+// histogram metric can return megabytes of series.
+const (
+	verifySeriesLimit  = 100
+	verifyMaxBodyBytes = 8 << 20
+)
+
+// verifyAttempts and verifyRetryDelay give VictoriaMetrics time to make just imported series
+// searchable: on v1.155.0 a new series showed up in /api/v1/series 3-11 seconds after the import.
+var (
+	verifyAttempts   = 30
+	verifyRetryDelay = time.Second
+)
+
 func (s *Server) verifyImport(ctx context.Context, cfg uploadConfig, summary importSummary, queryURL string) *verificationResult {
 	if summary.MetricName == "" || summary.Start.IsZero() || summary.End.IsZero() {
 		return &verificationResult{
@@ -1825,9 +1989,18 @@ func (s *Server) verifyImport(ctx context.Context, cfg uploadConfig, summary imp
 	params.Set("match[]", match)
 	params.Set("start", fmt.Sprintf("%d", start))
 	params.Set("end", fmt.Sprintf("%d", end))
+	params.Set("limit", strconv.Itoa(verifySeriesLimit))
 
 	var lastErr string
-	for attempt := 0; attempt < 3; attempt++ {
+	var lastResult *verificationResult
+	for attempt := 0; attempt < verifyAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return &verificationResult{Verified: false, Query: match, Message: ctx.Err().Error()}
+			case <-time.After(verifyRetryDelay):
+			}
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, seriesURL+"?"+params.Encode(), nil)
 		if err != nil {
 			return &verificationResult{Verified: false, Message: err.Error(), Query: match}
@@ -1840,31 +2013,39 @@ func (s *Server) verifyImport(ctx context.Context, cfg uploadConfig, summary imp
 		if err != nil {
 			lastErr = err.Error()
 		} else {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, verifyMaxBodyBytes))
 			_ = resp.Body.Close()
 			if resp.StatusCode >= 300 {
 				lastErr = fmt.Sprintf("query failed: %s %s", resp.Status, strings.TrimSpace(string(body)))
+				if resp.StatusCode < 500 {
+					// 4xx (no /api/v1/series on the target, bad auth, bad matcher): retrying cannot help.
+					return &verificationResult{Verified: false, Query: match, Message: lastErr}
+				}
 			} else {
 				var payload struct {
 					Status string              `json:"status"`
 					Data   []map[string]string `json:"data"`
 				}
 				if len(body) == 0 {
-					lastErr = fmt.Sprintf("verification response is empty (HTTP %s)", resp.Status)
+					return &verificationResult{Verified: false, Query: match, Message: fmt.Sprintf("verification response is empty (HTTP %s)", resp.Status)}
 				} else if err := json.Unmarshal(body, &payload); err != nil {
 					preview := string(body)
 					if len(preview) > 200 {
 						preview = preview[:200] + "…"
 					}
-					lastErr = fmt.Sprintf("invalid verification payload: %v; body=%q", err, preview)
+					return &verificationResult{Verified: false, Query: match, Message: fmt.Sprintf("invalid verification payload: %v; body=%q", err, preview)}
 				} else {
 					verified := payload.Status == "success" && len(payload.Data) > 0
-					message := fmt.Sprintf("%d matching series observed between %s and %s",
-						len(payload.Data),
+					seen := fmt.Sprintf("%d", len(payload.Data))
+					if len(payload.Data) >= verifySeriesLimit {
+						seen = "at least " + seen
+					}
+					message := fmt.Sprintf("%s matching series observed between %s and %s",
+						seen,
 						summary.Start.Format(time.RFC3339),
 						summary.End.Format(time.RFC3339),
 					)
-					return &verificationResult{
+					lastResult = &verificationResult{
 						Verified:   verified,
 						Query:      match,
 						SeriesSeen: len(payload.Data),
@@ -1872,18 +2053,32 @@ func (s *Server) verifyImport(ctx context.Context, cfg uploadConfig, summary imp
 						End:        summary.End.Format(time.RFC3339),
 						Message:    message,
 					}
+					// Freshly imported data becomes searchable a moment later: retry only an empty answer
+					// (plus network errors and 5xx above).
+					if verified {
+						return lastResult
+					}
 				}
 			}
 		}
-		time.Sleep(700 * time.Millisecond)
+	}
+	if lastResult != nil {
+		return lastResult
 	}
 	return &verificationResult{Verified: false, Query: match, Message: lastErr}
 }
 
+// quoteLabelValue quotes a label value for a series selector, escaping backslashes, quotes and newlines.
+func quoteLabelValue(v string) string {
+	return `"` + labelValueEscaper.Replace(v) + `"`
+}
+
+var labelValueEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`)
+
 func buildLabelMatcher(summary importSummary) string {
 	var parts []string
 	if summary.MetricName != "" {
-		parts = append(parts, fmt.Sprintf(`__name__="%s"`, summary.MetricName))
+		parts = append(parts, "__name__="+quoteLabelValue(summary.MetricName))
 	}
 	keys := make([]string, 0, len(summary.Labels))
 	for k := range summary.Labels {
@@ -1891,8 +2086,7 @@ func buildLabelMatcher(summary importSummary) string {
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		val := summary.Labels[key]
-		parts = append(parts, fmt.Sprintf(`%s="%s"`, key, val))
+		parts = append(parts, key+"="+quoteLabelValue(summary.Labels[key]))
 	}
 	return "{" + strings.Join(parts, ",") + "}"
 }
@@ -1953,6 +2147,15 @@ func (s *Server) pingEndpoint(ctx context.Context, cfg uploadConfig) error {
 		return fmt.Errorf("remote responded %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
 	return nil
+}
+
+// effectiveRetentionCutoff is the cutoff that analyze and import apply: 0 when the user turned off
+// dropping samples older than the target retention (drop_old=false).
+func (s *Server) effectiveRetentionCutoff(ctx context.Context, cfg uploadConfig) int64 {
+	if !cfg.DropOld {
+		return 0
+	}
+	return s.retentionCutoff(ctx, cfg)
 }
 
 func (s *Server) retentionCutoff(ctx context.Context, cfg uploadConfig) int64 {

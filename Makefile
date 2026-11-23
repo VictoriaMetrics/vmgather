@@ -7,8 +7,8 @@ PKG_TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "latest")
 PLATFORMS ?= linux/amd64,linux/arm64,linux/arm
 
 # Go version for build
-GO_VERSION ?= 1.25.11
-GOVULNCHECK_VERSION ?= v1.1.4
+GO_VERSION ?= 1.27.4
+GOVULNCHECK_VERSION ?= v1.8.0
 DOCKER_OUTPUT ?= type=docker
 DOCKER_COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo "docker compose" || echo "docker-compose")
 TEST_ENV_FILE := local-test-env/.env.dynamic
@@ -423,7 +423,7 @@ lint:
 	@echo "Running linter..."
 	@if ! command -v golangci-lint &> /dev/null; then \
 		echo "[ERROR] golangci-lint not found. Installing..."; \
-		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin v2.13.2; \
+		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin v2.14.0; \
 	fi
 	@golangci-lint run --timeout=5m
 	@echo "[OK] Lint complete"
@@ -500,13 +500,12 @@ test-env-up: local-test-env/testconfig
 				break; \
 			fi; \
 				if grep -qi "no space left on device" "$$tmpfile"; then \
-					echo ""; \
-					echo "[WARN] Docker reported 'no space left on device'. Running cleanup and retrying..."; \
-					$(DOCKER_COMPOSE) -p "$$proj" --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml down -v >/dev/null 2>&1 || true; \
-					docker builder prune -af || true; \
-					docker system prune -af || true; \
+					$(DOCKER_COMPOSE) -p "$$proj" --env-file $(TEST_ENV_FILE) -f local-test-env/docker-compose.test.yml down >/dev/null 2>&1 || true; \
 					rm -f "$$tmpfile"; \
-					continue; \
+					echo ""; \
+					echo "[ERROR] Docker has no space left on device. Free space and run again;"; \
+					echo "        this target never prunes images, build cache or volumes of other projects."; \
+					exit 1; \
 				fi; \
 				if grep -qi "already exists in network" "$$tmpfile"; then \
 					echo ""; \
@@ -612,13 +611,12 @@ manual-env-up: local-test-env/testconfig
 				break; \
 			fi; \
 			if grep -qi "no space left on device" "$$tmpfile"; then \
-				echo ""; \
-				echo "[WARN] Docker reported 'no space left on device'. Running cleanup and retrying..."; \
-				$(DOCKER_COMPOSE) -p "$$proj" --env-file $(MANUAL_ENV_FILE) -f local-test-env/docker-compose.test.yml down -v >/dev/null 2>&1 || true; \
-				docker builder prune -af || true; \
-				docker system prune -af || true; \
+				$(DOCKER_COMPOSE) -p "$$proj" --env-file $(MANUAL_ENV_FILE) -f local-test-env/docker-compose.test.yml down >/dev/null 2>&1 || true; \
 				rm -f "$$tmpfile"; \
-				continue; \
+				echo ""; \
+				echo "[ERROR] Docker has no space left on device. Free space and run again;"; \
+				echo "        this target never prunes images, build cache or volumes of other projects."; \
+				exit 1; \
 			fi; \
 			if grep -qi "already exists in network" "$$tmpfile"; then \
 				echo ""; \
@@ -813,7 +811,7 @@ security-check-go:
 	@echo "================================================================================"
 	@echo "Security Check: govulncheck"
 	@echo "================================================================================"
-	@docker run --rm -v "$$PWD:/work" -w /work golang:$(GO_VERSION)-alpine@sha256:c05ba4b73604069d376c4f41346b05374335b5ca0c46fb6dfede5a59f5196931 sh -ec '\
+	@docker run --rm -v "$$PWD:/work" -w /work golang:$(GO_VERSION)-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 sh -ec '\
 		go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION); \
 		$$(go env GOPATH)/bin/govulncheck ./...'
 

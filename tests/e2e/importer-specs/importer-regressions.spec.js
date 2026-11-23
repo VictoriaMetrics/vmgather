@@ -192,21 +192,21 @@ test.describe('VMImporter regressions', () => {
 
       const details = page.locator('#analysisDetails');
       await expect(details).toBeVisible({ timeout: 15000 });
-      await expect(details).toContainText('target maxLabelsPerTimeseries=40 (manual override)');
-      await expect(details).toContainText('max seen=');
-      await expect(page.locator('#labelManagerSummary')).toContainText('total labels:');
+      await expect(details).toContainText('the target allows 40');
+      await expect(details).toContainText('per series');
+      await expect(page.locator('#labelManagerSummary')).toContainText('found');
       const labelCheckboxCount = await page.locator('#labelManagerRows input[data-drop-label]').count();
       expect(labelCheckboxCount).toBeGreaterThan(50);
-      await expect(page.locator('#maxLabelsRisk')).toContainText('Potential drops detected');
-      await expect(page.locator('#maxLabelsRisk')).toContainText('Need at least');
+      await expect(page.locator('#maxLabelsRisk')).toContainText('more labels than the target allows');
+      await expect(page.locator('#maxLabelsRisk')).toContainText('more label(s) below');
 
       await page.fill('#maxLabelsOverride', '20');
-      await expect(page.locator('#maxLabelsRisk')).toContainText('exceeds limit 20');
+      await expect(page.locator('#maxLabelsRisk')).toContainText('of 20)');
       await page.click('#fullPreflightBtn');
 
-      await expect(details).toContainText('target maxLabelsPerTimeseries=20 (manual override)', { timeout: 15000 });
-      await expect(page.locator('#maxLabelsRisk')).toContainText('Potential drops detected');
-      await expect(page.locator('#maxLabelsRisk')).toContainText('Need at least');
+      await expect(details).toContainText('the target allows 20', { timeout: 15000 });
+      await expect(page.locator('#maxLabelsRisk')).toContainText('more labels than the target allows');
+      await expect(page.locator('#maxLabelsRisk')).toContainText('more label(s) below');
       await expect(page.locator('#startImportBtn')).toBeEnabled();
     } finally {
       await mock.close();
@@ -226,14 +226,13 @@ test.describe('VMImporter regressions', () => {
 
       const details = page.locator('#analysisDetails');
       await expect(details).toBeVisible({ timeout: 20000 });
-      await expect(details).toContainText('sample (2000 lines scanned');
-      await expect(details).toContainText('truncated');
+      await expect(details).toContainText('First 2000 lines');
 
       const fullButton = page.locator('#fullPreflightBtn');
       await expect(fullButton).toBeEnabled();
       await fullButton.click();
 
-      await expect(details).toContainText('full collection (2105 lines scanned)', { timeout: 20000 });
+      await expect(details).toContainText('All 2105 lines', { timeout: 20000 });
       await expect(details).toContainText('Labels:');
     } finally {
       await mock.close();

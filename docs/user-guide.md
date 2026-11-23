@@ -9,8 +9,9 @@ Official walkthrough for the VictoriaMetrics metrics export wizard.
 3. [Launch and connection](#launch-and-connection)
 4. [Wizard steps](#wizard-steps)
 5. [Export bundle](#export-bundle)
-6. [Troubleshooting](#troubleshooting)
-7. [Support](#support)
+6. [Scheduled snapshots (experimental)](#scheduled-snapshots-experimental)
+7. [Troubleshooting](#troubleshooting)
+8. [Support](#support)
 
 ## Before you start
 
@@ -57,8 +58,8 @@ Official walkthrough for the VictoriaMetrics metrics export wizard.
 | 2. **Time range** | Choose presets (15m, 1h, 6h, 24h) or define custom start/end timestamps. |
 | 3. **Connection** | Enter URL + auth method. Invalid URLs disable the **Test Connection** button instantly. |
 | 4. **Component discovery** | Select which VictoriaMetrics components, tenants, and jobs to include. UI lists everything found via `vm_app_version` metrics. |
-| 5. **Obfuscation** | Enable anonymisation for IPs, job labels, or add custom label keys. Estimated series count per component/job is displayed. |
-| 6. **Complete** | Review export details and download the archive. |
+| 5. **Obfuscation** | Replace instance, job or custom label values with SHA-256 digests (the vmagent algorithm). Estimated series count per component/job is displayed. |
+| 6. **Complete** | Review export details and download the archive. Auto batching uses 1-hour windows; the metric sampling step applies only to MetricsQL (query_range) exports, selector and cluster exports keep raw samples. A failed export can be resumed from the last completed batch. |
 
 ### Selector / Query flow (6 or 7 steps)
 | Step | Description |
@@ -107,6 +108,22 @@ Click **Start export** to execute the workflow:
 
 Downloads start automatically in the browser; you can also retrieve the archive via the **Download again** button.
 
+When obfuscation is on, the selected label values in `metrics.jsonl` are SHA-256 digests, the same as vmagent `-remoteWrite.obfuscateLabels`. To find the digest of a value you know, run `printf '%s' 10.0.0.1:8482 | sha256sum`.
+
+## Scheduled snapshots (experimental)
+
+If you cannot send MDX to VictoriaMetrics, run vmgather in snapshot mode. It exports the MDX metrics of your VictoriaMetrics components every hour (or another period) and uploads them to your S3, GCS, Azure Blob or local storage with the vmbackup storage code. You keep the data and share the snapshots you choose.
+
+```bash
+./vmgather -snapshot.dst=s3://my-bucket/vmgather -snapshot.config=./snapshot.json -output=/tmp/vmgather
+```
+
+- Use the [Kubernetes CronJob](../deploy/k8s/snapshot-cronjob.yaml), or add `-snapshot.interval=10m` for a long-running process.
+- Every window lands in `<dst>/<start>_<end>/vmgather.zip` (vmbackup layout). Get it with `vmrestore -src=<dst>/<start>_<end> -storageDataPath=<empty dir>` and import `vmgather.zip` with vmimporter.
+- To export old data from a vmbackup backup, use the [one-time Job](../deploy/k8s/snapshot-from-backup-job.yaml): vmrestore, a temporary vmsingle, then a backfill with `-snapshot.start` and `-snapshot.end`.
+
+All flags and details: README, "Snapshot mode (experimental)".
+
 ## Troubleshooting
 
 ### “Connection failed”
@@ -124,6 +141,8 @@ Downloads start automatically in the browser; you can also retrieve the archive 
 ### “Export timed out” / archive too large
 
 - Narrow the time range or deselect unused components/jobs.
+- A `504 Gateway Timeout` from a proxy (nginx, vmauth) in front of vmselect makes vmgather split the batch window by time, up to 3 times (1 hour down to 7.5 minutes). If even small windows time out, raise the proxy read timeout or choose a smaller batch window.
+- `502`/`503` (for example while vmselect restarts) are retried 3 times (after 2s, 8s and 30s). A failed export can be resumed from the last completed batch.
 - Use the scenario environment described in `local-test-env/README.md` to reproduce locally.
 - Inspect browser console logs for network failures if the UI becomes unresponsive.
 

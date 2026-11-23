@@ -1,4 +1,8 @@
 const { test, expect } = require('@playwright/test');
+const { createHash } = require('crypto');
+
+// sha256 mirrors vmgather obfuscation: the hex SHA-256 digest of the value, as in vmagent -remoteWrite.obfuscateLabels.
+const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
 const VM_SINGLE_NOAUTH_URL =
     process.env.VM_SINGLE_NOAUTH_URL || 'http://localhost:18428';
@@ -94,6 +98,17 @@ async function goToObfuscation(page, url = VM_SINGLE_NOAUTH_URL, options = {}) {
     await configureExportEnvironment(page);
 }
 
+// #metricStep is a manual-tuning control: it is hidden while the adaptive autopilot is on (default).
+async function disableAutopilot(page) {
+    await page.evaluate(() => {
+        const input = document.getElementById('adaptiveExportMode');
+        if (input && input.checked) {
+            input.checked = false;
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    });
+}
+
 async function configureExportEnvironment(page) {
     const stagingInput = page.locator('#stagingDir');
     if (await stagingInput.count()) {
@@ -101,6 +116,7 @@ async function configureExportEnvironment(page) {
     }
     const metricSelect = page.locator('#metricStep');
     if (await metricSelect.count()) {
+        await disableAutopilot(page);
         await metricSelect.selectOption('auto');
     }
 }
@@ -315,13 +331,13 @@ test.describe('Obfuscation Functionality', () => {
 
             if (obf.enabled) {
                 if (obf.obfuscate_instance) {
-                    instance = '777.777.1.1:8428';
+                    instance = sha256('10.0.0.1:8428');
                 }
                 if (obf.obfuscate_job) {
-                    job = 'vm_component_vmjob_1';
+                    job = sha256('vmjob');
                 }
                 if (custom.includes('pod')) {
-                    pod = 'pod-1';
+                    pod = sha256('pod-original');
                 }
             }
 
@@ -355,7 +371,7 @@ test.describe('Obfuscation Functionality', () => {
         await expect.poll(async () => {
             return await page.evaluate(() => window.__vm_samples_version || 0);
         }, { timeout: 15000 }).toBeGreaterThan(initialVersion);
-        await expect(preview).toContainText('777.777.1.1:8428');
+        await expect(preview).toContainText(sha256('10.0.0.1:8428'));
 
         await page.locator('.obf-label-checkbox[data-label="instance"]').uncheck();
         const versionAfterUncheck = await page.evaluate(() => window.__vm_samples_version || 0);
@@ -365,7 +381,7 @@ test.describe('Obfuscation Functionality', () => {
         await page.locator('.obf-label-checkbox[data-label="instance"]').check();
         const versionAfterCheck = await page.evaluate(() => window.__vm_samples_version || 0);
         await expect.poll(async () => await page.evaluate(() => window.__vm_samples_version || 0), { timeout: 10000 }).toBeGreaterThan(versionAfterCheck);
-        await expect(preview).toContainText('777.777.1.1:8428');
+        await expect(preview).toContainText(sha256('10.0.0.1:8428'));
 
         const advancedDetails = page.locator('#advancedLabelsDetails');
         await advancedDetails.evaluate(el => { el.open = true; });
@@ -373,7 +389,7 @@ test.describe('Obfuscation Functionality', () => {
         const podCheckbox = page.locator('#advancedLabels .obf-label-checkbox[data-label="pod"]');
         await podCheckbox.scrollIntoViewIfNeeded();
         await podCheckbox.check();
-        await expect(preview).toContainText('pod-1');
+        await expect(preview).toContainText(sha256('pod-original'));
 
         await podCheckbox.uncheck();
         await expect(preview).toContainText('pod-original');

@@ -605,6 +605,7 @@ func TestHandleListDirectory(t *testing.T) {
 	server := NewServer(tmpDir, "test-version", false)
 	req := httptest.NewRequest(http.MethodGet, "/api/fs/list?path="+tmpDir, nil)
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Host = "localhost:8080" // the UI is opened via localhost
 	w := httptest.NewRecorder()
 
 	server.Router().ServeHTTP(w, req)
@@ -654,6 +655,7 @@ func TestHandleCheckDirectory(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/fs/check", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Host = "localhost:8080" // the UI is opened via localhost
 	w := httptest.NewRecorder()
 
 	server.Router().ServeHTTP(w, req)
@@ -706,6 +708,7 @@ func TestHandleCheckDirectoryCreatesMissing(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/fs/check", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Host = "localhost:8080" // the UI is opened via localhost
 	w := httptest.NewRecorder()
 	server.Router().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -728,6 +731,7 @@ func TestHandleCheckDirectoryCreatesMissing(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPost, "/api/fs/check", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.RemoteAddr = "127.0.0.1:1234"
+	req.Host = "localhost:8080" // the UI is opened via localhost
 	w = httptest.NewRecorder()
 	server.Router().ServeHTTP(w, req)
 	if w.Code != http.StatusOK {

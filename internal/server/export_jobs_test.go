@@ -2,6 +2,9 @@ package server
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -483,5 +486,60 @@ func TestExportJobManagerCleanupRemovesCanceledJobsAfterRetention(t *testing.T) 
 
 	if _, ok := manager.GetStatus(job.status.ID); ok {
 		t.Fatalf("expected canceled job to be removed after retention")
+	}
+}
+
+// A failed job keeps its staging file for resume during the retention; after that nothing can resume
+// it, so the file goes too. Recent failed jobs keep theirs.
+func TestExportJobManagerCleanupRemovesStagingOfExpiredJobs(t *testing.T) {
+	manager := NewExportJobManager(&fakeExportService{})
+	manager.retention = time.Second
+	dir := t.TempDir()
+	old, recent := time.Now().Add(-2*time.Second), time.Now()
+	jobs := map[string]*time.Time{"job-old": &old, "job-recent": &recent}
+	manager.mu.Lock()
+	for id, at := range jobs {
+		path := filepath.Join(dir, id+".partial.jsonl")
+		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		manager.jobs[id] = &exportJob{status: &ExportJobStatus{ID: id, State: JobFailed, CompletedAt: at, StagingPath: path}}
+	}
+	manager.cleanupLocked(time.Now())
+	manager.mu.Unlock()
+
+	waitRemoved(t, filepath.Join(dir, "job-old.partial.jsonl"), 2*time.Second)
+	if _, err := os.Stat(filepath.Join(dir, "job-recent.partial.jsonl")); err != nil {
+		t.Fatalf("staging file of a recent failed job is gone: %v", err)
+	}
+}
+
+// A server that gets no more requests still removes the staging file when the retention of a failed job
+// ends: cleanup is scheduled when the job finishes.
+func TestExportJobManagerRemovesStagingOfIdleServer(t *testing.T) {
+	manager := NewExportJobManager(&fakeExportService{err: errors.New("boom")})
+	manager.retention = 50 * time.Millisecond
+	path := filepath.Join(t.TempDir(), "job-idle.partial.jsonl")
+	if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.StartJob(context.Background(), "job-idle", domain.ExportConfig{StagingFile: path}); err != nil {
+		t.Fatal(err)
+	}
+	// retention + the 1s margin of the scheduled cleanup
+	waitRemoved(t, path, 3*time.Second)
+}
+
+func waitRemoved(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s is still there after %s", path, timeout)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

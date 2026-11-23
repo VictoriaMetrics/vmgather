@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:,">
     <title>VMImporter - VictoriaMetrics Bundle Importer</title>
     <style>
         :root {
@@ -315,28 +316,26 @@
     <div class="container">
         <header>
             <h1>VMImporter</h1>
-            <p>Upload vmgather bundles into VictoriaMetrics using the exact same connection wizard.</p>
+            <p>Import vmgather bundles into VictoriaMetrics.</p>
         </header>
 
         <div class="wizard">
             <div class="step-card">
                 <h2>Step 1 · VM Connection</h2>
                 <div class="info-box">
-                    <strong>Flexible URL Parser:</strong> Paste any VictoriaMetrics URL (Grafana datasource, VMUI,
-                    direct /select paths) — parser extracts tenant ID, base path, and auth settings automatically.
+                    Paste any VictoriaMetrics URL: a Grafana datasource, VMUI or a /select path. The tenant and
+                    base path are found automatically.
                 </div>
 
-                <details class="help-section" open>
-                    <summary>Accepted URL formats (click to expand)</summary>
+                <details class="help-section">
+                    <summary>URL examples</summary>
                     <div class="help-content">
-                        <p>Examples:</p>
                         <ul>
                             <li>http://vmsingle:8428</li>
                             <li>https://vm.example.com/1234</li>
                             <li>http://vmselect:8481/select/0/prometheus</li>
                             <li>https://vm.example.com/select/multitenant/prometheus</li>
                         </ul>
-                        <p>Paste Grafana datasource URLs as-is — importer handles the rest.</p>
                     </div>
                 </details>
 
@@ -345,8 +344,7 @@
                     <select id="recentProfilesSelect" onchange="applySelectedRecentProfile()">
                         <option value="">No recent profiles yet</option>
                     </select>
-                    <span class="input-hint">Selecting a profile applies URL, tenant, auth mode, batching, and label-drop rules.
-                        Password/token/header value are never stored and must be entered again.</span>
+                    <span class="input-hint">A profile fills in the URL, tenant, auth type and dropped labels. Passwords and tokens are never saved.</span>
                 </div>
 
                 <div class="form-group">
@@ -390,9 +388,8 @@
             </div>
 
             <div class="step-card">
-                <h2>Step 2 · Import bundle + batching</h2>
-                <p style="color: var(--text-muted); margin-top: -8px;">Reuse the same adaptive batch window used by
-                    vmgather to stream bundles safely.</p>
+                <h2>Step 2 · Import bundle</h2>
+                <p style="color: var(--text-muted); margin-top: -8px;">Add a vmgather bundle. It is checked first, then imported.</p>
 
                 <div class="form-group">
                     <label>Bundle file (.jsonl or .zip)</label>
@@ -405,46 +402,46 @@
 
                 <div class="form-group" style="display:flex; gap:12px; align-items:flex-start;">
                     <div id="analysisResult" class="input-hint" style="flex:1; display:flex; align-items:center; gap:8px;">
-                        Drop a file to start automatic preflight: checks timestamps vs retention, validates JSONL, and estimates drops.
+                        We check the time range, labels and target retention before the import.
                     </div>
                     <div id="analysisLoader" class="status" style="display:none; background:transparent; padding:0; margin:0;">
                         <span class="loading-spinner"></span>
                     </div>
                 </div>
                 <div class="button-group" style="justify-content:flex-start; margin-top:-4px; margin-bottom:8px;">
-                    <button class="btn-secondary" type="button" id="fullPreflightBtn" onclick="analyzeBundle(true)" disabled>Full collection</button>
-                    <span class="input-hint">Default preflight scans first 2000 lines; Full collection scans the whole bundle.</span>
+                    <button class="btn-secondary" type="button" id="fullPreflightBtn" onclick="analyzeBundle(true)" disabled>Check all lines</button>
+                    <span class="input-hint">The quick check reads the first 2000 lines.</span>
                 </div>
                 <div id="analysisDetails" class="status" style="display:none;"></div>
 
                 <div class="form-group">
-                    <label style="display:block; margin-bottom:4px;">Retention window</label>
-                    <span id="retentionInfo" class="input-hint">Fetched from target during preflight; shown in UTC.</span>
+                    <label style="display:block; margin-bottom:4px;">Target retention</label>
+                    <span id="retentionInfo" class="input-hint">Read from the target during the check.</span>
                 </div>
 
                 <div class="form-group">
-                    <label for="maxLabelsOverride">maxLabelsPerTimeseries (optional override)</label>
+                    <label for="maxLabelsOverride">Label limit of the target</label>
                     <input type="number" id="maxLabelsOverride" min="1" step="1" placeholder="e.g. 40" value="40">
-                    <span id="maxLabelsOverrideHint" class="input-hint">Default is 40. Auto-detected value from target /metrics can override it when available.</span>
+                    <span id="maxLabelsOverrideHint" class="input-hint">VictoriaMetrics -maxLabelsPerTimeseries, 40 by default. Read from the target when possible.</span>
                     <div id="maxLabelsRisk" class="status error" style="display:none; margin-top:8px;"></div>
                 </div>
 
                 <details id="labelManagerDetails" class="help-section">
-                    <summary id="labelManagerSummary">Label management (optional)</summary>
+                    <summary id="labelManagerSummary">Drop labels (optional)</summary>
                     <div class="help-content">
                         <div id="labelManagerRows" style="margin-bottom:8px;">
-                            <div class="input-hint">Run preflight to see detected labels and choose what to drop before import.</div>
+                            <div class="input-hint">Select a bundle to see its labels.</div>
                         </div>
-                        <div id="labelManagerHint" class="input-hint">Protected labels are always kept.</div>
+                        <div id="labelManagerHint" class="input-hint">__name__, job and instance are always kept.</div>
                     </div>
                 </details>
 
                 <div class="form-group" style="display:flex; gap:12px; align-items:flex-start;">
                     <div style="flex:1;">
-                        <label for="targetStartPicker">Align first sample to (UTC)</label>
+                        <label for="targetStartPicker">Move data in time (optional)</label>
                         <input type="datetime-local" id="targetStartPicker" onchange="handleTargetStartChange()" disabled>
                         <input type="hidden" id="timeShiftMinutes" value="0">
-                        <span class="input-hint">Choose desired start time; we compute the offset so the bundle ends no later than now.</span>
+                        <span class="input-hint">Pick a new start time, for example to fit the target retention.</span>
                     </div>
                     <div style="min-width:220px;">
                         <div id="fileRangeInfo" class="input-hint" style="display:none;"></div>
@@ -453,18 +450,6 @@
                     </div>
                     <button class="btn-secondary" type="button" id="applySuggestedShift" style="display:none; align-self:flex-end;" onclick="applySuggestedShift()" disabled>Apply suggested shift</button>
                     <button class="btn-secondary" type="button" id="shiftToNowBtn" style="display:none; align-self:flex-end;" onclick="shiftBundleToNow()" disabled>Shift to now</button>
-                </div>
-
-                <div class="form-group">
-                    <label for="metricStep">Metric sampling step</label>
-                    <select id="metricStep">
-                        <option value="auto">Auto (based on file size)</option>
-                        <option value="30">30 seconds</option>
-                        <option value="60">1 minute</option>
-                        <option value="300">5 minutes</option>
-                    </select>
-                    <span class="input-hint" id="metricStepHint">Adaptive window picks 30s, 1m or 5m depending on bundle
-                        volume.</span>
                 </div>
 
                 <div class="export-progress hidden" id="importProgressPanel">

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -78,40 +79,12 @@ func (s *vmServiceImpl) ValidateConnection(ctx context.Context, conn domain.VMCo
 // DiscoverComponents discovers VictoriaMetrics components using vm_app_version metric
 func (s *vmServiceImpl) DiscoverComponents(ctx context.Context, conn domain.VMConnection, tr domain.TimeRange) ([]domain.VMComponent, error) {
 	client := s.clientFactory(conn)
-	queryTime := effectiveQueryTime(tr.End)
-
-	// Discovery query: extract component name from version label
-	// Example: version="vmstorage-v1.95.1" -> component="vmstorage"
-	query := `group by (job, vm_component) (label_replace(vm_app_version{version!=""}, "vm_component", "$1", "version", "(.+?)\\-.*"))`
-
-	result, err := client.Query(ctx, query, queryTime)
+	componentMap, err := discoverJobs(ctx, client, tr)
 	if err != nil {
-		return nil, fmt.Errorf("discovery query failed: %w", err)
+		return nil, err
 	}
-
-	if len(result.Data.Result) == 0 {
+	if len(componentMap) == 0 {
 		return nil, fmt.Errorf("no VM components discovered")
-	}
-
-	// Group by component
-	componentMap := make(map[string]*domain.VMComponent)
-
-	for _, r := range result.Data.Result {
-		component := r.Metric["vm_component"]
-		job := r.Metric["job"]
-
-		if component == "" || job == "" {
-			continue
-		}
-
-		if comp, exists := componentMap[component]; exists {
-			comp.Jobs = append(comp.Jobs, job)
-		} else {
-			componentMap[component] = &domain.VMComponent{
-				Component: component,
-				Jobs:      []string{job},
-			}
-		}
 	}
 
 	// Convert map to slice and estimate metrics count
@@ -150,6 +123,56 @@ func (s *vmServiceImpl) DiscoverComponents(ctx context.Context, conn domain.VMCo
 	}
 
 	return components, nil
+}
+
+// DiscoverVMJobs returns the VictoriaMetrics components and their jobs that had vm_app_version at any
+// time in tr, without the series estimates of DiscoverComponents. It returns no error and no components
+// when there are none.
+func DiscoverVMJobs(ctx context.Context, conn domain.VMConnection, tr domain.TimeRange) ([]domain.VMComponent, error) {
+	componentMap, err := discoverJobs(ctx, vm.NewClient(conn), tr)
+	if err != nil {
+		return nil, err
+	}
+	components := make([]domain.VMComponent, 0, len(componentMap))
+	for _, comp := range componentMap {
+		components = append(components, *comp)
+	}
+	sort.Slice(components, func(i, j int) bool { return components[i].Component < components[j].Component })
+	return components, nil
+}
+
+// discoverJobs groups the jobs that had vm_app_version in tr by component. last_over_time covers the whole
+// range, so a component that stopped before the end of the range is still found.
+func discoverJobs(ctx context.Context, client *vm.Client, tr domain.TimeRange) (map[string]*domain.VMComponent, error) {
+	queryTime := effectiveQueryTime(tr.End)
+	lookbehind := int64(math.Ceil(queryTime.Sub(tr.Start).Seconds()))
+	if tr.Start.IsZero() || lookbehind <= 0 {
+		lookbehind = 300
+	}
+	// The component name is parsed from the version label in Go (componentFromVersion).
+	query := fmt.Sprintf(`group by (job, version) (last_over_time(vm_app_version{version!=""}[%ds]))`, lookbehind)
+	result, err := client.Query(ctx, query, queryTime)
+	if err != nil {
+		return nil, fmt.Errorf("discovery query failed: %w", err)
+	}
+
+	componentMap := make(map[string]*domain.VMComponent)
+	for _, r := range result.Data.Result {
+		component := componentFromVersion(r.Metric["version"])
+		job := r.Metric["job"]
+		if component == "" || job == "" {
+			continue
+		}
+		if comp, exists := componentMap[component]; exists {
+			// During a rolling upgrade one job reports two versions; list it once.
+			if !containsString(comp.Jobs, job) {
+				comp.Jobs = append(comp.Jobs, job)
+			}
+		} else {
+			componentMap[component] = &domain.VMComponent{Component: component, Jobs: []string{job}}
+		}
+	}
+	return componentMap, nil
 }
 
 // DiscoverSelectorJobs discovers jobs/instances using a selector query
@@ -478,6 +501,32 @@ func (s *vmServiceImpl) buildSampleSelector(jobs []string) string {
 		parts = append(parts, fmt.Sprintf(`job=%q`, job))
 	}
 	return fmt.Sprintf("{%s}", strings.Join(parts, " or "))
+}
+
+// versionComponentPattern matches the build part of a vm_app_version "version" label:
+// <component>-<YYYYMMDD>-<HHMMSS>-..., for example "victoria-logs-20261001-105813-tags-v1.53.0-0-g915d91904b".
+var versionComponentPattern = regexp.MustCompile(`^(.+?)-\d{8}-\d{6}-`)
+
+// componentFromVersion returns the component name from a version label: "victoria-metrics",
+// "victoria-logs", "vmagent", "config-reloader". Versions without a build date fall back to the text
+// before the first "-" (the previous behavior); versions without "-" give "".
+func componentFromVersion(version string) string {
+	if m := versionComponentPattern.FindStringSubmatch(version); m != nil {
+		return m[1]
+	}
+	if i := strings.IndexByte(version, '-'); i > 0 {
+		return version[:i]
+	}
+	return ""
+}
+
+func containsString(values []string, value string) bool {
+	for _, v := range values {
+		if v == value {
+			return true
+		}
+	}
+	return false
 }
 
 var selectorPattern = regexp.MustCompile(`^\s*([a-zA-Z_:][a-zA-Z0-9_:]*)?\s*(\{.*\})?\s*$`)

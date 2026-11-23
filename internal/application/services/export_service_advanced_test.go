@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/VictoriaMetrics/vmgather/internal/domain"
+	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/obfuscation"
 	"github.com/VictoriaMetrics/vmgather/internal/infrastructure/vm"
 )
 
@@ -81,7 +82,7 @@ this is not json at all
 		reader := strings.NewReader(metricsData)
 		obfConfig := domain.ObfuscationConfig{Enabled: false}
 
-		_, count, _, err := service.processMetrics(reader, obfConfig)
+		_, count, err := service.processMetrics(reader, obfConfig)
 
 		// Current implementation: fail-fast on first error (KISS principle)
 		// Returns error and discards partial results
@@ -102,7 +103,7 @@ this is not json at all
 		reader := strings.NewReader(metricsData)
 		obfConfig := domain.ObfuscationConfig{Enabled: false}
 
-		_, count, _, err := service.processMetrics(reader, obfConfig)
+		_, count, err := service.processMetrics(reader, obfConfig)
 
 		// Should return error immediately
 		if err == nil {
@@ -125,7 +126,7 @@ func TestExportService_ProcessMetrics_DropLabels(t *testing.T) {
 		DropLabels: []string{"env", "job"},
 	}
 
-	processed, count, _, err := service.processMetrics(reader, obfConfig)
+	processed, count, err := service.processMetrics(reader, obfConfig)
 	if err != nil {
 		t.Fatalf("processMetrics failed: %v", err)
 	}
@@ -171,7 +172,7 @@ func TestExportService_ProcessMetrics_LargeStream(t *testing.T) {
 	}
 
 	start := time.Now()
-	processedReader, count, obfMaps, err := service.processMetrics(reader, obfConfig)
+	processedReader, count, err := service.processMetrics(reader, obfConfig)
 	duration := time.Since(start)
 
 	if err != nil {
@@ -187,14 +188,17 @@ func TestExportService_ProcessMetrics_LargeStream(t *testing.T) {
 		t.Errorf("processing too slow: %.0f metrics/sec (want > 10000)", metricsPerSec)
 	}
 
-	// Verify obfuscation maps
-	if len(obfMaps) == 0 {
-		t.Error("expected obfuscation maps")
+	out, err := io.ReadAll(processedReader)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	// Verify output
-	if processedReader == nil {
-		t.Fatal("processedReader is nil")
+	for _, original := range []string{`"instance":"10.0.1.5:8482"`, `"job":"test"`} {
+		if strings.Contains(string(out), original) {
+			t.Fatalf("%s is not obfuscated", original)
+		}
+	}
+	if want := `"instance":"` + obfuscation.Value("10.0.1.5:8482") + `"`; !strings.Contains(string(out), want) {
+		t.Fatalf("output has no obfuscated instance %s", want)
 	}
 }
 
@@ -220,7 +224,7 @@ func TestExportService_ProcessMetrics_MemoryEfficiency(t *testing.T) {
 	var memBefore runtime.MemStats
 	runtime.ReadMemStats(&memBefore)
 
-	_, _, _, err := service.processMetrics(reader, obfConfig)
+	_, _, err := service.processMetrics(reader, obfConfig)
 	if err != nil {
 		t.Fatalf("processMetrics failed: %v", err)
 	}
@@ -279,7 +283,7 @@ func TestExportService_ConcurrentExports(t *testing.T) {
 
 			obfConfig := domain.ObfuscationConfig{Enabled: false}
 
-			_, count, _, err := service.processMetrics(reader, obfConfig)
+			_, count, err := service.processMetrics(reader, obfConfig)
 			if err != nil {
 				errors <- fmt.Errorf("export %d failed: %w", id, err)
 				return
@@ -302,61 +306,6 @@ func TestExportService_ConcurrentExports(t *testing.T) {
 	t.Logf("Successfully ran %d concurrent exports", numExports)
 }
 
-// TestExportService_GuessComponent_EdgeCases tests component guessing edge cases
-func TestExportService_GuessComponent_EdgeCases(t *testing.T) {
-	service := &exportServiceImpl{}
-
-	tests := []struct {
-		name     string
-		labels   map[string]string
-		expected string
-	}{
-		{
-			name:     "no labels at all",
-			labels:   map[string]string{},
-			expected: "unknown",
-		},
-		{
-			name: "only __name__ without recognizable pattern",
-			labels: map[string]string{
-				"__name__": "random_custom_metric",
-			},
-			expected: "unknown",
-		},
-		{
-			name: "vm_component but no __name__",
-			labels: map[string]string{
-				"vm_component": "vmstorage",
-			},
-			expected: "vmstorage",
-		},
-		{
-			name: "conflicting signals - vm_component vs metric name",
-			labels: map[string]string{
-				"__name__":     "vmselect_concurrent_queries",
-				"vm_component": "vmstorage", // Conflict!
-			},
-			expected: "vmstorage", // vm_component takes precedence
-		},
-		{
-			name: "partial metric name match",
-			labels: map[string]string{
-				"__name__": "my_vmstorage_custom_metric",
-			},
-			expected: "unknown", // Current implementation checks prefix only
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := service.guessComponent(tt.labels)
-			if result != tt.expected {
-				t.Errorf("guessComponent() = %v, want %v", result, tt.expected)
-			}
-		})
-	}
-}
-
 // TestExportService_BuildArchiveMetadata_EdgeCases tests metadata edge cases
 func TestExportService_BuildArchiveMetadata_EdgeCases(t *testing.T) {
 	service := &exportServiceImpl{
@@ -364,11 +313,10 @@ func TestExportService_BuildArchiveMetadata_EdgeCases(t *testing.T) {
 	}
 
 	tests := []struct {
-		name            string
-		config          domain.ExportConfig
-		metricsCount    int
-		obfuscationMaps map[string]map[string]string
-		wantError       bool
+		name         string
+		config       domain.ExportConfig
+		metricsCount int
+		wantError    bool
 	}{
 		{
 			name: "zero metrics",
@@ -380,9 +328,8 @@ func TestExportService_BuildArchiveMetadata_EdgeCases(t *testing.T) {
 					End:   time.Now(),
 				},
 			},
-			metricsCount:    0,
-			obfuscationMaps: nil,
-			wantError:       false, // Should handle gracefully
+			metricsCount: 0,
+			wantError:    false, // Should handle gracefully
 		},
 		{
 			name: "empty components list",
@@ -394,9 +341,8 @@ func TestExportService_BuildArchiveMetadata_EdgeCases(t *testing.T) {
 					End:   time.Now(),
 				},
 			},
-			metricsCount:    100,
-			obfuscationMaps: nil,
-			wantError:       false,
+			metricsCount: 100,
+			wantError:    false,
 		},
 		{
 			name: "nil obfuscation maps when obfuscation enabled",
@@ -411,9 +357,8 @@ func TestExportService_BuildArchiveMetadata_EdgeCases(t *testing.T) {
 					Enabled: true,
 				},
 			},
-			metricsCount:    100,
-			obfuscationMaps: nil,
-			wantError:       false, // Should handle gracefully
+			metricsCount: 100,
+			wantError:    false, // Should handle gracefully
 		},
 	}
 
@@ -423,7 +368,6 @@ func TestExportService_BuildArchiveMetadata_EdgeCases(t *testing.T) {
 				"test-export",
 				tt.config,
 				tt.metricsCount,
-				tt.obfuscationMaps,
 				nil,
 			)
 

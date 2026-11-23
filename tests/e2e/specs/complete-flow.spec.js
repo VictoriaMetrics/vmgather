@@ -202,7 +202,7 @@ test.describe('Complete E2E Flow Tests', () => {
     await expect(metricsValue).not.toHaveText(/^\s*0\s*$/);
 
     // Verify Download button
-    await expect(page.locator('button:has-text("Generate ZIP package")')).toBeVisible();
+    await expect(page.locator('button:has-text("Download ZIP")')).toBeVisible();
     await expect(page.locator('button:has-text("Start New Export")')).toBeVisible();
 
     // Verify archive location is rendered and copy is available
@@ -325,7 +325,7 @@ test.describe('Complete E2E Flow Tests', () => {
     await expect(helpSection.getByText('How it works')).toBeVisible();
   });
 
-  test('should verify obfuscation uses 777.777.x.x IP pool', async ({ page }) => {
+  test('should explain that obfuscation uses SHA-256 like vmagent', async ({ page }) => {
     // Navigate to Step 5
     await page.locator('.step.active button.btn-primary').click();
     await page.waitForTimeout(200);
@@ -362,7 +362,7 @@ test.describe('Complete E2E Flow Tests', () => {
     // Enable obfuscation to see options
     await page.locator('#enableObfuscation').check();
     await expect(page.locator('#obfuscationOptions')).toBeVisible();
-    await expect(page.locator('.step.active').getByText(/777\.777/).first()).toBeVisible();
+    await expect(page.locator('.step.active').getByText(/SHA-256/).first()).toBeVisible();
   });
 
   test('should verify progress bar updates correctly', async ({ page }) => {

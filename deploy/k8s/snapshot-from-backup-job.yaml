@@ -1,0 +1,163 @@
+# Experimental: export MDX metrics from a vmbackup backup of single-node VictoriaMetrics, without touching production.
+#
+# 1. vmrestore downloads the backup into an emptyDir.
+# 2. A temporary vmsingle (native sidecar, Kubernetes 1.29+) serves that data. Its startupProbe makes
+#    vmgather wait until it is ready, and it stops when vmgather exits.
+# 3. vmgather backfills [-snapshot.start, -snapshot.end) into snapshot windows. A backfill does not read
+#    or write the state of scheduled runs, so it can share a bucket with the CronJob, and it skips windows
+#    that are already uploaded, so a failed Job can simply be started again.
+#
+# The emptyDir needs space for the whole backup (vmrestore -restoreSince and -restorePartitions, merged
+# after v1.156.0, restore only recent monthly partitions). For a cluster backup, restore every vmstorage
+# backup into vmstorage and read it through vmselect (-storageNode=127.0.0.1:8401) instead of vmsingle.
+#
+# Prerequisite: the vmgather-snapshot ServiceAccount and Secret. Create only these two; applying all of
+# snapshot-cronjob.yaml would also start the hourly CronJob against the live VictoriaMetrics:
+#
+#   kubectl -n monitoring create serviceaccount vmgather-snapshot
+#   kubectl -n monitoring create secret generic vmgather-snapshot --from-env-file=vmgather-snapshot.env
+#
+# vmgather-snapshot.env holds the S3 keys for vmrestore and vmgather as AWS_ACCESS_KEY_ID=... and
+# AWS_SECRET_ACCESS_KEY=... lines; keep it readable only by you and out of git, so the keys stay out of
+# the shell history. With IRSA or workload identity, annotate the ServiceAccount, give it access to both
+# buckets and create the Secret without --from-env-file (envFrom needs it to exist).
+#
+#   kubectl -n monitoring apply -f snapshot-from-backup-job.yaml
+---
+# The temporary vmsingle has no authentication. Deny all ingress to the Job pod: vmgather reaches it over
+# localhost, and the kubelet probes are not affected by NetworkPolicy. It needs a CNI that enforces it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vmgather-from-backup
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: vmgather-from-backup
+  policyTypes:
+    - Ingress
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vmgather-from-backup
+data:
+  snapshot.json: |
+    {
+      "connection": { "url": "http://127.0.0.1:8428", "auth": { "type": "none" } },
+      "obfuscation": { "enabled": true, "obfuscate_instance": true }
+    }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vmgather-from-backup
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vmgather-from-backup
+    spec:
+      serviceAccountName: vmgather-snapshot
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: vmrestore
+          image: victoriametrics/vmrestore:v1.156.0
+          args:
+            - -src=s3://my-backups/vmsingle/latest
+            - -storageDataPath=/storage
+            # - -customS3Endpoint=http://minio.minio.svc:9000
+          envFrom:
+            - secretRef:
+                name: vmgather-snapshot
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: storage
+              mountPath: /storage
+        - name: vmsingle
+          image: victoriametrics/victoria-metrics:v1.156.0
+          restartPolicy: Always
+          args:
+            - -storageDataPath=/storage
+            # Keep old partitions: the default retention would delete data older than 1 month at start.
+            - -retentionPeriod=100y
+            # kubelet probes the pod IP, so listen on all interfaces; the NetworkPolicy above keeps other
+            # pods out.
+            - -httpListenAddr=:8428
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8428
+            periodSeconds: 5
+            failureThreshold: 120
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: storage
+              mountPath: /storage
+      containers:
+        - name: vmgather
+          image: victoriametrics/vmgather:v1.13.0
+          args:
+            - -snapshot.dst=s3://my-bucket/vmgather-backfill
+            - -snapshot.config=/etc/vmgather/snapshot.json
+            - -snapshot.start=2026-11-01T00:00:00Z
+            - -snapshot.end=2026-11-02T00:00:00Z
+            - -output=/work
+            # - -customS3Endpoint=http://minio.minio.svc:9000
+          envFrom:
+            - secretRef:
+                name: vmgather-snapshot
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/vmgather
+              readOnly: true
+            - name: work
+              mountPath: /work
+      volumes:
+        - name: config
+          configMap:
+            name: vmgather-from-backup
+        - name: storage
+          emptyDir: {}
+        - name: work
+          emptyDir:
+            sizeLimit: 2Gi

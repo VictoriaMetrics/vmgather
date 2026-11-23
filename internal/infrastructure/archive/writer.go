@@ -52,9 +52,7 @@ func validateExportID(exportID string) error {
 	return nil
 }
 
-// ArchiveMetadata contains metadata about the export
-// Note: InstanceMap and JobMap are intentionally excluded from archive metadata
-// per issue #10 - mapping should not be included in the archive sent to customers
+// ArchiveMetadata is written to metadata.json in the archive.
 type ArchiveMetadata struct {
 	ExportID             string             `json:"export_id"`
 	ExportDate           time.Time          `json:"export_date"`
@@ -63,26 +61,7 @@ type ArchiveMetadata struct {
 	Jobs                 []string           `json:"jobs"`
 	MetricsCount         int                `json:"metrics_count"`
 	Obfuscated           bool               `json:"obfuscated"`
-	InstanceMap          map[string]string  `json:"instance_map,omitempty"` // Internal use only, not included in archive
-	JobMap               map[string]string  `json:"job_map,omitempty"`      // Internal use only, not included in archive
-	AdaptiveMode         string             `json:"adaptive_mode,omitempty"`
-	MetricStepSeconds    int                `json:"metric_step_seconds,omitempty"`
-	MaxMetricStepSeconds int                `json:"max_metric_step_seconds,omitempty"`
-	Sampled              bool               `json:"sampled,omitempty"`
-	AdaptiveDecisions    []AdaptiveDecision `json:"adaptive_decisions,omitempty"`
-	VMGatherVersion      string             `json:"vmgather_version"`
-}
-
-// archiveMetadataPublic is the public version of metadata without obfuscation maps
-// This is what gets included in the archive sent to customers
-type archiveMetadataPublic struct {
-	ExportID             string             `json:"export_id"`
-	ExportDate           time.Time          `json:"export_date"`
-	TimeRange            domain.TimeRange   `json:"time_range"`
-	Components           []string           `json:"components"`
-	Jobs                 []string           `json:"jobs"`
-	MetricsCount         int                `json:"metrics_count"`
-	Obfuscated           bool               `json:"obfuscated"`
+	MDXFiltered          bool               `json:"mdx_filtered,omitempty"`
 	AdaptiveMode         string             `json:"adaptive_mode,omitempty"`
 	MetricStepSeconds    int                `json:"metric_step_seconds,omitempty"`
 	MaxMetricStepSeconds int                `json:"max_metric_step_seconds,omitempty"`
@@ -171,33 +150,14 @@ func (w *Writer) addMetricsToArchive(zipWriter *zip.Writer, metricsReader io.Rea
 }
 
 // addMetadataToArchive adds metadata JSON to archive
-// Note: Obfuscation maps (InstanceMap, JobMap) are excluded from archive per issue #10
 func (w *Writer) addMetadataToArchive(zipWriter *zip.Writer, metadata ArchiveMetadata) error {
 	writer, err := zipWriter.Create("metadata.json")
 	if err != nil {
 		return err
 	}
-
-	// Create public metadata without obfuscation maps
-	publicMetadata := archiveMetadataPublic{
-		ExportID:             metadata.ExportID,
-		ExportDate:           metadata.ExportDate,
-		TimeRange:            metadata.TimeRange,
-		Components:           metadata.Components,
-		Jobs:                 metadata.Jobs,
-		MetricsCount:         metadata.MetricsCount,
-		Obfuscated:           metadata.Obfuscated,
-		AdaptiveMode:         metadata.AdaptiveMode,
-		MetricStepSeconds:    metadata.MetricStepSeconds,
-		MaxMetricStepSeconds: metadata.MaxMetricStepSeconds,
-		Sampled:              metadata.Sampled,
-		AdaptiveDecisions:    metadata.AdaptiveDecisions,
-		VMGatherVersion:      metadata.VMGatherVersion,
-	}
-
 	encoder := json.NewEncoder(writer)
 	encoder.SetIndent("", "  ")
-	return encoder.Encode(publicMetadata)
+	return encoder.Encode(metadata)
 }
 
 // addReadmeToArchive adds human-readable README to archive
@@ -234,7 +194,11 @@ Components Exported:
 
 	if metadata.Obfuscated {
 		readme += "\n[WARN] OBFUSCATION APPLIED\n"
-		readme += "Instance IPs and job names have been obfuscated for privacy.\n"
+		readme += "Values of the selected labels are replaced with their SHA-256 hex digests,\n"
+		readme += "the same as vmagent -remoteWrite.obfuscateLabels.\n"
+	}
+	if metadata.MDXFiltered {
+		readme += "\nOnly MDX series are included (the same filter as vmagent -remoteWrite.mdx.enable).\n"
 	}
 
 	readme += "\nFiles in this archive:\n"

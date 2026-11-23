@@ -11,21 +11,23 @@ vmgather collects VictoriaMetrics internal metrics, obfuscates sensitive data, a
 5. [Documentation set](#documentation-set)
 6. [Mode quick choice](#mode-quick-choice)
 7. [Usage workflow](#usage-workflow)
-8. [Privacy & obfuscation](#privacy--obfuscation)
-9. [Testing matrix](#testing-matrix)
-10. [Build & release](#build--release)
-11. [Contributing](#contributing)
-12. [Security](#security)
-13. [License & support](#license--support)
+8. [Snapshot mode (experimental)](#snapshot-mode-experimental)
+9. [Privacy & obfuscation](#privacy--obfuscation)
+10. [Testing matrix](#testing-matrix)
+11. [Build & release](#build--release)
+12. [Contributing](#contributing)
+13. [Security](#security)
+14. [License & support](#license--support)
 
 ## Highlights
 
 - **Single binary UI** – embedded web interfaces for both exporter and importer with VictoriaMetrics-style wizards.
 - **Automatic discovery** – exporter detects vmagent, vmstorage, vminsert, vmselect, vmalert, and vmsingle instances.
 - **Selector/Query (custom mode)** – collect any selector or MetricsQL query, with optional per-job target selection for selectors.
-- **Deterministic obfuscation** – configurable anonymisation for IPs, jobs, tenants, and custom labels, applied to samples and exports.
+- **vmagent-compatible obfuscation**: selected label values become SHA-256 digests, the same as vmagent `-remoteWrite.obfuscateLabels`, so values match across exports and MDX streams.
+- **Snapshot mode (experimental)**: scheduled exports of MDX metrics to your own S3, GCS, Azure Blob or local storage, ready for a Kubernetes CronJob; storage access is the vmbackup code.
 - **Disk-safe staging** – exporter streams batches to a chosen directory so partial files survive crashes or manual interrupts.
-- **Adjustable metric cadence** – choose 30s/1m/5m dedup steps per export or override explicitly.
+- **Adjustable metric cadence**: choose a 30s/1m/5m sampling step for MetricsQL (query_range) exports. Cluster exports and selectors keep raw samples; a selector that already has a `job` matcher and selected jobs also runs through query_range and uses the step.
 - **Batched exports with ETA** – splits long ranges into windows and shows progress + forecasted completion.
 - **Wide auth surface** – Basic, Bearer, custom headers, multi-tenant VMAuth flows; importer forwards tenant headers.
 - **Chunked importing** – importer streams vmgather bundles in resumable chunks with post-upload verification.
@@ -84,7 +86,7 @@ The binary starts an HTTP server and opens a browser window at `http://localhost
 
 ### From source
 
-Requirements: Go 1.24+, Make, Git.
+Requirements: Go 1.27.3+, Make, Git.
 
 ```bash
 git clone https://github.com/VictoriaMetrics/vmgather.git
@@ -138,11 +140,15 @@ docker run --rm -p 8081:8081 vmimporter:$(git describe --tags --always)
 
 Set `DOCKER_OUTPUT=type=registry` to push directly to your registry, or override the tags via `docker buildx build -t <registry>/vmgather:tag …`.
 
-Both Dockerfiles live in `build/docker/` and follow distroless best practices (scratch runtime, static binaries).
+Both Dockerfiles live in `build/docker/` and follow distroless best practices (`distroless/static-debian12` runtime without OpenSSL, static binaries).
 
 ### CLI flags
 
 Both `vmgather` and `vmimporter` support `-addr` (bind address) and `-no-browser` to skip auto-launching a browser during scripting or Docker-based runs. vmgather's default is `localhost:8080` with automatic fallback to a free port; VMImport defaults to `0.0.0.0:8081` to avoid clashing with vmgather. vmgather also accepts `-output` to choose the directory for generated archives (defaults to `./exports`).
+
+Both binaries accept `-allowed-hosts host1,host2` for a reverse proxy or a sidecar in front of the UI:
+- clients on the same machine or pod, such as a local nginx or an Istio sidecar that connects from `127.0.0.6`, may send these names in Host, on any port. `localhost`, `*.localhost` and IP addresses are always accepted; other names from local clients are rejected to block DNS rebinding;
+- a plain HTTP page on one of these names may POST even when the proxy rewrites Host (for example Apache without `ProxyPreserveHost On`). Otherwise the cross-origin check rejects such requests, because browsers send `Sec-Fetch-Site` only on HTTPS and localhost. Here the port counts: `vmgather.corp:8443` trusts pages on that port only, `vmgather.corp` only the default port.
 
 vmgather also accepts `-debug` for verbose logging. On vmgather, `-debug` additionally mounts Go's [`net/http/pprof`](https://pkg.go.dev/net/http/pprof) profiling endpoints at `/debug/pprof/` — useful for diagnosing high CPU usage during large exports, but pprof is unauthenticated, so only enable it on a deployment that isn't publicly reachable.
 
@@ -228,12 +234,83 @@ Importer
 
 See [docs/user-guide.md](docs/user-guide.md) for UI screenshots and parameter descriptions.
 
+## Snapshot mode (experimental)
+
+Snapshot mode is experimental: flags, the bucket layout and the state file may change between releases.
+
+Snapshot mode is for teams that cannot send MDX (Monitoring Data eXchange) to VictoriaMetrics. vmgather runs on a schedule in your infrastructure, exports the MDX metrics of your VictoriaMetrics components for fixed time windows and uploads every window to your own storage. You share the snapshots you choose with support.
+
+It reuses VictoriaMetrics code, so it behaves like the tools you already run:
+- **What is exported**: the vmagent `-remoteWrite.mdx.enable` filter (`lib/mdx`). A series is kept only if its job and instance (and tenant) have `vm_app_version`, or the series has `victoriametrics_app="true"` or the label from `-mdx.label`. Kept series get `victoriametrics_app="true"`.
+- **Obfuscation**: the vmagent `-remoteWrite.obfuscateLabels` algorithm (see [Privacy & obfuscation](#privacy--obfuscation)).
+- **Storage**: the vmbackup storage layer and upload (`lib/backup`). Destinations are `s3://bucket/prefix`, `gs://bucket/prefix`, `azblob://container/prefix` and `fs:///absolute/path`. Credentials and options use the vmbackup flags: `-customS3Endpoint`, `-s3ForcePathStyle`, `-credsFilePath`, `-configFilePath`, `-configProfile`, `-s3StorageClass`, `-s3ObjectTags` and others, plus the standard AWS, GCP and Azure credential chains (IRSA, workload identity, instance roles).
+
+Run one snapshot and exit (for a Kubernetes CronJob or cron):
+```bash
+./vmgather -snapshot.dst=s3://my-bucket/vmgather -snapshot.config=./snapshot.json -output=/tmp/vmgather
+```
+
+Add `-snapshot.interval=10m` to keep the process running and check for complete windows every 10 minutes.
+
+`snapshot.json` uses the oneshot config format; `time_range` is ignored. Leave `jobs` empty to discover, for every window, the VictoriaMetrics components that had `vm_app_version` at any time in it, so new components are picked up without config changes and a component that stopped during the window is still exported:
+```json
+{
+  "connection": { "url": "http://vmselect:8481/select/0/prometheus", "auth": { "type": "basic", "username": "vmgather" } },
+  "obfuscation": { "enabled": true, "obfuscate_instance": true }
+}
+```
+
+Keep secrets out of the file: `VMGATHER_VM_PASSWORD`, `VMGATHER_VM_BEARER_TOKEN` and `VMGATHER_VM_HEADER_VALUE` override the matching auth fields.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `-snapshot.dst` | | Destination. Setting it turns on snapshot mode |
+| `-snapshot.config` | | Export config JSON |
+| `-snapshot.period` | `1h` | Window length, at least `1m` and a whole number of seconds. Window ends are aligned to it (UTC); an off-grid `-snapshot.start` makes only the first window shorter |
+| `-snapshot.lag` | `5m` | A window is exported only when its end is at least this far behind now |
+| `-snapshot.maxCatchUp` | `24` | Maximum windows per run after downtime; the next run continues |
+| `-snapshot.start` | | Start of the first window when the destination has no state yet. Default: one period before the newest complete window end |
+| `-snapshot.end` | | Fixed end for a one-time backfill of `[-snapshot.start, -snapshot.end)`. Needs `-snapshot.start`, must be a multiple of the period and at least `-snapshot.lag` behind now. A backfill does not read or write the state and skips windows that are already uploaded, so a failed backfill can be started again |
+| `-snapshot.interval` | `0` | `0` runs once and exits; a positive value runs in a loop |
+| `-snapshot.retention` | `30d` | Scheduled runs delete snapshots whose window ended longer ago, including incomplete ones; `0` keeps them forever. VictoriaMetrics retention format: `h`, `d`, `w`, `y`, `M` (months); there is no minute suffix, use `300s` |
+
+How it works:
+- Windows are half-open `[start, end)`: a sample exactly at the end belongs to the next window, so no sample is in two snapshots.
+- Every window goes to `<dst>/<start>_<end>/` (for example `20261121T090000Z_20261121T100000Z`) with the usual vmgather bundle `vmgather.zip` (`metrics.jsonl`, `metadata.json`, `README.txt`), so vmimporter imports it as is. The layout is the vmbackup layout: the zip is stored as `vmgather.zip/<size>_<offset>_<size>` parts (one object for bundles under 1 GiB), followed by `backup_metadata.ignore` and `backup_complete.ignore`, which is written last.
+- `<dst>/vmgather_state.json` keeps the end of the last uploaded window. It is written only after the upload completed. A failed or interrupted window (SIGTERM included) is exported again by the next run into the same place.
+- Inside a window the export uses the usual adaptive batches: heavy windows are split by time and 502/503 responses are retried, so a busy cluster slows a run down instead of breaking it. If a window still fails, the run exits with code 1 and the state does not move.
+- A cluster with an unavailable vmstorage fails the run instead of returning part of the data: exports never accept partial responses, and discovery sends `deny_partial_response=1`.
+- A window without MDX series (for example before any component existed, or during an outage of the whole monitoring) is not uploaded; the run logs a warning and the state moves on, so it never blocks later windows.
+- A state that ends after the current time (clock moved back, edited file) stops the run with an error instead of waiting silently.
+- The first scheduled run without a state and without `-snapshot.start` fails if the newest complete window has no MDX series, and saves no state: usually the URL, the tenant or the jobs are wrong, or the components run for less than one period plus the lag (then the next run succeeds). With `-snapshot.start` empty windows are skipped as described above.
+- On `fs://` the state file is replaced atomically (temp file and rename), so a killed run cannot leave a broken state.
+
+Download a snapshot with vmrestore, then import `vmgather.zip` with vmimporter:
+```bash
+vmrestore -src=s3://my-bucket/vmgather/20261121T090000Z_20261121T100000Z -storageDataPath=/tmp/snapshot
+```
+
+Disk space, local and remote, stays bounded also when runs fail:
+- The local work directory `<-output>/vmgather-snapshot-work` is emptied before and after every run, including failed and interrupted ones. During a run it holds one window: raw JSONL plus its zip.
+- A failed window is retried into the same place and overwrites it, so failed attempts do not pile up in the bucket.
+- `-snapshot.retention` deletes old snapshots, complete or not, after every scheduled run. A backfill never deletes anything, so give backfills their own prefix.
+- For a bucket with object versioning add the vmbackup flag `-deleteAllObjectVersions`, otherwise deleted snapshots stay as old versions.
+- A killed multipart upload (bundles over 5 MB) can leave invisible parts in S3: add a lifecycle rule that aborts incomplete multipart uploads.
+
+Things to know:
+- Run one writer per destination (`concurrencyPolicy: Forbid` for a CronJob), and one snapshot process per `-output` directory: every run empties `<-output>/vmgather-snapshot-work`, also when another process uses it. A scheduled process and a backfill on the same host need different `-output` values.
+- The storage user needs read, write, delete and list on the prefix (for S3: `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, `s3:ListBucket`).
+- Samples that arrive later than `-snapshot.lag` (for example from a vmagent persistent queue after a long outage) are not exported again.
+- Tested: S3-compatible storage (Garage) and `fs://`. GCS, Azure Blob and bundles over 1 GiB use the same vmbackup code, but vmgather does not test them yet.
+
+Kubernetes manifests: [deploy/k8s/](deploy/k8s/) has a CronJob and a one-time Job that exports MDX metrics from a vmbackup backup (vmrestore into a temporary vmsingle, then a backfill).
+
 ## Privacy & obfuscation
 
-- Default mappings mask private networks with `777.777.x.x` while preserving ports for debugging.
-- Job names retain component prefixes (`vmstorage-job-1`) for observability without exposing tenant names.
-- Custom labels are mapped deterministically; mappings stay in memory and are not written to the archive.
-- Obfuscation settings apply to previews and exports; obfuscated mappings are included in archive metadata for support correlation.
+- Obfuscated label values are replaced with their hex SHA-256 digest, the same as vmagent [`-remoteWrite.obfuscateLabels`](https://docs.victoriametrics.com/victoriametrics/vmagent/#obfuscating-label-values). The same value gives the same digest in every export, in every snapshot and in MDX streams from vmagent, so support can match them.
+- There is no salt. Values with a small space, such as `IP:port`, can be recovered by brute force. Drop a label instead if it must not leave your network.
+- You choose the labels: `instance`, `job` and any custom labels. When `job` is obfuscated, the job names in `metadata.json` are obfuscated too.
+- Obfuscation settings apply to previews and exports. No mapping is stored: anyone with the real value can compute its digest (`printf '%s' 10.0.0.1:8482 | sha256sum`).
 - No credentials or temporary archives persist to disk after the process ends.
 
 ## Testing

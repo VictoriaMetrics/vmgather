@@ -6,7 +6,7 @@ A high-level breakdown of how the VictoriaMetrics metrics exporter is structured
 
 - **Single binary** – UI assets are embedded; the HTTP server defaults to localhost (configurable via `-addr` and auto-fallback to a free port).
 - **Privacy-first** – the pipeline obfuscates data as it streams instead of handling temporary plaintext copies.
-- **Stateless** – no configuration files or databases; everything is supplied per-run.
+- **Stateless** – no configuration files, databases or local state; everything is supplied per run. Snapshot mode keeps its window state (`vmgather_state.json`) in the destination.
 - **Predictable UX** – the same 6-step flow as other VictoriaMetrics utilities.
 
 ## Component overview
@@ -17,7 +17,8 @@ A high-level breakdown of how the VictoriaMetrics metrics exporter is structured
 | Presentation | `internal/importer/server` | Standalone VMImport UI & API for uploading bundles back into VictoriaMetrics. |
 | Application | `internal/application/services` | Orchestrates validation, discovery, sampling, and export workflows. |
 | Infrastructure | `internal/infrastructure/vm` | VictoriaMetrics client (query, export APIs, auth, multitenancy). |
-| Infrastructure | `internal/infrastructure/obfuscation` | Deterministic obfuscation for IPs/jobs/custom labels. |
+| Application | `internal/snapshot` | Snapshot mode: window planning, state, export of one window and upload through VictoriaMetrics `lib/backup`. |
+| Infrastructure | `internal/infrastructure/obfuscation` | vmagent-compatible obfuscation: hex SHA-256 of label values. |
 | Infrastructure | `internal/infrastructure/archive` | Streams export data, writes metadata, generates ZIP + checksum. |
 | Domain | `internal/domain` | Shared types/configs used across the stack. |
 
@@ -29,7 +30,7 @@ A high-level breakdown of how the VictoriaMetrics metrics exporter is structured
 
 ### Backend
 
-- Go 1.24+ HTTP server using the standard library.
+- Go 1.27.3+ HTTP server using the standard library.
 - Defaults to `localhost:8080` (exporter) and `0.0.0.0:8081` (importer); falls back to a free port when busy.
 - Provides REST APIs mirroring other VictoriaMetrics tools.
 
@@ -46,7 +47,8 @@ infrastructure/vm.Client ───→ VictoriaMetrics API
   ↓                                         ↑
 application/services.ExportService          │
   ↓                                         │
-infrastructure/obfuscation.Manager          │
+services.lineProcessor (MDX filter,         │
+  drop labels, obfuscation.Labels)          │
   ↓                                         │
 infrastructure/archive.Writer ──────────────┘
   ↓
@@ -55,12 +57,14 @@ ZIP archive → browser download
 
 ### Exporter specifics
 
-- Batching: auto-selects 30s/1m/5m windows (or custom interval) per time range; minimum batch interval 30s.
-- Metric step: defaults to the same 30s/1m/5m cadence unless overridden via `metric_step_seconds`.
+- Batching: auto uses 1-hour windows (a shorter range is one window) or a custom interval; minimum batch interval 30s. `/api/v1/export` repeats every label set once per request window, so small windows multiply the payload.
+- Metric step: used only by the query_range path (MetricsQL); defaults to 30s/1m/5m by time range unless overridden via `metric_step_seconds`.
 - Fallback: if `/api/v1/export` returns 404/missing route, transparently switches to `query_range` with normalized `/rw/prometheus` → `/prometheus` paths for VMAuth.
 - Staging: `/api/fs/check` creates/validates staging directories and write access; job metadata exposes the staging path.
 - Job manager: up to 3 concurrent exports, ETA/progress tracking, cancellation, retention window for finished jobs.
-- Obfuscation: instance/job/custom labels applied consistently to samples and exports; deterministic maps are embedded in archive metadata; `metadata.json` + `README.txt` accompany `metrics.jsonl` in the ZIP along with SHA256.
+- Line processing: one `lineProcessor` per export applies, in the vmagent order, the MDX filter (optional, VictoriaMetrics `lib/mdx`), dropped labels and obfuscation. Without any of them lines are copied unchanged without JSON parsing.
+- MDX filter: `lib/mdx` keeps a series only after it saw `vm_app_version` (or `victoriametrics_app="true"`) for its job and instance, so before every batch the export reads `vm_app_version` with the same job matcher and window to prime the filter. A failed priming request fails the export.
+- Obfuscation: instance/job/custom labels applied the same way to samples and exports; job names in `metadata.json` are obfuscated when the job label is; `metadata.json` + `README.txt` accompany `metrics.jsonl` in the ZIP along with SHA256.
 
 ## API surface
 
@@ -82,17 +86,35 @@ All endpoints accept/return JSON with error details suitable for UI presentation
 
 ## Obfuscation
 
-- **IPs** – replaced with `777.777.X.Y`, retaining port numbers and component grouping.
-- **Jobs** – renamed to `<component>-job-<n>` while keeping the original component prefix.
-- **Custom labels** – user-provided keys; mappings kept in memory for the session, not persisted.
-- **Sample previews** – `/api/sample` responses and export previews reuse the obfuscator so the UI never shows raw instances/jobs once obfuscation is enabled.
-- **Deterministic** – the same input within a session maps to the same output so support can correlate metrics.
+- **Algorithm**: a label value becomes its hex SHA-256 digest, without salt, the same as vmagent `-remoteWrite.obfuscateLabels` (`app/vmagent/remotewrite/obfuscate.go`). vmagent's implementation is not exported, so vmgather has the same few lines and tests them against fixed digests.
+- **Labels**: `instance`, `job` and user-provided keys.
+- **Deterministic**: the same value gives the same digest in every export, resumed export, snapshot and MDX stream. No mapping is kept or written.
+- **Limits**: values with a small space (IP:port) can be recovered by brute force.
+- **Sample previews**: `/api/sample` responses use the same helper, so the UI never shows raw values once obfuscation is enabled.
+
+## Snapshot mode
+
+One run:
+
+1. `planWindows` turns the state (end of the last uploaded window), `now - lag` and the period into aligned half-open windows.
+2. For every window, oldest first:
+   1. discover jobs with `vm_app_version` at any time in the window (`last_over_time` over the window, `deny_partial_response=1`), unless jobs are set in the config;
+   2. `ExecuteExport` in cluster mode with the MDX filter for `[start, end - 1ms]`, into `<work>/<VM snapshot name>/vmgather.zip`;
+   3. `lib/backup` `actions.Backup` uploads it to `<dst>/<start>_<end>/` (parts, `backup_metadata.ignore`, then `backup_complete.ignore`);
+   4. write `<dst>/vmgather_state.json`.
+
+- Storage access is VictoriaMetrics `lib/backup` (`actions.NewRemoteFS`, `actions.Backup`), so destinations, credentials, flags and retries are the vmbackup ones, and vmrestore downloads a snapshot.
+- The state is written only after `backup_complete.ignore`. Snapshot names are derived from the window, so a retry overwrites the same place.
+- A window without MDX series is not uploaded; the state still moves, so empty windows never block the schedule.
+- Space stays bounded: the work dir is emptied before and after every run; `-snapshot.retention` (scheduled runs only) deletes expired snapshot dirs with `RemoteFS.ListParts`, `DeleteFile` and `DeletePart`, completion marker first, including incomplete uploads.
+- A backfill (`-snapshot.end`) exports a fixed range, does not use the state and skips windows that already have `backup_complete.ignore`.
+- `-snapshot.interval` runs the same function in a loop; without it the process exits after one run (Kubernetes CronJob).
 
 ## Security characteristics
 
 - Credentials remain in memory only for the duration of the call and are never written to disk.
 - The HTTP server binds to `localhost` and random ports to lower the risk surface.
-- Temporary files are removed immediately after the bundle is downloaded or when the process exits.
+- vmgather removes the staging file when the archive is written; a canceled or failed export keeps it in the staging directory for resume. vmimporter keeps the upload of a failed job for 1 hour for resume, then deletes it, and deletes all kept uploads on shutdown.
 
 ## Testing hooks
 
@@ -116,7 +138,7 @@ The UI mirrors vmgather's connection card but introduces tenant/account ID field
 
 ### VMImporter specifics
 
-- Bundle ingestion: accepts `.zip` (extracts `metrics.jsonl`/`metadata.json`) or raw `.jsonl`; rejects archives without metrics.
+- Bundle ingestion: accepts `.zip` (reads `metrics.jsonl`/`metadata.json` in place, nothing is extracted to disk) or raw `.jsonl`; rejects archives without metrics. Uploads are streamed to a temp file; a failed job keeps its upload for resume for 1 hour.
 - Chunked streaming: uploads in ~512KB chunks to `/api/v1/import`, with progress reporting, byte counters, and resumable offsets on failure.
 - Resume: `/api/import/resume` continues a failed job from the saved offset and cached bundle path.
 - Retention: optional `drop_old` drops points older than the target’s retention (fetched via `/api/v1/status/tsdb`); warnings surface via `/api/analyze`.

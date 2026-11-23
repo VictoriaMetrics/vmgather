@@ -275,13 +275,13 @@ function initializeUrlValidation() {
         const nextBtn = document.getElementById('step3Next');
 
         if (assessment.valid) {
-            hint.textContent = `[OK] ${assessment.message || 'URL looks good'}`;
+            hint.textContent = `${assessment.message || 'URL looks good'}`;
             hint.classList.remove('error');
             hint.classList.add('success');
             testButton.disabled = false;
         } else {
             const message = assessment.message || 'Enter a valid http(s) URL';
-            hint.textContent = `[FAIL] ${message}`;
+            hint.textContent = `${message}`;
             hint.classList.remove('success');
             hint.classList.add('error');
             testButton.disabled = true;
@@ -441,8 +441,8 @@ function updateWelcomeCopy() {
     }
 
     if (currentMode === 'custom') {
-        purpose.innerHTML = '<strong>Purpose:</strong> Export metrics by selector or MetricsQL query for VictoriaMetrics team analysis';
-        intro.textContent = 'This wizard will guide you through exporting metrics from any dataset in VictoriaMetrics. You will:';
+        purpose.textContent = 'Export metrics by a selector or a MetricsQL query so the VictoriaMetrics team can analyze them.';
+        intro.textContent = 'In a few steps you will:';
         steps.forEach(step => {
             const key = step.dataset.welcomeStep;
             switch (key) {
@@ -464,8 +464,8 @@ function updateWelcomeCopy() {
             }
         });
     } else {
-        purpose.innerHTML = '<strong>Purpose:</strong> Export VictoriaMetrics internal metrics for VictoriaMetrics team analysis';
-        intro.textContent = 'This wizard will guide you through exporting metrics from your VictoriaMetrics installation. You will:';
+        purpose.textContent = 'Export the internal metrics of your VictoriaMetrics so the VictoriaMetrics team can analyze them.';
+        intro.textContent = 'In a few steps you will:';
         steps.forEach(step => {
             const key = step.dataset.welcomeStep;
             switch (key) {
@@ -927,7 +927,7 @@ async function testConnection() {
     if (!urlAssessment.valid) {
         result.innerHTML = `
             <div class="error-message">
-                [FAIL] ${urlAssessment.message}
+                ${escapeHtml(urlAssessment.message)}
             </div>
         `;
         btn.textContent = 'Test Connection';
@@ -943,31 +943,29 @@ async function testConnection() {
 
     const stepsContainer = document.getElementById('validationSteps');
 
-    // Helper to add validation step
+    // Helpers for validation steps. Texts include the URL and server errors, so they are set as text, not HTML.
+    const stepColors = {
+        pending: '#666',
+        progress: '#2962FF',
+        success: '#4CAF50',
+        error: '#f44336'
+    };
+
     function addStep(icon, text, status = 'pending') {
-        const stepId = `step-${Date.now()}-${Math.random()}`;
-        const stepHtml = `
-            <div id="${stepId}" data-status="${status}" style="padding: 8px; margin: 5px 0; border-left: 3px solid #666; background: #f5f5f5; font-size: 13px;">
-                <span style="margin-right: 8px;">[${status.toUpperCase()}]</span>
-                <span>${text}</span>
-            </div>
-        `;
-        stepsContainer.insertAdjacentHTML('beforeend', stepHtml);
-        return stepId;
+        const step = document.createElement('div');
+        step.id = `step-${Date.now()}-${Math.random()}`;
+        step.style.cssText = 'padding: 8px; margin: 5px 0; border-left: 3px solid #666; background: #f5f5f5; font-size: 13px;';
+        stepsContainer.appendChild(step);
+        updateStep(step.id, icon, text, status);
+        return step.id;
     }
 
     function updateStep(stepId, icon, text, status) {
         const step = document.getElementById(stepId);
         if (step) {
-            const colors = {
-                pending: '#666',
-                progress: '#2962FF',
-                success: '#4CAF50',
-                error: '#f44336'
-            };
-            step.style.borderLeftColor = colors[status];
+            step.style.borderLeftColor = stepColors[status];
             step.setAttribute('data-status', status);
-            step.innerHTML = `<span style="margin-right: 8px;">[${status.toUpperCase()}]</span><span>${text}</span>`;
+            step.textContent = text;
         }
     }
 
@@ -983,7 +981,7 @@ async function testConnection() {
         await new Promise(resolve => setTimeout(resolve, 300));
 
         if (!config.url) {
-            updateStep(step1, '[FAIL]', 'URL parsing failed: Empty URL', 'error');
+            updateStep(step1, '[FAIL]', 'Enter a URL', 'error');
             throw new Error('URL is required');
         }
 
@@ -1014,17 +1012,22 @@ async function testConnection() {
                 fetchOpts.signal = controller.signal;
             }
 
-            await fetch(config.url + '/metrics', fetchOpts).catch(() => null);
+            // An opaque (no-cors) answer still means the host answered; a network error or the timeout does not.
+            const answered = await fetch(config.url + '/metrics', fetchOpts).then(() => true, () => false);
             if (timeoutId) {
                 clearTimeout(timeoutId);
             }
 
-            updateStep(step2, '[OK]', `Host check complete (<=${Math.round(hostCheckTimeoutMs / 1000)}s)`, 'success');
-            console.log('[OK] Step 2: Host check complete');
+            if (answered) {
+                updateStep(step2, '[OK]', 'Host is reachable', 'success');
+            } else {
+                // The browser may be blocked (proxy, mixed content) while vmgather itself can connect.
+                updateStep(step2, '[WARN]', `No answer to the browser in ${Math.round(hostCheckTimeoutMs / 1000)}s; vmgather checks the connection itself next`, 'pending');
+            }
+            console.log('[OK] Step 2: Host check complete, answered:', answered);
         } catch (e) {
-            // Even if CORS fails, it means host is reachable
-            updateStep(step2, '[OK]', 'Host is reachable (CORS protected)', 'success');
-            console.log('[OK] Step 2: Host reachable (CORS)');
+            updateStep(step2, '[WARN]', 'Host check skipped; vmgather checks the connection itself next', 'pending');
+            console.log('[WARN] Step 2: Host check failed', e);
         }
 
         // Step 3: Detect VictoriaMetrics
@@ -1054,7 +1057,7 @@ async function testConnection() {
         if (response.ok && data.success) {
             // Check if VictoriaMetrics was detected
             if (data.is_victoria_metrics === false) {
-                updateStep(step3, '[WARN]', 'Warning: Not VictoriaMetrics', 'error');
+                updateStep(step3, '[WARN]', 'This does not look like VictoriaMetrics', 'error');
                 updateStep(step4, '[OK]', 'Connection successful, but...', 'success');
 
                 console.log('[WARN]  Warning: Not VictoriaMetrics');
@@ -1063,9 +1066,9 @@ async function testConnection() {
                 // Add warning summary
                 stepsContainer.insertAdjacentHTML('beforeend', `
                     <div style="margin-top: 15px; padding: 15px; background: #fff3cd; border-radius: 4px; border-left: 4px solid #ff9800;">
-                        <div style="font-weight: bold; color: #f57c00; margin-bottom: 8px;">[WARN] Warning</div>
+                        <div style="font-weight: bold; color: #f57c00; margin-bottom: 8px;">Warning</div>
                         <div style="font-size: 13px; color: #555;">
-                            ${data.warning || 'The endpoint responded but does not appear to be VictoriaMetrics.'}<br><br>
+                            ${escapeHtml(data.warning || 'The endpoint responded but does not appear to be VictoriaMetrics.')}<br><br>
                             <strong>Please verify:</strong><br>
                             - The URL points to VictoriaMetrics (vmselect, vmsingle, or vmauth)<br>
                             - The path includes /prometheus or /select/... if needed<br>
@@ -1080,7 +1083,7 @@ async function testConnection() {
                 return;
             }
 
-            updateStep(step3, '[OK]', `VictoriaMetrics detected! (${data.vm_components ? data.vm_components.join(', ') : 'components found'})`, 'success');
+            updateStep(step3, '[OK]', `VictoriaMetrics found: ${data.vm_components ? data.vm_components.join(', ') : 'components found'}`, 'success');
             updateStep(step4, '[OK]', `Connection successful! Version: ${data.version || 'Unknown'}`, 'success');
 
             console.log('[OK] All steps passed!');
@@ -1100,15 +1103,15 @@ async function testConnection() {
             // Add final summary
             stepsContainer.insertAdjacentHTML('beforeend', `
                 <div style="margin-top: 15px; padding: 15px; background: #e8f5e9; border-radius: 4px; border-left: 4px solid #4CAF50;">
-                    <div style="font-weight: bold; color: #2e7d32; margin-bottom: 8px;">[OK] Connection Successful!</div>
+                    <div style="font-weight: bold; color: #2e7d32; margin-bottom: 8px;">Connection Successful!</div>
                     <div style="font-size: 13px; color: #555;">
-                        <strong>Version:</strong> ${data.version || 'Unknown'}<br>
-                        <strong>Components:</strong> ${data.components || 0} detected<br>
-                        ${data.vm_components && data.vm_components.length > 0 ? `<strong>VM Components:</strong> ${data.vm_components.join(', ')}<br>` : ''}
-                        ${finalEndpoint ? `<strong>Final endpoint:</strong> ${finalEndpoint}<br>` : ''}
-                        ${config.tenant_id ? `<strong>Tenant ID:</strong> ${config.tenant_id}<br>` : ''}
+                        <strong>Version:</strong> ${escapeHtml(data.version || 'Unknown')}<br>
+                        <strong>Components:</strong> ${escapeHtml(data.components || 0)} detected<br>
+                        ${data.vm_components && data.vm_components.length > 0 ? `<strong>VM Components:</strong> ${escapeHtml(data.vm_components.join(', '))}<br>` : ''}
+                        ${finalEndpoint ? `<strong>Final endpoint:</strong> ${escapeHtml(finalEndpoint)}<br>` : ''}
+                        ${config.tenant_id ? `<strong>Tenant ID:</strong> ${escapeHtml(config.tenant_id)}<br>` : ''}
                         ${config.is_multitenant ? `<strong>Type:</strong> Multitenant endpoint<br>` : ''}
-                        ${Array.isArray(data.attempts) && data.attempts.length > 0 ? `<strong>Attempts:</strong><br>${data.attempts.map(a => `- ${a.endpoint} ${a.success ? '[OK]' : '[FAIL]'}`).join('<br>')}<br>` : ''}
+                        ${Array.isArray(data.attempts) && data.attempts.length > 0 ? `<strong>Attempts:</strong><br>${data.attempts.map(a => `- ${escapeHtml(a.endpoint)} ${a.success ? 'ok' : 'failed'}`).join('<br>')}<br>` : ''}
                     </div>
                 </div>
             `);
@@ -1118,7 +1121,7 @@ async function testConnection() {
             updateStep3NextTooltip();
             const hint = document.getElementById('vmUrlHint');
             if (hint) {
-                hint.textContent = '[OK] URL looks valid';
+                hint.textContent = 'URL looks valid';
                 hint.classList.remove('error');
                 hint.classList.add('success');
             }
@@ -1156,24 +1159,24 @@ async function testConnection() {
         const attemptsHtml = Array.isArray(lastValidationAttempts) && lastValidationAttempts.length > 0
             ? `<div style="margin-top: 8px; font-size: 12px; color: #555;">
                 <strong>Attempts:</strong><br>
-                ${lastValidationAttempts.map(a => `- ${a.endpoint} ${a.success ? '[OK]' : '[FAIL]'}${a.error ? `: ${a.error}` : ''}`).join('<br>')}
+                ${lastValidationAttempts.map(a => `- ${escapeHtml(a.endpoint)} ${a.success ? 'ok' : 'failed'}${a.error ? `: ${escapeHtml(a.error)}` : ''}`).join('<br>')}
               </div>`
             : '';
 
         const finalEndpointHtml = lastValidationFinalEndpoint
-            ? `<div style="margin-top: 8px; font-size: 12px; color: #555;"><strong>Final endpoint:</strong> ${lastValidationFinalEndpoint}</div>`
+            ? `<div style="margin-top: 8px; font-size: 12px; color: #555;"><strong>Final endpoint:</strong> ${escapeHtml(lastValidationFinalEndpoint)}</div>`
             : '';
 
         const errorBoxHtml = `
             <div class="error-message">
-                [FAIL] ${errorMsg}
-                ${errorDetails ? `<div style="margin-top: 8px; font-size: 13px;">${errorDetails}</div>` : ''}
+                ${escapeHtml(errorMsg)}
+                ${errorDetails ? `<div style="margin-top: 8px; font-size: 13px;">${escapeHtml(errorDetails)}</div>` : ''}
                 ${finalEndpointHtml}
                 ${attemptsHtml}
                 <div style="margin-top: 10px; font-size: 12px; opacity: 0.8; border-top: 1px solid #ffcccc; padding-top: 10px;">
                     <strong>Debug info:</strong><br>
                     Open browser console (F12) -> Console tab for detailed logs<br>
-                    Technical error: ${error.message}
+                    Technical error: ${escapeHtml(error.message)}
                 </div>
             </div>
         `;
@@ -1366,13 +1369,27 @@ function focusCustomQueryInput() {
     document.getElementById('customQueryInput')?.focus();
 }
 
+// escapeHtml makes text from VictoriaMetrics (job names, label values), the target (errors, versions)
+// or the user safe in HTML text and in quoted attribute values.
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+// renderErrorMessage shows a server or network error as text: it may contain HTML from a proxy.
+function renderErrorMessage(el, message) {
+    const box = document.createElement('div');
+    box.className = 'error-message';
+    box.textContent = message;
+    el.replaceChildren(box);
+}
+
 async function validateCustomQuery() {
     const query = getActiveCustomQuery();
     const resultEl = document.getElementById('customQueryValidationResult');
 
     if (!query) {
         if (resultEl) {
-            resultEl.innerHTML = '<div class="error-message">[FAIL] Query is required</div>';
+            resultEl.innerHTML = '<div class="error-message">Query is required</div>';
         }
         customQueryValidated = false;
         updateCustomQueryValidation();
@@ -1382,7 +1399,7 @@ async function validateCustomQuery() {
     const config = getConnectionConfig();
     if (!connectionValid) {
         if (resultEl) {
-            resultEl.innerHTML = '<div class="error-message">[FAIL] Please test the connection first</div>';
+            resultEl.innerHTML = '<div class="error-message">Please test the connection first</div>';
         }
         customQueryValidated = false;
         updateCustomQueryValidation();
@@ -1406,7 +1423,7 @@ async function validateCustomQuery() {
         if (!response.ok || !data.success) {
             const errMsg = data.error || data.message || 'Validation failed';
             if (resultEl) {
-                resultEl.innerHTML = `<div class="error-message">[FAIL] ${errMsg}</div>`;
+                renderErrorMessage(resultEl, errMsg);
             }
             customQueryValidated = false;
             customQueryValidationMessage = errMsg;
@@ -1417,15 +1434,15 @@ async function validateCustomQuery() {
         customQueryType = data.query_type === 'selector' ? 'selector' : 'metricsql';
         customQueryValidationMessage = '';
         if (resultEl) {
-            const meta = data.result_count != null ? `<div class="input-hint">Matched series: ${data.result_count}</div>` : '';
-            resultEl.innerHTML = `<div class="success-box" style="padding:12px;margin-top:10px;">[OK] Query validated (${customQueryType})${meta}</div>`;
+            const meta = data.result_count != null ? `<div class="input-hint">Matched series: ${escapeHtml(data.result_count)}</div>` : '';
+            resultEl.innerHTML = `<div class="success-box" style="padding:12px;margin-top:10px;">Query validated (${customQueryType})${meta}</div>`;
         }
         updateCustomQueryDetection();
         updateCustomQueryValidation();
         rebuildStepSequence();
     } catch (err) {
         if (resultEl) {
-            resultEl.innerHTML = `<div class="error-message">[FAIL] ${err.message}</div>`;
+            renderErrorMessage(resultEl, err.message);
         }
         customQueryValidated = false;
         customQueryValidationMessage = err.message;
@@ -1443,11 +1460,11 @@ function updateCustomQueryValidation() {
         return;
     }
     if (customQueryValidated) {
-        badge.textContent = `[OK] Validated (${customQueryType})`;
+        badge.textContent = `Validated (${customQueryType})`;
         badge.classList.remove('error');
         badge.classList.add('success');
     } else {
-        badge.textContent = customQueryValidationMessage ? `[FAIL] ${customQueryValidationMessage}` : '[WAIT] Validation required';
+        badge.textContent = customQueryValidationMessage ? `${customQueryValidationMessage}` : 'Validation required';
         badge.classList.remove('success');
         badge.classList.add('error');
     }
@@ -1625,13 +1642,13 @@ function renderComponents(components) {
             <div class="component-item" onclick="toggleComponent(this)">
                 <div class="component-header">
                     <input type="checkbox" 
-                           data-component="${comp.component}" 
+                           data-component="${escapeHtml(comp.component)}" 
                            onclick="event.stopPropagation();" 
                            onchange="handleComponentCheck(this)">
-                    <strong>${comp.component}</strong>
+                    <strong>${escapeHtml(comp.component)}</strong>
                 </div>
                 <div class="component-details">
-                    Jobs: ${jobListText} | Instances: ${totalInstances} | ${seriesEstimate}
+                    Jobs: ${escapeHtml(jobListText)} | Instances: ${escapeHtml(totalInstances)} | ${seriesEstimate}
                 </div>
                 ${allJobs.length > 1 ? renderJobsGroup(comp.component, allJobs, totalInstances, comp.job_metrics || {}) : ''}
             </div>
@@ -1664,9 +1681,9 @@ function renderSelectorJobs(jobs) {
         item.className = 'selector-job-item';
         item.innerHTML = `
             <label>
-                <input type="checkbox" data-job="${jobName}" checked>
-                <strong>${jobName}</strong>
-                <span class="selector-job-meta">${instances} instance(s) · ${seriesEstimate}</span>
+                <input type="checkbox" data-job="${escapeHtml(jobName)}" checked>
+                <strong>${escapeHtml(jobName)}</strong>
+                <span class="selector-job-meta">${escapeHtml(instances)} instance(s) · ${seriesEstimate}</span>
             </label>
         `;
         list.appendChild(item);
@@ -1687,10 +1704,10 @@ function renderJobsGroup(componentType, jobs, totalInstances, jobMetrics = {}) {
             <div class="job-item">
                 <label onclick="event.stopPropagation();">
                     <input type="checkbox" 
-                           data-component="${componentType}" 
-                           data-job="${job}"
+                           data-component="${escapeHtml(componentType)}" 
+                           data-job="${escapeHtml(job)}"
                            onchange="handleJobCheck(this)">
-                    <strong>${job}</strong> - ~${estimatedInstances} instance(s) - ${seriesForJob}
+                    <strong>${escapeHtml(job)}</strong> - ~${estimatedInstances} instance(s) - ${seriesForJob}
                 </label>
             </div>
         `;
@@ -1838,7 +1855,7 @@ function applyRecommendedMetricStep(forceApply) {
     }
     const recommended = getRecommendedMetricStepSeconds();
     if (hint) {
-        hint.textContent = `Current data step (minimum): ${formatStepLabel(recommended)}`;
+        hint.textContent = `Used only for MetricsQL (query_range) exports; selector and cluster exports keep raw samples. Recommended: ${formatStepLabel(recommended)}`;
     }
     if (forceApply && (!select.value || select.value === '')) {
         select.value = String(recommended);
@@ -1913,10 +1930,9 @@ function updateBatchWindowHint() {
     if (!hint || !select) {
         return;
     }
-    const recommended = getRecommendedMetricStepSeconds();
     const value = select.value || 'auto';
     if (value === 'auto') {
-        hint.textContent = `Auto batches by time range (current: ${formatStepLabel(recommended)}).`;
+        hint.textContent = 'Auto uses 1-hour batches (a shorter range is one batch).';
         return;
     }
     if (value === 'custom') {
@@ -2419,11 +2435,11 @@ async function loadSampleMetrics() {
         }
         const errorHtml = `
             <div class="error-message" role="alert" aria-live="assertive" style="margin: 20px; padding: 15px; background: #ffebee; border-left: 4px solid #f44336; border-radius: 4px;">
-                <strong style="color: #c62828;">[FAIL] Failed to load sample metrics</strong>
-                <p style="margin-top: 10px; color: #555;">${detailMessage}</p>
+                <strong style="color: #c62828;">Failed to load sample metrics</strong>
+                <p style="margin-top: 10px; color: #555;">${escapeHtml(detailMessage)}</p>
                 <details style="margin-top: 10px; font-size: 12px; color: #666;">
                     <summary style="cursor: pointer; font-weight: 500;">Technical details</summary>
-                    <pre style="margin-top: 10px; white-space: pre-wrap; word-break: break-all; background: #f5f5f5; padding: 10px; border-radius: 4px;">${err.stack || err.toString()}</pre>
+                    <pre style="margin-top: 10px; white-space: pre-wrap; word-break: break-all; background: #f5f5f5; padding: 10px; border-radius: 4px;">${escapeHtml(err.stack || err.toString())}</pre>
                 </details>
                 <button onclick="loadSampleMetrics()" style="margin-top: 15px; padding: 8px 16px; background: #2962FF; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
                     Retry
@@ -2439,8 +2455,8 @@ async function loadSampleMetrics() {
         advancedLabelsContainer.innerHTML = errorHtml;
         samplePreviewContainer.innerHTML = `
             <div class="error-message" role="alert" aria-live="assertive" style="padding: 15px; background: #ffebee; border-left: 4px solid #f44336; border-radius: 4px;">
-                <strong style="color: #c62828;">[FAIL] Preview unavailable</strong>
-                <p style="margin-top: 8px; color: #555;">${detailMessage}</p>
+                <strong style="color: #c62828;">Preview unavailable</strong>
+                <p style="margin-top: 8px; color: #555;">${escapeHtml(detailMessage)}</p>
             </div>
         `;
     } finally {
@@ -2480,8 +2496,8 @@ function renderSamplePreview(samples) {
         html += `
             <div class="sample-metric">
                 ${nameHint}
-                <div class="metric-name">${metricName}</div>
-                <div class="metric-labels">{${labels}}</div>
+                <div class="metric-name">${escapeHtml(metricName)}</div>
+                <div class="metric-labels">{${escapeHtml(labels)}}</div>
             </div>
         `;
     });
@@ -2523,9 +2539,9 @@ function renderAdvancedLabels(samples) {
         html += `
             <div class="label-item">
                 <label>
-                    <input type="checkbox" class="obf-label-checkbox" data-label="${label}" ${checkedAttr}>
-                    <strong>${label}</strong>
-                    <span class="label-sample">(e.g., ${sample})</span>
+                    <input type="checkbox" class="obf-label-checkbox" data-label="${escapeHtml(label)}" ${checkedAttr}>
+                    <strong>${escapeHtml(label)}</strong>
+                    <span class="label-sample">(e.g., ${escapeHtml(sample)})</span>
                 </label>
             </div>
         `;
@@ -2583,9 +2599,9 @@ function renderDropLabels(samples) {
         html += `
             <div class="label-item">
                 <label>
-                    <input type="checkbox" class="drop-label-checkbox" data-label="${label}" ${checkedAttr}>
-                    <strong>${label}</strong>
-                    <span class="label-sample">(e.g., ${sample})</span>
+                    <input type="checkbox" class="drop-label-checkbox" data-label="${escapeHtml(label)}" ${checkedAttr}>
+                    <strong>${escapeHtml(label)}</strong>
+                    <span class="label-sample">(e.g., ${escapeHtml(sample)})</span>
                 </label>
             </div>
         `;
@@ -2746,8 +2762,14 @@ function getSelectedComponents() {
                 });
             });
         } else {
-            // Add component without specific job (all jobs)
-            selected.push({ component });
+            // Components with a single job have no job checkboxes: export all their jobs explicitly.
+            // Without explicit jobs the backend has no job filter.
+            const compData = discoveredComponents.find(comp => comp.component === component);
+            const jobs = (compData && compData.jobs) || [];
+            if (jobs.length === 0) {
+                selected.push({ component });
+            }
+            jobs.forEach(job => selected.push({ component, job }));
         }
     });
 
@@ -2817,7 +2839,7 @@ function renderSummaryWarnings(warnings) {
     }
     return `
         <div class="warning-box" style="margin-top: 16px;">
-            <strong>Estimate warning:</strong> ${warnings.join(' ')}
+            <strong>Estimate warning:</strong> ${escapeHtml(warnings.join(' '))}
         </div>
     `;
 }
@@ -2830,7 +2852,7 @@ function updateSelectionSummary() {
 
     if (currentMode === 'custom' && customQueryType === 'metricsql') {
         summary.innerHTML = `
-            <h4>[BUILD] Estimated Export Volume</h4>
+            <h4>Estimated export size</h4>
             <p class="summary-placeholder">MetricsQL mode exports series directly from your query.</p>
         `;
         return;
@@ -2840,7 +2862,7 @@ function updateSelectionSummary() {
         const selectedJobs = getSelectedJobsFromSelector();
         if (!selectedJobs || selectedJobs.length === 0) {
             summary.innerHTML = `
-                <h4>[BUILD] Estimated Export Volume</h4>
+                <h4>Estimated export size</h4>
                 <p class="summary-placeholder">Select jobs above to see series estimates.</p>
             `;
             return;
@@ -2849,7 +2871,7 @@ function updateSelectionSummary() {
         const stats = computeSelectorSelectionStats(selectedJobs);
         if (stats.length === 0) {
             summary.innerHTML = `
-                <h4>[BUILD] Estimated Export Volume</h4>
+                <h4>Estimated export size</h4>
                 <p class="summary-placeholder">Metrics data is not available for the selected jobs.</p>
             `;
             return;
@@ -2858,15 +2880,15 @@ function updateSelectionSummary() {
         const totalKnown = stats.reduce((sum, stat) => stat.series != null ? sum + stat.series : sum, 0);
         const hasUnknown = stats.some(stat => stat.series == null);
 
-        let html = '<h4>[BUILD] Estimated Export Volume</h4><div class="summary-grid">';
+        let html = '<h4>Estimated export size</h4><div class="summary-grid">';
         stats.forEach(stat => {
             const seriesLabel = stat.series != null
                 ? `${stat.series.toLocaleString()} series`
                 : 'Series count unavailable';
             html += `
                 <div class="summary-card">
-                    <div><strong>${stat.job}</strong></div>
-                    <div class="summary-meta">${stat.instances} instance(s)</div>
+                    <div><strong>${escapeHtml(stat.job)}</strong></div>
+                    <div class="summary-meta">${escapeHtml(stat.instances)} instance(s)</div>
                     <div class="summary-meta">${seriesLabel}</div>
                 </div>
             `;
@@ -2889,7 +2911,7 @@ function updateSelectionSummary() {
     const selected = getSelectedComponents();
     if (!selected || selected.length === 0) {
         summary.innerHTML = `
-            <h4>[BUILD] Estimated Export Volume</h4>
+            <h4>Estimated export size</h4>
             <p class="summary-placeholder">Select components above to see per-component and per-job series counts.</p>
         `;
         return;
@@ -2898,7 +2920,7 @@ function updateSelectionSummary() {
     const stats = computeSelectionStats(selected);
     if (stats.length === 0) {
         summary.innerHTML = `
-            <h4>[BUILD] Estimated Export Volume</h4>
+            <h4>Estimated export size</h4>
             <p class="summary-placeholder">Metrics data is not available for the selected components.</p>
         `;
         return;
@@ -2909,7 +2931,7 @@ function updateSelectionSummary() {
     }, 0);
     const hasUnknown = stats.some(stat => stat.series == null);
 
-    let html = '<h4>[BUILD] Estimated Export Volume</h4><div class="summary-grid">';
+    let html = '<h4>Estimated export size</h4><div class="summary-grid">';
     stats.forEach(stat => {
         const seriesLabel = stat.series != null
             ? `${stat.series.toLocaleString()} series`
@@ -2917,7 +2939,7 @@ function updateSelectionSummary() {
 
         html += `
             <div class="summary-card">
-                <div><strong>${stat.component}</strong></div>
+                <div><strong>${escapeHtml(stat.component)}</strong></div>
                 <div class="summary-meta">${seriesLabel}</div>
         `;
 
@@ -2927,7 +2949,7 @@ function updateSelectionSummary() {
                 const jobLabel = job.series != null
                     ? job.series.toLocaleString()
                     : 'unknown';
-                html += `<li>${job.name}: ${jobLabel}</li>`;
+                html += `<li>${escapeHtml(job.name)}: ${jobLabel}</li>`;
             });
             html += '</ul>';
         }
@@ -2975,7 +2997,11 @@ function computeSelectionStats(selected) {
         };
 
         if (item.job) {
-            const jobSeries = existing.jobMetrics[item.job];
+            let jobSeries = existing.jobMetrics[item.job];
+            if ((jobSeries == null || jobSeries < 0) && (compData.jobs || []).length === 1) {
+                // Single-job component: the component estimate is the job estimate.
+                jobSeries = existing.metricsEstimate;
+            }
             existing.jobs.push({
                 name: item.job,
                 series: typeof jobSeries === 'number' && jobSeries >= 0 ? jobSeries : null,
@@ -3105,6 +3131,7 @@ async function exportMetrics(buttonElement) {
         resumeExportJob();
         return;
     }
+    hideResumeExportOption();
     const originalText = btn.textContent || 'Prepare Support Bundle';
     currentExportButton = btn;
     btn.dataset.originalText = originalText;
@@ -3229,13 +3256,13 @@ async function monitorExportJob(btn) {
                 disableCancelButton();
                 showCancelNotice('');
             } else if (status.state === 'failed') {
-                cleanupExportPolling(false);
+                // Keep the job id: completed batches stay in staging and the job can be resumed.
+                cleanupExportPolling(true);
                 btn.disabled = false;
                 btn.textContent = btn.dataset.originalText || 'Prepare Support Bundle';
                 currentExportButton = null;
-                alert('Export failed: ' + (status.error || 'Unknown error'));
                 disableCancelButton();
-                showCancelNotice('');
+                showFailedExportResumeOption(status);
             } else if (status.state === 'canceled') {
                 cleanupExportPolling(true);
                 btn.disabled = false;
@@ -3489,16 +3516,16 @@ function renderExportSpoilers(samples) {
         html += `
             <div class="spoiler">
                 <div class="spoiler-header" onclick="toggleSpoiler(this)">
-                    <span>Sample ${idx + 1}: ${metricName}</span>
+                    <span>Sample ${idx + 1}: ${escapeHtml(metricName)}</span>
                     <span>v</span>
                 </div>
                 <div class="spoiler-content">
                     <div class="spoiler-body">
                         <div class="sample-metric">
                             ${nameHint}
-                            <div class="metric-name">${metricName}</div>
-                            <div class="metric-labels">{${labels}}</div>
-                            ${sample.value ? `<div style="margin-top: 10px; color: #2962FF;">Value: ${sample.value}</div>` : ''}
+                            <div class="metric-name">${escapeHtml(metricName)}</div>
+                            <div class="metric-labels">{${escapeHtml(labels)}}</div>
+                            ${sample.value ? `<div style="margin-top: 10px; color: #2962FF;">Value: ${escapeHtml(sample.value)}</div>` : ''}
                         </div>
                     </div>
                 </div>
@@ -3551,6 +3578,19 @@ function showResumeExportOption(message) {
         resumeBtn.disabled = false;
     }
     showCancelNotice(message || 'Export canceled. You can resume with the same settings.');
+}
+
+// After a failure only the separate Resume button continues the failed job. The main button keeps
+// starting a new export, so a changed selection (for example fewer jobs) is not ignored.
+function showFailedExportResumeOption(status) {
+    const resumeBtn = document.getElementById('resumeExportBtn');
+    if (resumeBtn) {
+        resumeBtn.style.display = 'inline-flex';
+        resumeBtn.disabled = false;
+    }
+    const done = status.completed_batches || 0;
+    const total = status.total_batches || 0;
+    showCancelNotice(`Export failed: ${status.error || 'unknown error'}. ${done} of ${total} batches are kept: Resume continues from there, or change the selection and start a new export.`);
 }
 
 function hideResumeExportOption() {
