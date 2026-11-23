@@ -38,6 +38,7 @@ publish-vmgather:
 	@docker buildx build \
 		--platform $(PLATFORMS) \
 		--build-arg GO_VERSION=$(GO_VERSION) \
+		--build-arg VERSION=$(PKG_TAG) \
 		--provenance=mode=max \
 		--sbom=true \
 		--label "org.opencontainers.image.source=https://github.com/VictoriaMetrics/vmgather" \
@@ -57,6 +58,7 @@ publish-vmimporter:
 	@docker buildx build \
 		--platform $(PLATFORMS) \
 		--build-arg GO_VERSION=$(GO_VERSION) \
+		--build-arg VERSION=$(PKG_TAG) \
 		--provenance=mode=max \
 		--sbom=true \
 		--label "org.opencontainers.image.source=https://github.com/VictoriaMetrics/vmgather" \
@@ -381,6 +383,7 @@ docker-build-vmgather:
 		docker buildx build \
 			--platform "$$platform" \
 			--build-arg GO_VERSION=$(GO_VERSION) \
+			--build-arg VERSION=$(VERSION) \
 			--label "org.opencontainers.image.source=https://github.com/VictoriaMetrics/vmgather" \
 			--label "org.opencontainers.image.vendor=VictoriaMetrics" \
 			--label "org.opencontainers.image.version=$(PKG_TAG)" \
@@ -401,6 +404,7 @@ docker-build-vmimporter:
 		docker buildx build \
 			--platform "$$platform" \
 			--build-arg GO_VERSION=$(GO_VERSION) \
+			--build-arg VERSION=$(VERSION) \
 			--label "org.opencontainers.image.source=https://github.com/VictoriaMetrics/vmgather" \
 			--label "org.opencontainers.image.vendor=VictoriaMetrics" \
 			--label "org.opencontainers.image.version=$(PKG_TAG)" \
